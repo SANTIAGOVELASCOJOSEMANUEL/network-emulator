@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulador de Red v4.1</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div id="portTooltip"></div>
+
+<div class="container">
+
+    <!-- ─── Toolbar ───────────────────────────── -->
+    <div class="toolbar">
+        <!-- Device groups injected by app.js -->
+
+        <!-- Cable / delete tools -->
+        <div class="tool-group">
+            <button class="btn" id="cableMode" title="Modo cable (conectar)">
+                <span class="icon">🔗</span> Cable
+            </button>
+            <button class="btn danger" id="delCableMode" title="Eliminar cable">
+                <span class="icon">✂️</span> Del.Cable
+            </button>
+            <button class="btn danger" id="deleteMode" title="Eliminar equipo (Del)">
+                <span class="icon">🗑️</span> Equipo
+            </button>
+            <button class="btn" id="clearAll" title="Limpiar todo">
+                <span class="icon">🧹</span>
+            </button>
+        </div>
+
+        <!-- Zoom controls -->
+        <div class="tool-group">
+            <button class="btn" id="zoomIn"    title="Acercar (+)"><span class="icon">🔍</span>+</button>
+            <button class="btn" id="zoomOut"   title="Alejar (-)"><span class="icon">🔍</span>−</button>
+            <button class="btn" id="zoomReset" title="Zoom 100% (0)"><span class="icon">⊙</span> 100%</button>
+            <button class="btn" id="fitAll"    title="Ajustar todo (F)"><span class="icon">⊞</span> Fit</button>
+        </div>
+
+        <!-- Simulation + Theme -->
+        <div class="tool-group">
+            <button class="btn" id="startSimulation"><span class="icon">▶️</span></button>
+            <button class="btn" id="stopSimulation"> <span class="icon">⏹️</span></button>
+            <button class="btn" id="darkModeToggle" title="Alternar tema">
+                <span class="icon">☀️</span> Claro
+            </button>
+        </div>
+    </div>
+
+    <!-- ─── Main ──────────────────────────────── -->
+    <div class="main-area">
+        <div class="canvas-container">
+            <canvas id="networkCanvas" width="1400" height="900"></canvas>
+        </div>
+
+        <div class="config-panel">
+            <div class="panel-header">
+                <h3>Configuración</h3>
+                <span class="panel-subtitle" id="selectedDeviceInfo">Ninguno seleccionado</span>
+            </div>
+
+            <div class="tabs">
+                <button class="tab-btn active" data-tab="properties">Props</button>
+                <button class="tab-btn"        data-tab="interfaces">Iface</button>
+                <button class="tab-btn"        data-tab="stats">Info</button>
+            </div>
+
+            <div class="tab-content active" id="tab-properties">
+                <div class="properties">
+                    <div id="propertyContent">
+                        <p class="info-message" style="margin-top:16px;text-align:center;line-height:1.8">
+                            Selecciona un equipo<br>
+                            <small style="color:#475569">Doble clic → interfaces</small>
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <div class="tab-content" id="tab-interfaces">
+                <div class="interfaces-list" id="interfacesList">
+                    <p class="info-message">Selecciona un dispositivo</p>
+                </div>
+            </div>
+            <div class="tab-content" id="tab-stats">
+                <div class="device-stats" id="deviceStats">
+                    <p class="info-message">Estadísticas</p>
+                </div>
+            </div>
+
+            <!-- Console -->
+            <div class="console-section expanded">
+                <div class="console-toggle">
+                    <h4>⬛ Consola <span class="badge" id="consoleDevice">—</span></h4>
+                    <span class="console-chevron">▲</span>
+                </div>
+                <div class="console-body">
+                    <div class="console-header">
+                        <input type="text" id="consoleInput" placeholder="Comando... (help)">
+                        <button id="sendCommand">↵</button>
+                    </div>
+                    <div id="consoleOutput" class="console-output"></div>
+                </div>
+            </div>
+
+            <!-- Quick commands -->
+            <div class="quick-commands">
+                <h4>Comandos rápidos</h4>
+                <div class="cmd-grid">
+                    <button class="cmd-btn" data-cmd="ping">ping</button>
+                    <button class="cmd-btn" data-cmd="tracert">tracert</button>
+                    <button class="cmd-btn" data-cmd="ipconfig">ipconfig</button>
+                    <button class="cmd-btn" data-cmd="dhcp renew">dhcp</button>
+                    <button class="cmd-btn" data-cmd="show devices">devices</button>
+                    <button class="cmd-btn" data-cmd="show connections">conex</button>
+                    <button class="cmd-btn" data-cmd="isp list">isps</button>
+                    <button class="cmd-btn" data-cmd="bandwidth">bw</button>
+                    <button class="cmd-btn" data-cmd="help">help</button>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- ─── Status bar ────────────────────────── -->
+    <div class="status-bar">
+        <div class="status-item">
+            <span class="status-label">Estado:</span>
+            <span id="connectionStatus" class="status-value offline">Desconectado</span>
+        </div>
+        <div class="status-item">
+            <span class="status-label">Pkt:</span>
+            <span id="packetCount" class="status-value">0</span>
+        </div>
+        <div class="status-item">
+            <span class="status-label">Modo:</span>
+            <span id="modeStatus" class="status-value">Selección</span>
+        </div>
+        <div class="status-item">
+            <span class="status-label">Equipos:</span>
+            <span id="deviceCount" class="status-value">0</span>
+        </div>
+        <div class="status-item">
+            <span class="status-label">Cables:</span>
+            <span id="connectionCount" class="status-value">0</span>
+        </div>
+        <div class="status-item">
+            <div class="cable-legend">
+                <div class="cable-legend-item"><div class="cl-cobre"></div>Cobre</div>
+                <div class="cable-legend-item"><div class="cl-fibra"></div>Fibra</div>
+                <div class="cable-legend-item"><div class="cl-wireless"></div>Wireless</div>
+                <div class="cable-legend-item"><div class="cl-poe"></div>PoE</div>
+            </div>
+        </div>
+        <div class="status-item" style="margin-left:auto">
+            <span style="color:#475569;font-size:9px">🔍 Rueda=zoom · Alt+clic=pan · F=fit</span>
+        </div>
+    </div>
+
+</div>
+
+<script src="js/devices.js"></script>
+<script src="js/network.js"></script>
+<script src="js/console.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
