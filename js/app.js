@@ -16,6 +16,41 @@ document.addEventListener('DOMContentLoaded', () => {
     let cableStart = null, cableStartIntf = null;
     let darkMode = true;
 
+    // ── Undo / Redo ──────────────────────────────────
+    const _history = [];
+    let _histIdx = -1;
+
+    function _snapshot() {
+        // Serializa el estado actual como JSON
+        const state = JSON.stringify(NetworkPersistence._serialize(simulator));
+        // Descarta futuros si estábamos en medio de la historia
+        _history.splice(_histIdx + 1);
+        _history.push(state);
+        if (_history.length > 60) _history.shift();
+        _histIdx = _history.length - 1;
+        _updateUndoRedo();
+    }
+
+    function _undo() {
+        if (_histIdx <= 0) return;
+        _histIdx--;
+        NetworkPersistence._deserialize(simulator, JSON.parse(_history[_histIdx]));
+        updateCounts(); _updateUndoRedo();
+    }
+
+    function _redo() {
+        if (_histIdx >= _history.length - 1) return;
+        _histIdx++;
+        NetworkPersistence._deserialize(simulator, JSON.parse(_history[_histIdx]));
+        updateCounts(); _updateUndoRedo();
+    }
+
+    function _updateUndoRedo() {
+        const u = $('undoBtn'), r = $('redoBtn');
+        if (u) u.style.opacity = _histIdx <= 0 ? '0.35' : '1';
+        if (r) r.style.opacity = _histIdx >= _history.length - 1 ? '0.35' : '1';
+    }
+
     // ── Theme ────────────────────────────────────────
     function applyTheme() {
         document.body.classList.toggle('light-mode', !darkMode);
@@ -108,18 +143,45 @@ document.addEventListener('DOMContentLoaded', () => {
     buildToolbar();
 
     function addAt(type) {
+        // Click directo en el canvas para colocar equipos, uno por uno
+        // Cada clic agrega un equipo; Escape o clic derecho cancela
+        _addAtSimple(type, 999); // 999 = modo continuo, cancela con Escape o clic derecho
+    }
+
+    function _addAtSimple(type, qty) {
+        let placed = 0;
+        const continuous = qty >= 999;
         setMode('add');
-        $('modeStatus').textContent = `Agregar ${type}`;
+        $('modeStatus').textContent = `Agregar ${type} · Esc=listo`;
         $('modeStatus').style.color = '#f59e0b';
-        simulator.canvas.addEventListener('click', function h(e) {
-            if (mode !== 'add') { simulator.canvas.removeEventListener('click', h); return; }
+
+        function placeOne(e) {
+            if (mode !== 'add') { cleanup(); return; }
             const sc = sCoords(e), wc = simulator.screenToWorld(sc.x, sc.y);
             const dev = simulator.addDevice(type, wc.x, wc.y);
-            if (dev) { netConsole.writeToConsole(`✅ ${type}: ${dev.name}`); updateCounts(); }
-            setMode('select');
-            simulator.canvas.removeEventListener('click', h);
-        }, { once: true });
+            if (dev) {
+                placed++;
+                netConsole.writeToConsole(`✅ ${type}: ${dev.name}`);
+                updateCounts();
+                _snapshot();
+            }
+            if (!continuous && placed >= qty) { cleanup(); setMode('select'); }
+            else if (!continuous) $('modeStatus').textContent = `Agregar ${type} (${placed}/${qty})`;
+        }
+
+        function onRightClick(e) { e.preventDefault(); cleanup(); setMode('select'); }
+
+        function cleanup() {
+            simulator.canvas.removeEventListener('click', placeOne);
+            simulator.canvas.removeEventListener('contextmenu', onRightClick);
+        }
+
+        simulator.canvas.addEventListener('click', placeOne);
+        simulator.canvas.addEventListener('contextmenu', onRightClick);
     }
+
+    $('undoBtn')?.addEventListener('click', _undo);
+    $('redoBtn')?.addEventListener('click', _redo);
 
     // ── Mode management ──────────────────────────────
     function setMode(m) {
@@ -147,6 +209,7 @@ document.addEventListener('DOMContentLoaded', () => {
             simulator.devices = simulator.devices.filter(x => x !== d);
             simulator.deselectAll(); simulator.draw(); updateCounts();
             netConsole.writeToConsole(`🗑️ ${d.name} eliminado`);
+            _snapshot();
         }
     });
 
@@ -157,20 +220,21 @@ document.addEventListener('DOMContentLoaded', () => {
     $('fitAll')?.addEventListener('click', () => simulator.fitAll());
 
     // ── Simulation ───────────────────────────────────
-    $('startSimulation')?.addEventListener('click', () => { simulator.startSimulation(); $('connectionStatus').textContent = 'Activo'; $('connectionStatus').className = 'status-value online'; });
-    $('stopSimulation')?.addEventListener('click',  () => { simulator.stopSimulation();  $('connectionStatus').textContent = 'Detenido'; $('connectionStatus').className = 'status-value offline'; });
+    $('startSimulation')?.addEventListener('click', () => { simulator.startSimulation(); $('connectionStatus').textContent = '▶ Activo'; $('connectionStatus').className = 'status-value online'; });
+    $('stopSimulation')?.addEventListener('click',  () => { simulator.stopSimulation();  $('connectionStatus').textContent = '⏹ Detenido'; $('connectionStatus').className = 'status-value offline'; });
 
     // ── Persistence ──────────────────────────────────
     $('saveNet')?.addEventListener('click',   () => { if (simulator.save()) netConsole.writeToConsole('💾 Red guardada'); });
-    $('loadNet')?.addEventListener('click',   () => { if (simulator.load()) { updateCounts(); simulator.fitAll(); netConsole.writeToConsole('📂 Red cargada'); } });
+    $('loadNet')?.addEventListener('click',   () => { if (simulator.load()) { updateCounts(); simulator.fitAll(); netConsole.writeToConsole('📂 Red cargada'); _snapshot(); } });
     $('exportNet')?.addEventListener('click', () => simulator.download());
     $('importFile')?.addEventListener('change', async e => {
         const file = e.target.files[0]; if (!file) return;
         await simulator.importFile(file); updateCounts(); simulator.fitAll();
         netConsole.writeToConsole(`📂 Importado: ${file.name}`);
+        _snapshot();
         e.target.value = '';
     });
-    $('clearAll')?.addEventListener('click', () => { if (confirm('¿Limpiar todo?')) { simulator.clear(); updateCounts(); netConsole.writeToConsole('🧹 Lienzo limpio'); } });
+    $('clearAll')?.addEventListener('click', () => { if (confirm('¿Limpiar todo?')) { simulator.clear(); updateCounts(); netConsole.writeToConsole('🧹 Lienzo limpio'); _snapshot(); } });
 
     // ── Console ──────────────────────────────────────
     $('sendCommand')?.addEventListener('click', () => {
@@ -493,7 +557,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 simulator.showConnPopup(dev, e.clientX, e.clientY, (d2, intf2) => {
                     const r = simulator.connectDevices(cableStart, d2, cableStartIntf, intf2, null);
-                    if (r.success) { netConsole.writeToConsole(`✅ ${cableStart.name}↔${d2.name} (${intf2.name})`); updateCounts(); }
+                    if (r.success) { netConsole.writeToConsole(`✅ ${cableStart.name}↔${d2.name} (${intf2.name})`); updateCounts(); _snapshot(); }
                     else netConsole.writeToConsole(`❌ ${r.message}`);
                     cableStart = null; cableStartIntf = null;
                 });
@@ -525,20 +589,27 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isDragging && dragDev) { dragDev.x = wc.x - dragOffX; dragDev.y = wc.y - dragOffY; simulator.draw(); return; }
         if (dragAnnotation) { dragAnnotation.x = wc.x; dragAnnotation.y = wc.y; simulator.draw(); return; }
 
-        // Tooltip
+        // Tooltip — solo sobre puntos de interfaz
         const dev = simulator.findDeviceAt(wc.x, wc.y);
-        if (dev) {
-            const intf = simulator.findInterfaceAt(dev, wc.x, wc.y);
-            const tt = document.getElementById('portTooltip');
-            if (intf && tt) {
+        const tt = document.getElementById('portTooltip');
+        if (dev && mode === 'cable') {
+            // En modo cable: buscar interfaz cerca del cursor (radio estricto)
+            const n = dev.interfaces.length;
+            let closestIntf = null, closestD = 14 / simulator.zoom;
+            dev.interfaces.forEach((intf, i) => {
+                const pos = simulator._iPos(dev, i, n);
+                const d = Math.hypot(pos.x - wc.x, pos.y - wc.y);
+                if (d < closestD) { closestD = d; closestIntf = intf; }
+            });
+            if (closestIntf && tt) {
                 tt.style.display = 'block';
                 tt.style.left = (e.clientX + 14) + 'px';
                 tt.style.top  = (e.clientY - 8)  + 'px';
-                const col = intf.mediaType === 'fibra' ? 'pt-media-fibra' : intf.mediaType === 'wireless' ? 'pt-media-wl' : 'pt-media-cobre';
-                const conn = intf.connectedTo ? `<div class="pt-conn">↔ ${intf.connectedTo.name} [${intf.connectedInterface?.name ?? '?'}]</div>` : `<div class="pt-free">libre</div>`;
-                tt.innerHTML = `<div class="pt-name">${intf.name}</div><div class="${col}">${intf.mediaType} · ${intf.speed}</div>${conn}`;
-            }
-        } else { const tt = document.getElementById('portTooltip'); if (tt) tt.style.display = 'none'; }
+                const col = closestIntf.mediaType === 'fibra' ? 'pt-media-fibra' : closestIntf.mediaType === 'wireless' ? 'pt-media-wl' : 'pt-media-cobre';
+                const conn = closestIntf.connectedTo ? `<div class="pt-conn">↔ ${closestIntf.connectedTo.name} [${closestIntf.connectedInterface?.name ?? '?'}]</div>` : `<div class="pt-free">libre</div>`;
+                tt.innerHTML = `<div class="pt-name">${closestIntf.name}</div><div class="${col}">${closestIntf.mediaType} · ${closestIntf.speed}</div>${conn}`;
+            } else if (tt) tt.style.display = 'none';
+        } else { if (tt) tt.style.display = 'none'; }
 
         if (mode === 'delcable') {
             const closest = findClosestConn(wc);
@@ -568,7 +639,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (mode === 'delcable') {
             const sc = sCoords(e), wc = simulator.screenToWorld(sc.x, sc.y);
             const del = simulator.deleteConnectionAt(wc.x, wc.y);
-            if (del) { netConsole.writeToConsole(`✂️ Cable eliminado`); updateCounts(); }
+            if (del) { netConsole.writeToConsole(`✂️ Cable eliminado`); updateCounts(); _snapshot(); }
             return;
         }
     });
@@ -600,6 +671,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.addEventListener('keydown', e => {
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+        if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); _undo(); return; }
+        if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.shiftKey && e.key === 'z'))) { e.preventDefault(); _redo(); return; }
         if (e.key === 'Escape') { setMode('select'); simulator.hideConnPopup(); }
         if (e.key === 'Delete' && simulator.selectedDevice) $('deleteMode')?.click();
         if (e.key === '+' || e.key === '=') { simulator.zoom = Math.min(4, simulator.zoom * 1.15); simulator.draw(); }
@@ -608,6 +681,92 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.key === 'f' || e.key === 'F') simulator.fitAll();
         if (e.key === 'c' || e.key === 'C') setMode(mode === 'cable' ? 'select' : 'cable');
     });
+
+    // ── Auto Layout (Ordenar topología) ─────────────────
+    $('autoLayoutBtn')?.addEventListener('click', () => {
+        const modal = $('layoutModal');
+        if (modal) { modal.style.display = 'flex'; }
+    });
+    $('layoutCancel')?.addEventListener('click', () => { $('layoutModal').style.display = 'none'; });
+    $('layoutTopDown')?.addEventListener('click', () => { $('layoutModal').style.display = 'none'; _autoLayout('TB'); });
+    $('layoutLeftRight')?.addEventListener('click', () => { $('layoutModal').style.display = 'none'; _autoLayout('LR'); });
+
+    // Highlight hover en modal layout
+    ['layoutTopDown','layoutLeftRight'].forEach(id => {
+        const btn = $(id);
+        if (!btn) return;
+        btn.addEventListener('mouseenter', () => { btn.style.borderColor='#06b6d4'; btn.style.background='#0c2030'; });
+        btn.addEventListener('mouseleave', () => { btn.style.borderColor='#334155'; btn.style.background='#0c1e30'; });
+    });
+
+    function _autoLayout(direction) {
+        const devs = simulator.devices;
+        const conns = simulator.connections;
+        if (!devs.length) return;
+
+        // Construir grafo de adyacencia
+        const adjMap = new Map();
+        devs.forEach(d => adjMap.set(d.id, []));
+        conns.forEach(cn => {
+            const fId = cn.from?.id;
+            const tId = cn.to?.id;
+            if (fId && tId && fId !== tId) {
+                if (!adjMap.get(fId).includes(tId)) adjMap.get(fId).push(tId);
+                if (!adjMap.get(tId).includes(fId)) adjMap.get(tId).push(fId);
+            }
+        });
+
+        // Encontrar raíz (nodo con más conexiones = backbone)
+        let root = devs[0];
+        devs.forEach(d => { if ((adjMap.get(d.id)?.length||0) > (adjMap.get(root.id)?.length||0)) root = d; });
+
+        // BFS para asignar niveles
+        const levels = new Map();
+        const visited = new Set();
+        const queue = [{ id: root.id, level: 0 }];
+        visited.add(root.id);
+        while (queue.length) {
+            const { id, level } = queue.shift();
+            levels.set(id, level);
+            (adjMap.get(id) || []).forEach(nId => {
+                if (!visited.has(nId)) { visited.add(nId); queue.push({ id: nId, level: level + 1 }); }
+            });
+        }
+        // Nodos no conectados al árbol
+        devs.forEach(d => { if (!levels.has(d.id)) levels.set(d.id, 0); });
+
+        // Agrupar por nivel
+        const byLevel = {};
+        devs.forEach(d => {
+            const lv = levels.get(d.id) ?? 0;
+            (byLevel[lv] = byLevel[lv] || []).push(d);
+        });
+        const maxLevel = Math.max(...Object.keys(byLevel).map(Number));
+
+        // Espaciado
+        const W = 160, H = 130;
+        const canvasW = simulator.canvas.width / simulator.zoom;
+        const canvasH = simulator.canvas.height / simulator.zoom;
+
+        Object.entries(byLevel).forEach(([lvStr, nodes]) => {
+            const lv = Number(lvStr);
+            nodes.forEach((d, i) => {
+                const count = nodes.length;
+                if (direction === 'TB') {
+                    d.x = (i - (count-1)/2) * W + canvasW / 2;
+                    d.y = lv * H + 80;
+                } else {
+                    d.x = lv * W + 80;
+                    d.y = (i - (count-1)/2) * H + canvasH / 2;
+                }
+            });
+        });
+
+        simulator.draw();
+        simulator.fitAll();
+        _snapshot();
+        netConsole.writeToConsole(`🗂️ Topología ordenada (${direction === 'TB' ? 'Vertical' : 'Horizontal'})`);
+    }
 
     // ── Example network ───────────────────────────────
     function buildExample() {
@@ -650,11 +809,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const exBtn = document.createElement('button');
     exBtn.className = 'btn';
     exBtn.innerHTML = '<span class="icon">📋</span> Ejemplo';
-    exBtn.addEventListener('click', buildExample);
+    exBtn.addEventListener('click', () => { buildExample(); _snapshot(); });
     lg?.appendChild(exBtn);
 
     // ── Init ──────────────────────────────────────────
-    setTimeout(() => { simulator._resizeCanvas(); simulator.draw(); }, 0);
+    setTimeout(() => { simulator._resizeCanvas(); simulator.draw(); _snapshot(); _updateUndoRedo(); simulator._startCableAnim(); }, 0);
 
     netConsole.writeToConsole('╔══════════════════════════════════╗');
     netConsole.writeToConsole('║  SIMULADOR DE RED  v5.0          ║');

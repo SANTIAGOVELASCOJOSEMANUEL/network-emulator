@@ -1,5 +1,81 @@
-// devices.js v5.0 — incluye IPPhone, ControlTerminal, PayTerminal, Alarm
+// devices.js v5.1 — incluye IPPhone, ControlTerminal, PayTerminal, Alarm
+// + validaciones de IP, detección de duplicados
 'use strict';
+
+// ── Validaciones de red ──────────────────────────────────────────────
+
+/**
+ * Valida que una cadena tenga formato IPv4 válido.
+ * @param {string} ip
+ * @returns {boolean}
+ */
+function isValidIP(ip) {
+    if (!ip || ip === '0.0.0.0') return true; // 0.0.0.0 = no configurada (válida)
+    if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(ip)) return false;
+    return ip.split('.').every(o => parseInt(o, 10) <= 255);
+}
+
+/**
+ * Valida que una máscara de subred sea correcta.
+ * @param {string} mask
+ * @returns {boolean}
+ */
+function isValidMask(mask) {
+    const valid = [
+        '255.255.255.0','255.255.0.0','255.0.0.0',
+        '255.255.255.128','255.255.255.192','255.255.255.224',
+        '255.255.255.240','255.255.255.248','255.255.255.252',
+        '255.255.128.0','255.255.192.0','255.255.224.0',
+        '255.255.240.0','255.255.248.0','255.255.252.0',
+        '255.255.254.0','0.0.0.0',
+    ];
+    return valid.includes(mask);
+}
+
+/**
+ * Comprueba si una IP ya está en uso en otro dispositivo.
+ * @param {NetworkDevice[]} allDevices  Lista de todos los dispositivos
+ * @param {string}          ip
+ * @param {string}          [excludeId]  ID del dispositivo a excluir (al editar)
+ * @returns {boolean}
+ */
+function checkDuplicateIP(allDevices, ip, excludeId = null) {
+    if (!ip || ip === '0.0.0.0') return false;
+    return allDevices.some(d => {
+        if (excludeId && d.id === excludeId) return false;
+        return d.ipConfig?.ipAddress === ip;
+    });
+}
+
+/**
+ * Aplica y valida una configuración IP a un dispositivo.
+ * Lanza Error si la IP es inválida o duplicada.
+ *
+ * @param {NetworkDevice}   device
+ * @param {string}          ip
+ * @param {string}          mask
+ * @param {string}          gateway
+ * @param {NetworkDevice[]} allDevices
+ */
+function applyIPConfig(device, ip, mask, gateway, allDevices = []) {
+    if (!isValidIP(ip))      throw new Error(`IP inválida: "${ip}"`);
+    if (!isValidIP(mask))    throw new Error(`Máscara inválida: "${mask}"`);
+    if (gateway && !isValidIP(gateway)) throw new Error(`Gateway inválido: "${gateway}"`);
+
+    if (checkDuplicateIP(allDevices, ip, device.id)) {
+        throw new Error(`IP duplicada: ${ip} ya está en uso`);
+    }
+
+    device.ipConfig = {
+        ...device.ipConfig,
+        ipAddress : ip,
+        subnetMask: mask   || '255.255.255.0',
+        gateway   : gateway || '',
+    };
+    return device.ipConfig;
+}
+
+// ────────────────────────────────────────────────────────────────────
 
 class NetworkDevice {
     constructor(id,name,type,x,y){this.id=id;this.name=name;this.type=type;this.x=x;this.y=y;this.interfaces=[];this.selected=false;this.status='up';this.config={hostname:name};}

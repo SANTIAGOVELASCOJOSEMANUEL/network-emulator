@@ -83,14 +83,19 @@ class NetworkSimulator {
     }
 
     showConnPopup(device, clientX, clientY, onSelectIntf) {
-        const free = device.interfaces.filter(i => !i.connectedTo && i.mediaType !== 'wifi' || i.mediaType === 'wireless');
-        if (!free.length) { this._connPopup.style.display = 'none'; return; }
+        const allIntfs = device.interfaces.filter(i => i.mediaType !== 'wifi');
+        if (!allIntfs.length) { this._connPopup.style.display = 'none'; return; }
         const typeColor = { fibra:'#f59e0b', cobre:'#06b6d4', wireless:'#a78bfa', 'LAN-POE':'#22c55e' };
         let html = `<div style="font-size:10px;color:#64748b;margin-bottom:6px;font-weight:700;letter-spacing:.05em;text-transform:uppercase">📌 ${device.name} — elige puerto</div><div style="display:flex;flex-wrap:wrap;gap:4px;">`;
-        free.forEach(intf => {
+        allIntfs.forEach(intf => {
             const col  = typeColor[intf.mediaType] || '#06b6d4';
             const icon = intf.mediaType === 'fibra' ? '◈' : intf.mediaType === 'wireless' ? '〜' : '●';
-            html += `<button data-intf="${intf.name}" style="background:rgba(255,255,255,.06);border:1px solid ${col};color:${col};padding:4px 8px;border-radius:5px;cursor:pointer;font-size:10px;font-family:inherit;white-space:nowrap;transition:all .12s" onmouseover="this.style.background='${col}';this.style.color='#0f172a'" onmouseout="this.style.background='rgba(255,255,255,.06)';this.style.color='${col}'">${icon} ${intf.name}</button>`;
+            if (intf.connectedTo) {
+                // Puerto ocupado — se muestra bloqueado, no clickeable
+                html += `<button data-intf="${intf.name}" disabled title="Ya conectado a ${intf.connectedTo.name}" style="background:rgba(255,255,255,.03);border:1px solid #334155;color:#475569;padding:4px 8px;border-radius:5px;cursor:not-allowed;font-size:10px;font-family:inherit;white-space:nowrap;opacity:0.55;text-decoration:line-through">🔒 ${intf.name}</button>`;
+            } else {
+                html += `<button data-intf="${intf.name}" style="background:rgba(255,255,255,.06);border:1px solid ${col};color:${col};padding:4px 8px;border-radius:5px;cursor:pointer;font-size:10px;font-family:inherit;white-space:nowrap;transition:all .12s" onmouseover="this.style.background='${col}';this.style.color='#0f172a'" onmouseout="this.style.background='rgba(255,255,255,.06)';this.style.color='${col}'">${icon} ${intf.name}</button>`;
+            }
         });
         html += '</div>';
         this._connPopup.innerHTML = html;
@@ -100,7 +105,7 @@ class NetworkSimulator {
         if (px + popW > window.innerWidth) px = clientX - popW - 14;
         this._connPopup.style.left = px + 'px';
         this._connPopup.style.top  = py + 'px';
-        this._connPopup.querySelectorAll('button[data-intf]').forEach(btn => {
+        this._connPopup.querySelectorAll('button[data-intf]:not([disabled])').forEach(btn => {
             btn.addEventListener('click', () => {
                 const intf = device.interfaces.find(i => i.name === btn.dataset.intf);
                 this._connPopup.style.display = 'none';
@@ -747,6 +752,16 @@ class NetworkSimulator {
     startSimulation() { this.simulationRunning = true; this._anim(); }
     stopSimulation()  { this.simulationRunning = false; if (this.animationFrame) cancelAnimationFrame(this.animationFrame); }
     _anim()           { if (!this.simulationRunning) return; this.draw(); this.animationFrame = requestAnimationFrame(this._anim.bind(this)); }
+
+    // Animación permanente de cables (cobre/fibra/wireless) — independiente de simulación
+    _startCableAnim() {
+        const loop = () => {
+            this._waveOffset = (this._waveOffset + 0.8) % 300;
+            if (this.connections.length > 0) this.draw();
+            this._cableAnimFrame = requestAnimationFrame(loop);
+        };
+        this._cableAnimFrame = requestAnimationFrame(loop);
+    }
 
     setISPStatus(isp, st) {
         isp.status = st;

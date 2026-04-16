@@ -1,11 +1,68 @@
-// renderer.js v2.0 — Renderer mejorado con nuevos íconos
+// renderer.js v2.1 — Renderer con throttle 60 FPS + snap-to-grid
 'use strict';
 
+// ── UX: Snap-to-grid ────────────────────────────────────────────────
+const GRID_SIZE = 20;
+
+/**
+ * Ajusta coordenadas al grid más cercano.
+ * Usar al soltar un dispositivo después de arrastrar.
+ * @param {number} x
+ * @param {number} y
+ * @param {number} [grid=20]
+ * @returns {{ x: number, y: number }}
+ */
+function snapToGrid(x, y, grid = GRID_SIZE) {
+    return {
+        x: Math.round(x / grid) * grid,
+        y: Math.round(y / grid) * grid,
+    };
+}
+
 class NetworkRenderer {
-    constructor(sim) { this.sim = sim; }
+    constructor(sim) {
+        this.sim = sim;
+        // ── Throttle 60 FPS ──────────────────────────────────────────
+        this._lastFrame   = 0;
+        this._frameTarget = 1000 / 60; // ~16.67 ms
+        this._rafId       = null;
+    }
+
     get ctx()  { return this.sim.ctx; }
     get zoom() { return this.sim.zoom; }
     get dark() { return this.sim.darkMode; }
+
+    /**
+     * Solicita un frame de render respetando el cap de 60 FPS.
+     * Usar en lugar de llamar render() directamente desde animaciones.
+     * @param {number} time  — timestamp de requestAnimationFrame
+     */
+    requestRender(time) {
+        if (time - this._lastFrame < this._frameTarget) return;
+        this._lastFrame = time;
+        this.render();
+    }
+
+    /**
+     * Inicia el bucle de animación con throttle.
+     */
+    startLoop() {
+        const loop = (time) => {
+            this.requestRender(time);
+            this._rafId = requestAnimationFrame(loop);
+        };
+        this._rafId = requestAnimationFrame(loop);
+    }
+
+    /**
+     * Detiene el bucle de animación.
+     */
+    stopLoop() {
+        if (this._rafId !== null) {
+            cancelAnimationFrame(this._rafId);
+            this._rafId = null;
+        }
+    }
 
     render() {
         const { ctx, sim } = this;
@@ -81,15 +138,28 @@ class NetworkRenderer {
             this._drawWirelessAnim(cn);
             ctx.restore(); return;
         } else if (isFibra) {
+            // Fibra: línea sólida naranja/dorado + pulso animado de luz
             ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 2.5 / zoom;
-            ctx.setLineDash([8 / zoom, 4 / zoom]);
-            ctx.shadowColor = 'rgba(245,158,11,.4)'; ctx.shadowBlur = 4;
+            ctx.shadowColor = 'rgba(245,158,11,.5)'; ctx.shadowBlur = 6;
+            ctx.beginPath(); ctx.moveTo(cn.from.x, cn.from.y); ctx.lineTo(cn.to.x, cn.to.y); ctx.stroke();
+            ctx.shadowBlur = 0;
+            this._drawFibraAnim(cn);
+            ctx.restore(); return;
         } else if (isPoE) {
             ctx.strokeStyle = '#4ade80'; ctx.lineWidth = 2.5 / zoom;
             ctx.shadowColor = 'rgba(74,222,128,.3)'; ctx.shadowBlur = 4;
+            ctx.beginPath(); ctx.moveTo(cn.from.x, cn.from.y); ctx.lineTo(cn.to.x, cn.to.y); ctx.stroke();
+            ctx.shadowBlur = 0;
+            this._drawCobreAnim(cn, '#4ade80');
+            ctx.restore(); return;
         } else {
+            // Cobre: línea azul + pulso de datos animado
             ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 2 / zoom;
-            ctx.shadowColor = 'rgba(56,189,248,.25)'; ctx.shadowBlur = 4;
+            ctx.shadowColor = 'rgba(56,189,248,.3)'; ctx.shadowBlur = 4;
+            ctx.beginPath(); ctx.moveTo(cn.from.x, cn.from.y); ctx.lineTo(cn.to.x, cn.to.y); ctx.stroke();
+            ctx.shadowBlur = 0;
+            this._drawCobreAnim(cn, '#38bdf8');
+            ctx.restore(); return;
         }
         ctx.beginPath(); ctx.moveTo(cn.from.x, cn.from.y); ctx.lineTo(cn.to.x, cn.to.y); ctx.stroke();
         ctx.setLineDash([]); ctx.shadowBlur = 0;
@@ -111,6 +181,72 @@ class NetworkRenderer {
             ctx.beginPath(); ctx.arc(px, py, 2.5 / zoom, 0, Math.PI * 2); ctx.fill();
         }
         ctx.shadowBlur = 0;
+        // Port badges
+        const angle = Math.atan2(cn.to.y - cn.from.y, cn.to.x - cn.from.x);
+        const D = 38;
+        this._portBadge(cn.from.x + Math.cos(angle)*D, cn.from.y + Math.sin(angle)*D - 14, cn.fromInterface?.name, cn.type);
+        this._portBadge(cn.to.x   - Math.cos(angle)*D, cn.to.y   - Math.sin(angle)*D - 14, cn.toInterface?.name,   cn.type);
+    }
+
+    // Cobre: pequeños cuadraditos/segmentos que viajan por el cable (estilo señal eléctrica)
+    _drawCobreAnim(cn, color) {
+        const { ctx, zoom, sim } = this;
+        const numPulses = 3;
+        const spacing = 1 / numPulses;
+        for (let i = 0; i < numPulses; i++) {
+            const t = ((sim._waveOffset / 90) + i * spacing) % 1;
+            const px = cn.from.x + (cn.to.x - cn.from.x) * t;
+            const py = cn.from.y + (cn.to.y - cn.from.y) * t;
+            const alpha = 0.9 - Math.abs(t - 0.5) * 0.8;
+            // Cuadradito rotado 45° (rombo) — diferente a wireless (círculos) y fibra (flash largo)
+            ctx.save();
+            ctx.translate(px, py);
+            ctx.rotate(Math.PI / 4);
+            const sz = 3.5 / zoom;
+            ctx.fillStyle = color.replace(')', `,${alpha})`).replace('rgb', 'rgba');
+            ctx.shadowColor = color; ctx.shadowBlur = 6 / zoom;
+            ctx.fillRect(-sz / 2, -sz / 2, sz, sz);
+            ctx.restore();
+        }
+        ctx.shadowBlur = 0;
+        // Port badges
+        const angle = Math.atan2(cn.to.y - cn.from.y, cn.to.x - cn.from.x);
+        const D = 38;
+        this._portBadge(cn.from.x + Math.cos(angle)*D, cn.from.y + Math.sin(angle)*D - 14, cn.fromInterface?.name, cn.type);
+        this._portBadge(cn.to.x   - Math.cos(angle)*D, cn.to.y   - Math.sin(angle)*D - 14, cn.toInterface?.name,   cn.type);
+    }
+
+    // Fibra: destellos de luz alargados que viajan rápido (fotones)
+    _drawFibraAnim(cn) {
+        const { ctx, zoom, sim } = this;
+        const dx = cn.to.x - cn.from.x, dy = cn.to.y - cn.from.y;
+        const len = Math.hypot(dx, dy);
+        const angle = Math.atan2(dy, dx);
+        const numPhotons = 2;
+        for (let i = 0; i < numPhotons; i++) {
+            const t = ((sim._waveOffset / 40) + i / numPhotons) % 1; // más rápido que cobre/wireless
+            const px = cn.from.x + dx * t;
+            const py = cn.from.y + dy * t;
+            const alpha = Math.sin(t * Math.PI) * 0.95 + 0.05;
+            const trailLen = 18 / zoom; // destello alargado
+            ctx.save();
+            ctx.translate(px, py);
+            ctx.rotate(angle);
+            const grad = ctx.createLinearGradient(-trailLen, 0, trailLen * 0.5, 0);
+            grad.addColorStop(0, `rgba(255,220,100,0)`);
+            grad.addColorStop(0.5, `rgba(255,220,100,${alpha})`);
+            grad.addColorStop(1, `rgba(255,255,255,0)`);
+            ctx.fillStyle = grad;
+            ctx.shadowColor = '#fde68a'; ctx.shadowBlur = 8 / zoom;
+            ctx.fillRect(-trailLen, -1.5 / zoom, trailLen * 1.5, 3 / zoom);
+            ctx.restore();
+        }
+        ctx.shadowBlur = 0;
+        // Port badges
+        const ang = Math.atan2(dy, dx);
+        const D = 38;
+        this._portBadge(cn.from.x + Math.cos(ang)*D, cn.from.y + Math.sin(ang)*D - 14, cn.fromInterface?.name, cn.type);
+        this._portBadge(cn.to.x   - Math.cos(ang)*D, cn.to.y   - Math.sin(ang)*D - 14, cn.toInterface?.name,   cn.type);
     }
 
     _portBadge(x, y, name, type) {
@@ -215,17 +351,19 @@ class NetworkRenderer {
         // Icon
         this._drawIcon(d, d.x, y + 22/zoom, 22/zoom);
 
-        // Name
+        // Name — tamaño fijo en mundo, escala con zoom naturalmente
         const short = d.name.length > 12 ? d.name.substring(0, 12) : d.name;
         ctx.fillStyle = dark ? '#e2f0ff' : '#0d2340';
-        ctx.font = `700 ${10/zoom}px "Exo 2",sans-serif`;
+        const nameFontSize = Math.max(7, Math.min(12, 10)) / zoom;
+        ctx.font = `700 ${nameFontSize}px "Exo 2",sans-serif`;
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText(short, d.x, y + h - 16/zoom);
 
         // IP
         if (d.ipConfig?.ipAddress && d.ipConfig.ipAddress !== '0.0.0.0') {
             ctx.fillStyle = accent;
-            ctx.font = `${7.5/zoom}px "Space Mono",monospace`;
+            const ipFontSize = Math.max(5, 7.5) / zoom;
+            ctx.font = `${ipFontSize}px "Space Mono",monospace`;
             ctx.fillText(d.ipConfig.ipAddress, d.x, y + h - 6/zoom);
         }
 
@@ -294,7 +432,26 @@ class NetworkRenderer {
     _icoONT(cx,cy,s){const c=this.ctx,z=this.zoom;c.strokeStyle='#4ade80';c.lineWidth=1.4/z;c.beginPath();c.roundRect(cx-s*.7,cy-s*.5,s*1.4,s,2/z);c.stroke();c.beginPath();c.arc(cx-s*.3,cy,s*.3,0,Math.PI*2);c.stroke();c.beginPath();c.moveTo(cx-s*.5,cy-s*.2);c.lineTo(cx-s*.1,cy+s*.2);c.moveTo(cx-s*.1,cy-s*.2);c.lineTo(cx-s*.5,cy+s*.2);c.stroke();c.fillStyle='#4ade80';c.font=`bold ${s*.22}px sans-serif`;c.textAlign='center';c.textBaseline='middle';c.fillText('ONT',cx+s*.35,cy);}
     _icoAP(cx,cy,s){const c=this.ctx,z=this.zoom;c.strokeStyle='#a78bfa';c.lineWidth=1.4/z;c.beginPath();c.ellipse(cx,cy+s*.4,s*.7,s*.3,0,0,Math.PI*2);c.stroke();for(let i=1;i<=3;i++){c.strokeStyle=`rgba(167,139,250,${.9-i*.2})`;c.lineWidth=(1.5-i*.2)/z;c.beginPath();c.arc(cx,cy,i*s*.35,Math.PI+.45,2*Math.PI-.45);c.stroke();}c.fillStyle='#a78bfa';c.beginPath();c.arc(cx,cy,s*.08,0,Math.PI*2);c.fill();}
     _icoBridge(cx,cy,s){const c=this.ctx,z=this.zoom;c.strokeStyle='#a78bfa';c.lineWidth=1.4/z;c.beginPath();c.arc(cx-s*.5,cy,s*.4,Math.PI+.3,Math.PI*2-.3);c.stroke();c.beginPath();c.arc(cx+s*.5,cy,s*.4,.3,Math.PI-.3);c.stroke();c.setLineDash([3/z,2/z]);c.beginPath();c.moveTo(cx-s*.1,cy);c.lineTo(cx+s*.1,cy);c.stroke();c.setLineDash([]);c.fillStyle='#a78bfa';c.font=`bold ${s*.22}px sans-serif`;c.textAlign='center';c.textBaseline='middle';c.fillText('↔',cx,cy);}
-    _icoCamera(cx,cy,s){const c=this.ctx,z=this.zoom;c.strokeStyle='#64748b';c.lineWidth=1.4/z;c.beginPath();c.roundRect(cx-s*.6,cy-s*.4,s*1.2,s*.8,2/z);c.stroke();c.fillStyle='rgba(100,116,139,.2)';c.beginPath();c.arc(cx,cy,s*.3,0,Math.PI*2);c.fill();c.stroke();c.fillStyle='rgba(100,116,139,.5)';c.beginPath();c.arc(cx,cy,s*.15,0,Math.PI*2);c.fill();c.fillStyle='#f43f5e';c.shadowColor='#f43f5e';c.shadowBlur=3/z;c.beginPath();c.arc(cx+s*.55,cy-s*.35,s*.1,0,Math.PI*2);c.fill();c.shadowBlur=0;}
+    _icoCamera(cx,cy,s){
+        const c=this.ctx,z=this.zoom;
+        // Soporte/brazo
+        c.strokeStyle='#94a3b8';c.lineWidth=1.4/z;
+        c.beginPath();c.moveTo(cx-s*.1,cy-s*.8);c.lineTo(cx-s*.1,cy-s*.3);c.stroke();
+        // Cuerpo de cámara domo (caja horizontal)
+        c.beginPath();c.roundRect(cx-s*.7,cy-s*.3,s*1.0,s*.45,3/z);c.stroke();
+        c.fillStyle='rgba(100,116,139,.15)';c.beginPath();c.roundRect(cx-s*.7,cy-s*.3,s*1.0,s*.45,3/z);c.fill();
+        // Lente
+        c.strokeStyle='#94a3b8';c.fillStyle='rgba(56,189,248,.3)';
+        c.beginPath();c.arc(cx+s*.2,cy-s*.08,s*.22,0,Math.PI*2);c.fill();c.stroke();
+        c.fillStyle='rgba(56,189,248,.6)';
+        c.beginPath();c.arc(cx+s*.2,cy-s*.08,s*.1,0,Math.PI*2);c.fill();
+        // LED rojo de grabación
+        c.fillStyle='#f43f5e';c.shadowColor='#f43f5e';c.shadowBlur=4/z;
+        c.beginPath();c.arc(cx-s*.5,cy-s*.18,s*.09,0,Math.PI*2);c.fill();c.shadowBlur=0;
+        // Base de montaje
+        c.strokeStyle='#64748b';c.lineWidth=1/z;
+        c.beginPath();c.moveTo(cx-s*.3,cy-s*.8);c.lineTo(cx+s*.1,cy-s*.8);c.stroke();
+    }
     _icoPC(cx,cy,s){const c=this.ctx,z=this.zoom;c.strokeStyle='#64748b';c.lineWidth=1.4/z;c.beginPath();c.roundRect(cx-s*.7,cy-s*.6,s*1.4,s,3/z);c.stroke();c.fillStyle='rgba(56,189,248,.12)';c.beginPath();c.roundRect(cx-s*.55,cy-s*.45,s*1.1,s*.7,2/z);c.fill();c.beginPath();c.moveTo(cx-s*.2,cy+s*.4);c.lineTo(cx-s*.2,cy+s*.6);c.moveTo(cx+s*.2,cy+s*.4);c.lineTo(cx+s*.2,cy+s*.6);c.moveTo(cx-s*.35,cy+s*.6);c.lineTo(cx+s*.35,cy+s*.6);c.stroke();}
     _icoLaptop(cx,cy,s){const c=this.ctx,z=this.zoom;c.strokeStyle='#64748b';c.lineWidth=1.4/z;c.beginPath();c.roundRect(cx-s*.7,cy-s*.7,s*1.4,s*.9,2/z);c.stroke();c.fillStyle='rgba(56,189,248,.12)';c.beginPath();c.roundRect(cx-s*.6,cy-s*.6,s*1.2,s*.7,2/z);c.fill();c.beginPath();c.moveTo(cx-s,cy+s*.2);c.lineTo(cx+s,cy+s*.2);c.quadraticCurveTo(cx+s*.9,cy+s*.5,cx+s*.7,cy+s*.5);c.lineTo(cx-s*.7,cy+s*.5);c.quadraticCurveTo(cx-s*.9,cy+s*.5,cx-s,cy+s*.2);c.closePath();c.stroke();}
     _icoPhone(cx,cy,s){const c=this.ctx,z=this.zoom;c.strokeStyle='#64748b';c.lineWidth=1.4/z;c.beginPath();c.roundRect(cx-s*.45,cy-s,s*.9,s*2,s*.15);c.stroke();c.fillStyle='rgba(56,189,248,.12)';c.beginPath();c.roundRect(cx-s*.35,cy-s*.8,s*.7,s*1.4,2/z);c.fill();c.fillStyle='#64748b';c.beginPath();c.arc(cx,cy+s*.75,s*.12,0,Math.PI*2);c.fill();}
