@@ -1,4 +1,6 @@
 # 🌐 Simulador de Red Web
+https://santiagovelascojosemanuel.github.io/network-emulator/
+<img width="1919" height="975" alt="image" src="https://github.com/user-attachments/assets/4a1f8a5f-6152-4910-a0b0-5ec38a4b297b" />
 
 Un **simulador de topologías de red basado en navegador** desarrollado con **HTML, CSS y JavaScript**, que permite crear, conectar y probar dispositivos de red dentro de un entorno visual interactivo.
 
