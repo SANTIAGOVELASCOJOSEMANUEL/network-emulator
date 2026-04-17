@@ -148,7 +148,13 @@ document.addEventListener('DOMContentLoaded', () => {
         _addAtSimple(type, 999); // 999 = modo continuo, cancela con Escape o clic derecho
     }
 
+    // Referencia global al cleanup activo para que ESC/setMode puedan cancelarlo
+    let _activeAddCleanup = null;
+
     function _addAtSimple(type, qty) {
+        // Cancelar sesión de agregar anterior si existe
+        if (_activeAddCleanup) { _activeAddCleanup(); _activeAddCleanup = null; }
+
         let placed = 0;
         const continuous = qty >= 999;
         setMode('add');
@@ -174,8 +180,10 @@ document.addEventListener('DOMContentLoaded', () => {
         function cleanup() {
             simulator.canvas.removeEventListener('click', placeOne);
             simulator.canvas.removeEventListener('contextmenu', onRightClick);
+            if (_activeAddCleanup === cleanup) _activeAddCleanup = null;
         }
 
+        _activeAddCleanup = cleanup;
         simulator.canvas.addEventListener('click', placeOne);
         simulator.canvas.addEventListener('contextmenu', onRightClick);
     }
@@ -205,7 +213,21 @@ document.addEventListener('DOMContentLoaded', () => {
     $('deleteMode')?.addEventListener('click', () => {
         if (simulator.selectedDevice) {
             const d = simulator.selectedDevice;
-            d.interfaces.forEach(i => { if (i.connectedTo) { simulator.connections = simulator.connections.filter(c => c.fromInterface !== i && c.toInterface !== i); i.connectedTo = null; i.connectedInterface = null; } });
+            // Liberar el extremo remoto de cada cable conectado a este equipo
+            d.interfaces.forEach(i => {
+                if (i.connectedTo) {
+                    // Limpiar referencia en el puerto del otro equipo
+                    if (i.connectedInterface) {
+                        i.connectedInterface.connectedTo = null;
+                        i.connectedInterface.connectedInterface = null;
+                    }
+                    // Quitar la conexión del listado global
+                    simulator.connections = simulator.connections.filter(c => c.fromInterface !== i && c.toInterface !== i);
+                    // Limpiar interfaz propia
+                    i.connectedTo = null;
+                    i.connectedInterface = null;
+                }
+            });
             simulator.devices = simulator.devices.filter(x => x !== d);
             simulator.deselectAll(); simulator.draw(); updateCounts();
             netConsole.writeToConsole(`🗑️ ${d.name} eliminado`);
@@ -673,7 +695,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
         if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); _undo(); return; }
         if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.shiftKey && e.key === 'z'))) { e.preventDefault(); _redo(); return; }
-        if (e.key === 'Escape') { setMode('select'); simulator.hideConnPopup(); }
+        if (e.key === 'Escape') { if (_activeAddCleanup) { _activeAddCleanup(); _activeAddCleanup = null; } setMode('select'); simulator.hideConnPopup(); }
         if (e.key === 'Delete' && simulator.selectedDevice) $('deleteMode')?.click();
         if (e.key === '+' || e.key === '=') { simulator.zoom = Math.min(4, simulator.zoom * 1.15); simulator.draw(); }
         if (e.key === '-') { simulator.zoom = Math.max(0.2, simulator.zoom / 1.15); simulator.draw(); }
@@ -732,8 +754,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!visited.has(nId)) { visited.add(nId); queue.push({ id: nId, level: level + 1 }); }
             });
         }
-        // Nodos no conectados al árbol
-        devs.forEach(d => { if (!levels.has(d.id)) levels.set(d.id, 0); });
+        // Nodos no conectados al árbol: asignar nivel propio al final
+        let orphanLevel = Math.max(...[...levels.values()], 0) + 1;
+        devs.forEach(d => { if (!levels.has(d.id)) { levels.set(d.id, orphanLevel++); } });
 
         // Agrupar por nivel
         const byLevel = {};
@@ -741,23 +764,34 @@ document.addEventListener('DOMContentLoaded', () => {
             const lv = levels.get(d.id) ?? 0;
             (byLevel[lv] = byLevel[lv] || []).push(d);
         });
-        const maxLevel = Math.max(...Object.keys(byLevel).map(Number));
+        const levelCount = Object.keys(byLevel).length;
 
-        // Espaciado
-        const W = 160, H = 130;
-        const canvasW = simulator.canvas.width / simulator.zoom;
-        const canvasH = simulator.canvas.height / simulator.zoom;
+        // Espaciado fijo en espacio-mundo (sin depender de zoom/pan)
+        const W = 200, H = 160;
+        const maxInLevel = Math.max(...Object.values(byLevel).map(n => n.length));
+
+        // Centro del canvas en espacio-mundo
+        const worldCX = (simulator.canvas.width  / 2 - simulator.panX) / simulator.zoom;
+        const worldCY = (simulator.canvas.height / 2 - simulator.panY) / simulator.zoom;
+
+        // Punto de origen para que el layout quede centrado
+        const originX = direction === 'LR'
+            ? worldCX - ((levelCount - 1) * W) / 2
+            : worldCX - ((maxInLevel - 1) * W) / 2;
+        const originY = direction === 'TB'
+            ? worldCY - ((levelCount - 1) * H) / 2
+            : worldCY - ((maxInLevel - 1) * H) / 2;
 
         Object.entries(byLevel).forEach(([lvStr, nodes]) => {
             const lv = Number(lvStr);
             nodes.forEach((d, i) => {
                 const count = nodes.length;
                 if (direction === 'TB') {
-                    d.x = (i - (count-1)/2) * W + canvasW / 2;
-                    d.y = lv * H + 80;
+                    d.x = originX + (i - (count - 1) / 2) * W;
+                    d.y = originY + lv * H;
                 } else {
-                    d.x = lv * W + 80;
-                    d.y = (i - (count-1)/2) * H + canvasH / 2;
+                    d.x = originX + lv * W;
+                    d.y = originY + (i - (count - 1) / 2) * H;
                 }
             });
         });
