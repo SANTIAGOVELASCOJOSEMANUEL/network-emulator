@@ -107,6 +107,7 @@ document.addEventListener('DOMContentLoaded', () => {
             { label: '🖨️', name: 'Printer', title: 'Impresora' },
             { label: '📷', name: 'Camera', title: 'Cámara IP' },
             { label: '📹', name: 'DVR', title: 'DVR/NVR' },
+            { label: '🖥️', name: 'Server', title: 'Servidor' },
         ]},
         // Especializados
         { group: 'sp', items: [
@@ -244,6 +245,94 @@ document.addEventListener('DOMContentLoaded', () => {
     // ── Simulation ───────────────────────────────────
     $('startSimulation')?.addEventListener('click', () => { simulator.startSimulation(); $('connectionStatus').textContent = '▶ Activo'; $('connectionStatus').className = 'status-value online'; });
     $('stopSimulation')?.addEventListener('click',  () => { simulator.stopSimulation();  $('connectionStatus').textContent = '⏹ Detenido'; $('connectionStatus').className = 'status-value offline'; });
+
+    // ── Advanced feature toolbar buttons ─────────────────────────────
+    function toggleAdvBtn(id) {
+        document.querySelectorAll('.adv-btn').forEach(b => b.classList.remove('adv-active'));
+        const btn = $(id); if (btn) btn.classList.add('adv-active');
+        setTimeout(() => btn?.classList.remove('adv-active'), 300);
+    }
+
+    $('openCLIBtn')?.addEventListener('click', () => {
+        toggleAdvBtn('openCLIBtn');
+        const dev = simulator.selectedDevice;
+        if (!dev) { netConsole.writeToConsole('❌ Selecciona un dispositivo primero (clic sobre él)'); return; }
+        window.cliPanel?.openForDevice(dev);
+    });
+
+    $('openTrafficBtn')?.addEventListener('click', () => { toggleAdvBtn('openTrafficBtn'); window.trafficMonitor?.toggle(); });
+    $('openFaultBtn')?.addEventListener('click',   () => { toggleAdvBtn('openFaultBtn');   window.faultSimulator?.toggle(); });
+    $('openEventLogBtn')?.addEventListener('click',() => { toggleAdvBtn('openEventLogBtn');window.eventLog?.toggle(); });
+
+    $('openDiagBtn')?.addEventListener('click', () => {
+        toggleAdvBtn('openDiagBtn');
+        netConsole.cmdDiagnose?.();
+        document.querySelector('.console-section')?.classList.add('expanded');
+    });
+
+    // ── Init advanced engines after DOM ready ─────────────────────────
+    setTimeout(() => {
+        if (!window.dhcpEngine)    window.dhcpEngine    = new DHCPEngine(simulator);
+        if (!window.NATEngine)     window.NATEngine     = new NATEngineClass(simulator);
+        if (!window.FirewallEngine)window.FirewallEngine= new FirewallEngineClass(simulator);
+        if (!window.trafficMonitor)window.trafficMonitor= new TrafficMonitor(simulator);
+        if (!window.faultSimulator)window.faultSimulator= new FaultSimulator(simulator);
+        if (!window.networkDiag)   window.networkDiag   = new NetworkDiagnostics(simulator);
+        if (!window.eventLog)      window.eventLog      = new EventLog();
+        // Hook network events into log
+        const origConnect = simulator.connectDevices.bind(simulator);
+        simulator.connectDevices = function(d1, d2, i1, i2, ls) {
+            const r = origConnect(d1, d2, i1, i2, ls);
+            if (r.success) window.eventLog?.add(`Enlace: ${d1?.name} ↔ ${d2?.name}`);
+            return r;
+        };
+    }, 600);
+
+    // ── Herramientas Avanzadas ───────────────────────
+    $('openCLIBtn')?.addEventListener('click', () => {
+        const dev = simulator.selectedDevice;
+        if (!dev) { netConsole.writeToConsole('❌ Selecciona un dispositivo primero'); return; }
+        window.cliPanel?.openForDevice(dev);
+    });
+    $('openTrafficBtn')?.addEventListener('click', () => window.trafficMonitor?.toggle());
+    $('openFaultBtn')?.addEventListener('click',   () => window.faultSimulator?.toggle());
+    $('openDiagBtn')?.addEventListener('click',    () => {
+        if (!window.networkDiag) return;
+        const write = (text, cls) => {
+            const colors = {'diag-header':'#06b6d4','diag-error':'#f87171','diag-warn':'#fbbf24','diag-ok':'#4ade80','diag-dim':'#475569'};
+            const line = document.createElement('div'); line.textContent = text; if (cls) line.style.color = colors[cls]||'#e2e8f0';
+            const out = document.getElementById('consoleOutput'); if (out) { out.appendChild(line); out.scrollTop = out.scrollHeight; }
+        };
+        window.networkDiag.showReport(write);
+        // Expand console to show results
+        document.querySelector('.console-section')?.classList.add('expanded');
+    });
+    $('openEventLogBtn')?.addEventListener('click', () => window.eventLog?.toggle());
+
+    // Inicializar dhcpEngine cuando el simulator esté listo
+    setTimeout(() => {
+        if (window.simulator && !window.dhcpEngine) {
+            window.dhcpEngine = new DHCPEngine(window.simulator);
+        }
+    }, 500);
+
+    // Hook: loggear eventos importantes del simulador
+    const _origConnect = simulator.connectDevices?.bind(simulator);
+    if (_origConnect) {
+        simulator.connectDevices = function(...args) {
+            const result = _origConnect(...args);
+            if (result?.success && window.eventLog) {
+                const [d1,,d2] = args;
+                window.eventLog.add(`Cable: ${d1?.name}↔${d2?.name} conectados`);
+            }
+            return result;
+        };
+    }
+
+    // Hook: CLI se abre con doble clic en canvas (además del panel de interfaces)
+    // Ya está en el dblclick handler, solo agregar CLI por doble clic en dispositivo
+
+
 
     // ── Persistence ──────────────────────────────────
     $('saveNet')?.addEventListener('click',   () => { if (simulator.save()) netConsole.writeToConsole('💾 Red guardada'); });
@@ -434,6 +523,36 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="property-item"><label>Estado</label><span>${device.armed ? '🔴 Armada' : '🟢 Desarmada'}</span></div>`;
         }
 
+        // ── Server specific ──
+        if (device.type === 'Server') {
+            const roleOptions = ['generic','web','ftp','dns','dhcp','mail','database']
+                .map(r => `<option value="${r}" ${device.role===r?'selected':''}>${r.toUpperCase()}</option>`).join('');
+            h += `<div class="prop-section">🖥️ Servidor</div>
+            <div class="property-item"><label>Rol</label>
+              <select id="serverRole" class="property-select">${roleOptions}</select>
+            </div>
+            <div class="property-item"><label>OS</label><input type="text" value="${device.os}" id="serverOS" class="property-input"></div>
+            <div class="property-item"><label>CPU</label><span>${device.cpu}</span></div>
+            <div class="property-item"><label>RAM</label><span>${device.ram}</span></div>
+            <div class="property-item"><label>Almacenamiento</label><span>${device.storage}</span></div>
+            <div class="property-item"><label>Servicios</label>
+              <div style="font-family:var(--mono);font-size:10px;line-height:1.7">
+                ${(device.services||[]).map(s=>`<div style="color:#06b6d4">● ${s}</div>`).join('')}
+              </div>
+            </div>`;
+            if (device.dhcpServer) {
+                const pool = device.dhcpServer;
+                const leaseCount = Object.keys(pool.leases||{}).length;
+                h += `<div class="property-item"><label>DHCP Pool</label>
+                  <div style="background:rgba(6,182,212,.06);border:1px solid rgba(6,182,212,.2);border-radius:5px;padding:7px 9px;font-family:var(--mono);font-size:10px">
+                    <div style="color:#06b6d4">${pool.network}</div>
+                    <div style="color:var(--text-dim)">GW: ${pool.gateway}</div>
+                    <div style="color:var(--text-dim)">Leases: ${leaseCount}</div>
+                  </div>
+                </div>`;
+            }
+        }
+
         // ── Interface button ──
         h += `<div class="prop-section">🔌 Interfaces</div>
         <div class="property-item">
@@ -450,6 +569,10 @@ document.addEventListener('DOMContentLoaded', () => {
         $('devZone')?.addEventListener('change', e => { device.zone = e.target.value; });
         $('devBrand')?.addEventListener('change', e => { device.brand = e.target.value; });
         $('devPanel')?.addEventListener('change', e => { device.panel = e.target.value; });
+        $('serverOS')?.addEventListener('change', e => { device.os = e.target.value; });
+        $('serverRole')?.addEventListener('change', e => {
+            if (device.setRole) { device.setRole(e.target.value); updatePanel(device); simulator.draw(); }
+        });
 
         // Apply IP
         $('applyIP')?.addEventListener('click', () => {
@@ -822,11 +945,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const phone = simulator.addDevice('Phone',     240, 820);
         const iph   = simulator.addDevice('IPPhone',   500, 700);
         const alarm = simulator.addDevice('Alarm',     560, 820);
+        const srv   = simulator.addDevice('Server',    700, 700);
         [
             [net, isp1], [net, isp2], [isp1, fw], [isp2, fw], [fw, rtr],
             [rtr, sw1], [rtr, swPoe], [rtr, ac],
             [ac, ap1], [ac, ap2], [swPoe, cam1], [swPoe, cam2],
-            [sw1, pc1], [sw1, iph], [sw1, alarm],
+            [sw1, pc1], [sw1, iph], [sw1, alarm], [sw1, srv],
             [ap1, laptop], [ap2, phone],
         ].forEach(([d1, d2]) => {
             if (!d1 || !d2) return;
@@ -849,10 +973,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // ── Init ──────────────────────────────────────────
     setTimeout(() => { simulator._resizeCanvas(); simulator.draw(); _snapshot(); _updateUndoRedo(); simulator._startCableAnim(); }, 0);
 
-    netConsole.writeToConsole('╔══════════════════════════════════╗');
-    netConsole.writeToConsole('║  SIMULADOR DE RED  v5.0          ║');
-    netConsole.writeToConsole('╚══════════════════════════════════╝');
-    netConsole.writeToConsole('🔗 Cable: C · ✋ Pan: Alt+clic · 🔍 Rueda=zoom · F=fit');
-    netConsole.writeToConsole('🔷 VLANs auto-heredadas al conectar Switch a Router');
+    netConsole.writeToConsole('╔══════════════════════════════════════════╗');
+    netConsole.writeToConsole('║  SIMULADOR DE RED  v6.0  — PRO EDITION  ║');
+    netConsole.writeToConsole('╚══════════════════════════════════════════╝');
+    netConsole.writeToConsole('🔗 Cable: C  ✋ Pan: Alt+clic  🔍 Rueda=zoom  F=fit');
+    netConsole.writeToConsole('⚡ CLI IOS: botón CLI o escribe: cli  |  diagnose  |  traffic show');
+    netConsole.writeToConsole('📡 DHCP real: dhcp enable  |  💥 Fallas: fault show  |  🌐 nat show');
     setTimeout(() => consoleSec.classList.remove('expanded'), 5000);
 });

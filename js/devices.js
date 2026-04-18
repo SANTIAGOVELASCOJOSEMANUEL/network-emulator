@@ -306,3 +306,69 @@ class Alarm extends NetworkDevice {
     }
     requestDHCP(){for(const conn of(window.simulator?.connections||[])){let other=null;if(conn.from===this)other=conn.to;else if(conn.to===this)other=conn.from;if(other){const pool=other.dhcpServer||(other.getDHCPPool&&other.getDHCPPool());if(pool){const base=pool.network.split('/')[0].split('.');const ip=`${base[0]}.${base[1]}.${base[2]}.${Math.floor(Math.random()*190)+10}`;this.ipConfig.ipAddress=ip;return{ip};}}}return null;}
 }
+
+class Server extends NetworkDevice {
+    constructor(id, name, x, y) {
+        super(id, name, 'Server', x, y);
+        this.role    = 'generic';   // web | ftp | dns | dhcp | mail | database | generic
+        this.os      = 'Linux';
+        this.cpu     = '8 vCPU';
+        this.ram     = '32 GB';
+        this.storage = '2 TB';
+        this.services = [];
+
+        // Interfaces: 2 GbE + 1 management
+        this.addInterface('ETH0', 'LAN', '1Gbps',  'cobre');
+        this.addInterface('ETH1', 'LAN', '10Gbps', 'fibra');
+        this.addInterface('MGMT', 'MGMT','1Gbps',  'cobre');
+
+        this.ipConfig = {
+            ipAddress  : '0.0.0.0',
+            subnetMask : '255.255.255.0',
+            gateway    : '',
+            dns        : ['8.8.8.8'],
+            dhcpEnabled: false,
+        };
+
+        // El servidor puede actuar como DHCP server
+        this.dhcpServer = null;
+
+        // Servicios activos por defecto según el rol
+        this._initServices();
+    }
+
+    _initServices() {
+        const roleServices = {
+            web     : ['HTTP:80','HTTPS:443'],
+            ftp     : ['FTP:21','FTPS:990'],
+            dns     : ['DNS:53'],
+            dhcp    : ['DHCP:67'],
+            mail    : ['SMTP:25','IMAP:143','POP3:110'],
+            database: ['MySQL:3306','PostgreSQL:5432'],
+            generic : ['SSH:22','HTTP:80'],
+        };
+        this.services = roleServices[this.role] || roleServices.generic;
+    }
+
+    setRole(role) {
+        this.role = role;
+        this._initServices();
+        if (role === 'dhcp') {
+            this.dhcpServer = {
+                poolName  : 'default',
+                network   : '192.168.1.0/24',
+                subnetMask: '255.255.255.0',
+                gateway   : '192.168.1.254',
+                dns       : ['8.8.8.8'],
+                leases    : {},
+                range     : { start: '192.168.1.10', end: '192.168.1.200' },
+            };
+        }
+    }
+
+    getDHCPPool() {
+        return this.dhcpServer || null;
+    }
+
+    requestDHCP() { return null; }   // Servers use static IPs
+}

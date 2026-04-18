@@ -289,7 +289,7 @@ class NetworkRenderer {
             ONT:'#4ade80',OLT:'#4ade80',AP:'#a78bfa',AC:'#a78bfa',Bridge:'#a78bfa',SDWAN:'#a78bfa',
             Camera:'#94a3b8',DVR:'#94a3b8',
             PC:'#64748b',Laptop:'#64748b',Phone:'#64748b',Printer:'#64748b',
-            IPPhone:'#fb923c',ControlTerminal:'#fb923c',PayTerminal:'#22d3ee',Alarm:'#f43f5e',
+            IPPhone:'#fb923c',ControlTerminal:'#fb923c',PayTerminal:'#22d3ee',Alarm:'#f43f5e',Server:'#06b6d4',
         };
         return m[type] || '#38bdf8';
     }
@@ -417,6 +417,7 @@ class NetworkRenderer {
             case 'ControlTerminal': this._icoControlTerminal(cx,cy,s); break;
             case 'PayTerminal':     this._icoPayTerminal(cx,cy,s); break;
             case 'Alarm':           this._icoAlarm(cx,cy,s); break;
+            case 'Server':          this._icoServer(cx,cy,s); break;
         }
         ctx.restore();
     }
@@ -531,6 +532,32 @@ class NetworkRenderer {
         }
     }
 
+
+    _icoServer(cx,cy,s){
+        const c=this.ctx,z=this.zoom;
+        const col='#06b6d4';
+        c.strokeStyle=col; c.lineWidth=1.5/z;
+        // Server body (rack unit)
+        const bx=cx-s*.85, bw=s*1.7, uh=s*.38;
+        [0,1,2].forEach(i=>{
+            const by=cy-s*.55+i*uh;
+            c.fillStyle=`rgba(6,182,212,${0.07+i*0.03})`;
+            c.beginPath();c.roundRect(bx,by,bw,uh*.88,2/z);c.fill();c.stroke();
+            // LED indicator
+            c.fillStyle=i===0?'#4ade80':'rgba(6,182,212,.5)';
+            c.beginPath();c.arc(bx+bw-6/z,by+uh*.44,2/z,0,Math.PI*2);c.fill();
+            // Drive bays (small rects)
+            for(let d=0;d<3;d++){
+                c.fillStyle='rgba(6,182,212,.3)';
+                c.beginPath();c.roundRect(bx+4/z+d*(s*.35),by+uh*.2,s*.28,uh*.55,1/z);c.fill();
+            }
+        });
+        // Power button
+        c.strokeStyle=col;c.lineWidth=1.2/z;
+        c.beginPath();c.arc(cx,cy+s*.72,s*.22,Math.PI*.3,Math.PI*1.7);c.stroke();
+        c.beginPath();c.moveTo(cx,cy+s*.5);c.lineTo(cx,cy+s*.72);c.stroke();
+    }
+
     // ═══════════════════════════════════════════
     //  ANNOTATIONS
     // ═══════════════════════════════════════════
@@ -567,6 +594,19 @@ class NetworkRenderer {
     // ═══════════════════════════════════════════
     drawPackets() {
         const { ctx, zoom, sim } = this;
+        const typeColors = {
+            'ping'         : '#38bdf8',
+            'data'         : '#4ade80',
+            'arp'          : '#f59e0b',
+            'dhcp-discover': '#06b6d4',
+            'dhcp-offer'   : '#a78bfa',
+            'dhcp-request' : '#f59e0b',
+            'dhcp-ack'     : '#4ade80',
+            'dhcp'         : '#06b6d4',
+            'nat'          : '#fb923c',
+            'icmp'         : '#38bdf8',
+            'broadcast'    : '#fbbf24',
+        };
         sim.packets.forEach(p => {
             const path = p.path || [];
             if (!path.length) return;
@@ -588,11 +628,23 @@ class NetworkRenderer {
                 fx = path[idx].x + (path[idx+1].x - path[idx].x) * t;
                 fy = path[idx].y + (path[idx+1].y - path[idx].y) * t;
             }
+            const color = typeColors[p.type] || p.color || '#38bdf8';
+            const size  = (p.type && p.type.startsWith('dhcp') ? 7 : 5) / zoom;
+
             ctx.save();
-            ctx.fillStyle   = p.color || '#38bdf8';
-            ctx.shadowColor = p.color || '#38bdf8';
-            ctx.shadowBlur  = 10 / zoom;
-            ctx.beginPath(); ctx.arc(fx, fy, 5/zoom, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle   = color;
+            ctx.shadowColor = color;
+            ctx.shadowBlur  = 12 / zoom;
+            ctx.beginPath(); ctx.arc(fx, fy, size, 0, Math.PI*2); ctx.fill();
+
+            if (p.label && zoom > 0.5) {
+                ctx.shadowBlur = 0;
+                ctx.fillStyle  = color;
+                ctx.font       = 'bold ' + (9/zoom) + 'px monospace';
+                ctx.textAlign  = 'center';
+                ctx.textBaseline = 'bottom';
+                ctx.fillText(p.label, fx, fy - size - 1/zoom);
+            }
             ctx.restore();
         });
     }

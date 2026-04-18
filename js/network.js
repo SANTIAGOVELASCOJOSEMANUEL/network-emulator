@@ -162,6 +162,7 @@ class NetworkSimulator {
             ControlTerminal: () => new ControlTerminal(id, name, wx, wy),
             PayTerminal  : () => new PayTerminal(id, name, wx, wy),
             Alarm        : () => new Alarm(id, name, wx, wy),
+            Server       : () => new Server(id, name, wx, wy),
         };
         const fn = map[type]; if (!fn) return null;
         const dev = fn();
@@ -348,6 +349,123 @@ class NetworkSimulator {
     // ══════════════════════════════════════════════
 
     /**
+     * _validateIPPath — Valida que existe una ruta IP válida entre src y dst.
+     *
+     * Reglas reales de red que se comprueban, en orden:
+     *  1. Ambos dispositivos deben tener IP configurada (≠ 0.0.0.0).
+     *  2. Si están en el mismo segmento → OK directo.
+     *  3. Si están en segmentos distintos:
+     *     a. src debe tener gateway configurado.
+     *     b. El gateway debe existir como dispositivo en la red.
+     *     c. El gateway debe ser un router/firewall.
+     *     d. El router debe tener conectividad física con el segmento del dst
+     *        (ruta hacia dst en la tabla de routing del router, o estar
+     *         directamente conectado al segmento del dst).
+     *
+     * @param {NetworkDevice} src
+     * @param {NetworkDevice} dst
+     * @returns {{ ok: boolean, reason: string, hop: NetworkDevice|null }}
+     */
+    _validateIPPath(src, dst) {
+        const srcIP  = src.ipConfig?.ipAddress;
+        const dstIP  = dst.ipConfig?.ipAddress;
+        const srcMask = src.ipConfig?.subnetMask || '255.255.255.0';
+
+        // ── Regla 1: IPs configuradas ───────────────────────────────
+        if (!srcIP || srcIP === '0.0.0.0') {
+            return { ok: false, reason: `${src.name} no tiene IP configurada`, hop: null };
+        }
+        if (!dstIP || dstIP === '0.0.0.0') {
+            return { ok: false, reason: `${dst.name} no tiene IP configurada`, hop: null };
+        }
+
+        // ── Regla 2: Mismo segmento → OK directo ───────────────────
+        if (NetUtils.inSameSubnet(srcIP, dstIP, srcMask)) {
+            return { ok: true, reason: 'mismo segmento', hop: dst };
+        }
+
+        // ── Regla 3a: Gateway configurado ──────────────────────────
+        const gwIP = src.ipConfig?.gateway;
+        if (!gwIP || gwIP === '0.0.0.0' || gwIP === '') {
+            return {
+                ok: false,
+                reason: `${src.name} no tiene gateway configurado (destino ${dstIP} está en otro segmento)`,
+                hop: null,
+            };
+        }
+
+        // ── Regla 3b: Gateway existe ────────────────────────────────
+        const gwDev = this.devices.find(d => d.ipConfig?.ipAddress === gwIP);
+        if (!gwDev) {
+            return {
+                ok: false,
+                reason: `Gateway ${gwIP} no existe en la red`,
+                hop: null,
+            };
+        }
+
+        // ── Regla 3c: Gateway es un router/firewall ─────────────────
+        const routerTypes = ['Router', 'RouterWifi', 'Firewall', 'SDWAN', 'Internet', 'ISP'];
+        if (!routerTypes.includes(gwDev.type)) {
+            return {
+                ok: false,
+                reason: `${gwDev.name} (gateway ${gwIP}) no es un router`,
+                hop: null,
+            };
+        }
+
+        // ── Regla 3d: El router tiene ruta hacia el destino ─────────
+        // Primero comprobamos si el router tiene conectividad física con dst
+        const physicalPath = this.engine.findRoute(gwDev.id, dst.id);
+        if (!physicalPath.length) {
+            return {
+                ok: false,
+                reason: `${gwDev.name} no tiene conectividad física hacia ${dst.name}`,
+                hop: gwDev,
+            };
+        }
+
+        // El router debe tener al dst en su segmento directamente conectado,
+        // O tener una ruta en su tabla hacia la red del dst
+        const gwMask = dst.ipConfig?.subnetMask || '255.255.255.0';
+        const dstNet = NetUtils.networkAddress(dstIP, gwMask);
+
+        // Verificar si el router está en el mismo segmento que el dst
+        const routerDirectlyConnected = gwDev.interfaces?.some(intf => {
+            const ifIP = intf.ipConfig?.ipAddress;
+            if (!ifIP || ifIP === '0.0.0.0') return false;
+            return NetUtils.inSameSubnet(ifIP, dstIP, intf.ipConfig?.subnetMask || gwMask);
+        });
+
+        if (routerDirectlyConnected) {
+            return { ok: true, reason: `vía gateway ${gwIP} (ruta directa)`, hop: gwDev };
+        }
+
+        // Verificar tabla de routing del router
+        if (gwDev.routingTable instanceof RoutingTable) {
+            const route = gwDev.routingTable.lookup(dstIP);
+            if (route) {
+                return { ok: true, reason: `vía gateway ${gwIP} → ruta ${dstNet}`, hop: gwDev };
+            }
+        }
+
+        // Fallback: si hay camino físico desde el router al dst, aceptar
+        // (cubre casos donde el router no tiene tabla explícita pero está conectado)
+        const intermediates = physicalPath.slice(1, -1).map(id => this.devices.find(d => d.id === id));
+        const hasRouter = intermediates.some(d => d && routerTypes.includes(d.type));
+        if (!hasRouter && physicalPath.length <= 3) {
+            // Router directamente adyacente al destino (sin otro router entre medio)
+            return { ok: true, reason: `vía gateway ${gwIP}`, hop: gwDev };
+        }
+
+        return {
+            ok: false,
+            reason: `${gwDev.name} no tiene ruta hacia ${dstNet} (${dstIP})`,
+            hop: gwDev,
+        };
+    }
+
+    /**
      * sendPacket v2: aplica ARP, subred, gateway, TTL, condiciones de red.
      * @param {NetworkDevice} src
      * @param {NetworkDevice} dst
@@ -368,6 +486,18 @@ class NetworkSimulator {
         // Broadcast: enviar a todos en el segmento
         if (type === 'broadcast' || opts.unicast === false) {
             return this._sendBroadcast(src, type, opts);
+        }
+
+        // Paquetes internos (ARP, DHCP, pong) omiten validación IP
+        const skipValidation = ['arp', 'arp-reply', 'dhcp', 'pong'].includes(type) || opts.forcePath;
+
+        // ── Validación de ruta IP ────────────────────────────────────────
+        if (!skipValidation) {
+            const ipCheck = this._validateIPPath(src, dst);
+            if (!ipCheck.ok) {
+                this._log(`❌ ${ipCheck.reason}`);
+                return null;
+            }
         }
 
         // ARP: ¿conocemos la MAC del destino?
@@ -435,6 +565,7 @@ class NetworkSimulator {
                 src._congestionQueue++;
 
                 const pkt = new Packet({ origen: src, destino: dst, ruta, tipo: type, ttl, payload: opts.payload ?? null, unicast: opts.unicast ?? true });
+                pkt.label   = opts.label || null;
                 pkt.speed   = speedFactor;
                 pkt._ls     = ls;
                 pkt._src    = src;
@@ -446,6 +577,7 @@ class NetworkSimulator {
 
         // Sin LinkState (fallback)
         const pkt = new Packet({ origen: src, destino: dst, ruta, tipo: type, ttl, payload: opts.payload ?? null, unicast: opts.unicast ?? true });
+        pkt.label = opts.label || null;
         src._totalPackets++;
         this.packets.push(pkt);
         return pkt;
@@ -548,20 +680,78 @@ class NetworkSimulator {
             const ls = i > 0 ? this.engine.getLinkState(ruta[i - 1], id) : null;
             const lat = ls ? `${ls.latency.toFixed(1)}ms` : '—';
             const role = d ? ` [${d.type}]` : '';
-            this._log(`  ${i + 1}. ${d ? d.name : id}${role} · latencia: ${lat}`);
+            const ip = d?.ipConfig?.ipAddress ? ` (${d.ipConfig.ipAddress})` : '';
+            this._log(`  ${i}. ${d ? d.name : id}${role}${ip} · ${lat}`);
         });
-        this._log(`  Total: ${ruta.length - 1} saltos`);
+        this._log(`  Total: ${ruta.length - 1} salto(s)`);
 
-        // Animar tracert hop a hop
+        // Animar tracert: un paquete por salto con TTL=i
+        // Cada paquete muere exactamente en el router del salto i
+        // y genera un ICMP Time Exceeded de vuelta — igual que traceroute real
         ruta.forEach((id, i) => {
             if (i === 0) return;
+            const hopDev  = this.devices.find(d => d.id === id);
             const subRuta = ruta.slice(0, i + 1);
             setTimeout(() => {
-                const pkt = new Packet({ origen, destino, ruta: subRuta, tipo: 'tracert', ttl: i + 1 });
-                pkt.speed = 0.03;
+                const pkt = new Packet({ origen, destino, ruta: subRuta, tipo: 'tracert', ttl: i });
+                pkt.speed = 0.025;
+                pkt._tracertHop    = i;
+                pkt._tracertRouter = hopDev;
                 this.packets.push(pkt);
-            }, i * 300);
+            }, i * 400);
         });
+    }
+
+    // ── ICMP Ping visual paso a paso ──────────────
+    icmpPingVisual(src, dst, writeCallback, count=4) {
+        const write = writeCallback || (()=>{});
+        const ruta  = this.engine.findRoute(src.id, dst.id);
+        const srcIP = src.ipConfig?.ipAddress || '?';
+        const dstIP = dst.ipConfig?.ipAddress || '?';
+
+        write(`\nPinging ${dstIP} from ${srcIP} with 32 bytes of data:`);
+
+        if (!ruta.length) {
+            for (let i=0;i<count;i++) {
+                setTimeout(()=>write(`Request timeout for icmp_seq ${i+1}`), i*900);
+            }
+            setTimeout(()=>write(`\nPing statistics for ${dstIP}:\n  Packets: Sent=${count}, Received=0, Lost=${count} (100% loss)`), count*900+100);
+            return;
+        }
+
+        let ok=0;
+        const times=[];
+        for (let i=0;i<count;i++) {
+            setTimeout(()=>{
+                // Echo request animation
+                const pkt = this.sendPacket(src, dst, 'ping', 32, { ttl: 64 });
+                const ls  = ruta.length>1 ? this.engine.getLinkState(ruta[0],ruta[1]) : null;
+                const lost = !pkt || (ls && !ls.isUp()) || (ls && Math.random()<(ls.lossRate||0));
+                if (!lost) {
+                    ok++;
+                    const base = ls ? ls.latency : 1;
+                    const t = Math.max(1, Math.round(base*(ruta.length-1) + Math.random()*base*0.5));
+                    times.push(t);
+                    const ttlLeft = 64-(ruta.length-1);
+                    write(`Reply from ${dstIP}: bytes=32 time=${t}ms TTL=${ttlLeft}`);
+                    // Echo reply animation
+                    setTimeout(()=>this.sendPacket(dst, src, 'pong', 32, { ttl:64 }), t+50);
+                } else {
+                    write(`Request timed out.`);
+                }
+                if (i===count-1) {
+                    const lost_count = count-ok;
+                    const pct = Math.round((lost_count/count)*100);
+                    const minT = times.length?Math.min(...times):'—';
+                    const maxT = times.length?Math.max(...times):'—';
+                    const avgT = times.length?Math.round(times.reduce((a,b)=>a+b,0)/times.length):'—';
+                    write(`\nPing statistics for ${dstIP}:`);
+                    write(`    Packets: Sent=${count}, Received=${ok}, Lost=${lost_count} (${pct}% loss)`);
+                    if (times.length) write(`Approximate round trip times in milli-seconds:`);
+                    if (times.length) write(`    Minimum=${minT}ms, Maximum=${maxT}ms, Average=${avgT}ms`);
+                }
+            }, i*900);
+        }
     }
 
     // ── Actualizar paquetes por frame ─────────────
@@ -570,18 +760,42 @@ class NetworkSimulator {
         this.packets.forEach(p => {
             if (p.status !== 'sending') return;
 
-            // TTL expirado
-            if (p.expired()) {
-                p.status = 'expired';
-                if (p._ls) p._ls.dequeue();
-                if (p._src) p._src._congestionQueue = Math.max(0, p._src._congestionQueue - 1);
-                this._log(`⛔ TTL=0: paquete expirado (${p.origen?.name} → ${p.destino?.name})`);
-                return;
-            }
-
             const pathLen = (p.ruta || []).length;
+            const prevIndex = Math.floor(p.position);
+
             p.position += (p.speed || 0.015);
-            p.ttl = Math.max(0, p.ttl - (p.speed / pathLen)); // reducir TTL proporcionalmente
+
+            const currIndex = Math.floor(p.position);
+
+            // ── Decremento de TTL por salto real ──────────────────────────
+            // El TTL baja 1 cada vez que el paquete cruza un router/firewall,
+            // no de forma continua. Esto replica el comportamiento real de IP.
+            if (currIndex > prevIndex && currIndex < pathLen) {
+                const hopId  = p.ruta[currIndex];
+                const hopDev = this.devices.find(d => d.id === hopId);
+                const routerTypes = ['Router', 'RouterWifi', 'Firewall', 'SDWAN', 'Internet', 'ISP'];
+
+                if (hopDev && routerTypes.includes(hopDev.type)) {
+                    p.ttl = Math.max(0, p.ttl - 1);
+
+                    // ── ICMP Time Exceeded ─────────────────────────────────
+                    // Si el TTL llegó a 0 en este router, el router descarta
+                    // el paquete y envía un ICMP Time Exceeded de vuelta al origen.
+                    if (p.ttl === 0) {
+                        p.status = 'expired';
+                        if (p._ls) p._ls.dequeue();
+                        if (p._src) p._src._congestionQueue = Math.max(0, p._src._congestionQueue - 1);
+
+                        const routerName = hopDev.name;
+                        const routerIP   = hopDev.ipConfig?.ipAddress || '?';
+                        this._log(`⛔ TTL=0 en ${routerName} (${routerIP}) — ICMP Time Exceeded → ${p.origen?.name}`);
+
+                        // Enviar ICMP Time Exceeded animado de vuelta al origen
+                        this._sendICMPTimeExceeded(hopDev, p.origen, routerIP);
+                        return;
+                    }
+                }
+            }
 
             if (p.position >= pathLen - 1) {
                 p.status = 'delivered';
@@ -604,11 +818,61 @@ class NetworkSimulator {
                     setTimeout(() => this.sendPacket(p.destino, p.origen, 'pong', 64, { ttl: 64 }), 100);
                 }
 
+                // ICMP Time Exceeded llegó al origen
+                if (tipo === 'icmp-ttl') {
+                    const fromIP = p.payload?.from || p.origen?.ipConfig?.ipAddress || '?';
+                    this._log(`📨 ICMP Time Exceeded recibido en ${p.destino?.name} — origen: ${fromIP}`);
+                }
+
+                // Tracert: el paquete llegó a su router objetivo → ICMP Time Exceeded de vuelta
+                if (tipo === 'tracert' && p._tracertRouter && p._tracertRouter !== p.destino) {
+                    const router = p._tracertRouter;
+                    this._sendICMPTimeExceeded(router, p.origen, router.ipConfig?.ipAddress || '?');
+                }
+
                 // ARP reply ya fue gestionado en _sendARP
             }
         });
 
         this.packets = this.packets.filter(p => p.status !== 'delivered' && p.status !== 'expired');
+    }
+
+    /**
+     * _sendICMPTimeExceeded — El router genera un mensaje ICMP Time Exceeded
+     * y lo envía animado de vuelta al host origen.
+     *
+     * En una red real, el router que descarta el paquete es quien responde,
+     * incluyendo su propia IP como origen del mensaje ICMP.
+     *
+     * @param {NetworkDevice} router   — dispositivo que descartó el paquete
+     * @param {NetworkDevice} origen   — host que originó el paquete
+     * @param {string}        routerIP — IP del router para el mensaje
+     */
+    _sendICMPTimeExceeded(router, origen, routerIP) {
+        if (!origen) return;
+
+        // Ruta física de vuelta: router → origen
+        const rutaVuelta = this.engine.findRoute(router.id, origen.id);
+        if (!rutaVuelta.length) {
+            this._log(`⚠️ ICMP Time Exceeded no pudo llegar a ${origen.name} (sin ruta de vuelta)`);
+            return;
+        }
+
+        // Crear paquete ICMP Time Exceeded (tipo icmp, color distinto)
+        const icmpPkt = new Packet({
+            origen  : router,
+            destino : origen,
+            ruta    : rutaVuelta,
+            tipo    : 'icmp-ttl',
+            ttl     : 64,
+            payload : { code: 'time-exceeded', from: routerIP },
+            unicast : true,
+        });
+        icmpPkt.speed  = 0.022;
+        icmpPkt.color  = '#f43f5e'; // rojo — error ICMP
+        icmpPkt.label  = 'TTL!';
+
+        this.packets.push(icmpPkt);
     }
 
     findPath(src, dst) {
@@ -724,7 +988,7 @@ class NetworkSimulator {
     }
 
     // ── GEOMETRÍA ─────────────────────────────────
-    cardW(d) { return { Internet: 90, ISP: 80, Router: 88, RouterWifi: 80, Switch: 88, SwitchPoE: 88, Firewall: 80, AC: 80, ONT: 72, AP: 68, Bridge: 68, Camera: 64, PC: 64, Laptop: 64, Phone: 56, Printer: 64, SDWAN: 96, OLT: 80, DVR: 80, IPPhone: 72, ControlTerminal: 88, PayTerminal: 72, Alarm: 72 }[d.type] || 72; }
+    cardW(d) { return { Internet: 90, ISP: 80, Router: 88, RouterWifi: 80, Switch: 88, SwitchPoE: 88, Firewall: 80, AC: 80, ONT: 72, AP: 68, Bridge: 68, Camera: 64, PC: 64, Laptop: 64, Phone: 56, Printer: 64, SDWAN: 96, OLT: 80, DVR: 80, IPPhone: 72, ControlTerminal: 88, PayTerminal: 72, Alarm: 72, Server: 88 }[d.type] || 72; }
     cardH() { return 76; }
     _iPos(device, idx, total) { const w = this.cardW(device), h = this.cardH(); const x0 = device.x - w / 2, y0 = device.y - h / 2; const spacing = w / (total + 1); return { x: x0 + spacing * (idx + 1), y: y0 + h + 5 }; }
     findDeviceAt(wx, wy) { for (let i = this.devices.length - 1; i >= 0; i--) { const d = this.devices[i]; const w = this.cardW(d) / 2 + 8, h = this.cardH() / 2 + 8; if (wx >= d.x - w && wx <= d.x + w && wy >= d.y - h && wy <= d.y + h) return d; } return null; }

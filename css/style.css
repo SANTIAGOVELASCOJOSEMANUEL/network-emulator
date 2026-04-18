@@ -783,3 +783,216 @@ body.light-mode .canvas-hud { background: rgba(255,255,255,.88); }
     border: 1px solid var(--border);
 }
 body.light-mode .canvas-hint { background: rgba(255,255,255,.85); }
+/* ══════════════════════════════════════════════════════
+   NUEVAS FUNCIONALIDADES v6.0
+   CLI, DHCP, NAT, Firewall, Traffic Monitor, Faults
+════════════════════════════════════════════════════════ */
+
+/* CLI Panel scrollbar */
+#cliOutput::-webkit-scrollbar { width: 4px; }
+#cliOutput::-webkit-scrollbar-thumb { background: #1e3a4a; border-radius: 2px; }
+#cliOutput::-webkit-scrollbar-track { background: transparent; }
+
+/* Traffic panel scrollbar */
+#trafficLinks::-webkit-scrollbar { width: 3px; }
+#trafficLinks::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+
+/* Fault panel */
+#faultList::-webkit-scrollbar { width: 3px; }
+#faultList::-webkit-scrollbar-thumb { background: #3a1a1a; border-radius: 2px; }
+#faultLog::-webkit-scrollbar { width: 3px; }
+#faultLog::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 2px; }
+
+/* Event log */
+#eventLogList::-webkit-scrollbar { width: 3px; }
+#eventLogList::-webkit-scrollbar-thumb { background: #2a1a4a; border-radius: 2px; }
+
+/* DHCP step animations */
+@keyframes dhcpStep {
+    from { opacity: 0; transform: translateX(-8px); }
+    to   { opacity: 1; transform: translateX(0); }
+}
+
+/* Advanced toolbar buttons highlight */
+.tb-btn[id^="open"] {
+    border-width: 1px;
+    border-style: solid;
+    opacity: 0.9;
+    transition: opacity .15s, transform .1s;
+}
+.tb-btn[id^="open"]:hover {
+    opacity: 1;
+    transform: translateY(-1px);
+}
+
+/* Firewall rule badge */
+.fw-permit { color: #4ade80; font-weight: 700; }
+.fw-deny   { color: #f87171; font-weight: 700; }
+.fw-del-btn {
+    background: none;
+    border: 1px solid #334155;
+    color: #64748b;
+    padding: 1px 5px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 9px;
+}
+.fw-del-btn:hover { border-color: #ef4444; color: #ef4444; }
+
+/* CLI tab active */
+#cliTabs { scrollbar-width: thin; scrollbar-color: #1e3a4a transparent; }
+
+/* Fault type button selected */
+.fault-type-btn.selected {
+    background: rgba(239,68,68,.3) !important;
+    border-color: #ef4444 !important;
+}
+
+/* Packet DHCP colors */
+.pkt-dhcp-discover { color: #06b6d4; }
+.pkt-dhcp-offer    { color: #a78bfa; }
+.pkt-dhcp-request  { color: #f59e0b; }
+.pkt-dhcp-ack      { color: #4ade80; }
+
+/* ══════════════════════════════════════════════════════
+   CLI PANEL — Estilos adicionales
+══════════════════════════════════════════════════════ */
+
+#cliPanel {
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+}
+
+#cliOutput div {
+    padding: 1px 0;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+#cliOutput::-webkit-scrollbar { width: 4px; }
+#cliOutput::-webkit-scrollbar-track { background: transparent; }
+#cliOutput::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+
+/* Toolbar advanced buttons */
+/* Moved to .adv-btn rules */
+
+/* Traffic panel scrollbar */
+#trafficLinks::-webkit-scrollbar { width: 3px; }
+#trafficLinks::-webkit-scrollbar-thumb { background: #334155; }
+
+/* Fault panel */
+#faultLog::-webkit-scrollbar { width: 3px; }
+#faultLog::-webkit-scrollbar-thumb { background: #3a1a1a; }
+
+/* Event log scrollbar */
+#eventLogList::-webkit-scrollbar { width: 3px; }
+#eventLogList::-webkit-scrollbar-thumb { background: #334155; }
+
+/* Firewall permit/deny badges */
+.fw-permit { color: #4ade80; font-weight: 700; }
+.fw-deny   { color: #f87171; font-weight: 700; }
+.fw-del-btn {
+    background: rgba(239,68,68,.15);
+    border: 1px solid rgba(239,68,68,.4);
+    color: #ef4444;
+    padding: 1px 5px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 9px;
+}
+.fw-del-btn:hover { background: rgba(239,68,68,.3); }
+
+/* DHCP step colors in console */
+.console-line.dhcp-discover { color: #06b6d4; }
+.console-line.dhcp-offer    { color: #a78bfa; }
+.console-line.dhcp-request  { color: #f59e0b; }
+.console-line.dhcp-ack      { color: #4ade80; }
+
+/* CLI tabs scrollbar */
+#cliTabs::-webkit-scrollbar { height: 3px; }
+#cliTabs::-webkit-scrollbar-thumb { background: #334155; }
+
+/* ══════════════════════════════════════════════════════
+   BARRA VERTICAL — Herramientas avanzadas (lado derecho del canvas)
+══════════════════════════════════════════════════════ */
+
+.adv-sidebar {
+    width: 52px;
+    min-width: 52px;
+    background: var(--bg-panel);
+    border-left: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 8px 0;
+    gap: 4px;
+    z-index: 200;
+    flex-shrink: 0;
+}
+
+.adv-btn {
+    width: 42px;
+    height: 48px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    color: var(--text-dim);
+    transition: all 0.15s ease;
+    padding: 4px 2px;
+    font-family: var(--mono);
+}
+
+.adv-btn svg {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+}
+
+.adv-btn span {
+    font-size: 8px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    line-height: 1;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.adv-btn:hover {
+    transform: translateX(-2px);
+    box-shadow: 2px 0 8px rgba(0,0,0,.3);
+}
+
+/* Colores individuales */
+#openCLIBtn      { color: #06b6d4; border-color: rgba(6,182,212,.35); }
+#openCLIBtn:hover     { background: rgba(6,182,212,.15); border-color: #06b6d4; box-shadow: 2px 0 12px rgba(6,182,212,.25); }
+
+#openTrafficBtn  { color: #f59e0b; border-color: rgba(245,158,11,.35); }
+#openTrafficBtn:hover { background: rgba(245,158,11,.15); border-color: #f59e0b; box-shadow: 2px 0 12px rgba(245,158,11,.25); }
+
+#openFaultBtn    { color: #ef4444; border-color: rgba(239,68,68,.35); }
+#openFaultBtn:hover   { background: rgba(239,68,68,.15);  border-color: #ef4444; box-shadow: 2px 0 12px rgba(239,68,68,.25); }
+
+#openDiagBtn     { color: #4ade80; border-color: rgba(74,222,128,.35); }
+#openDiagBtn:hover    { background: rgba(74,222,128,.15); border-color: #4ade80; box-shadow: 2px 0 12px rgba(74,222,128,.25); }
+
+#openEventLogBtn { color: #8b5cf6; border-color: rgba(139,92,246,.35); }
+#openEventLogBtn:hover{ background: rgba(139,92,246,.15); border-color: #8b5cf6; box-shadow: 2px 0 12px rgba(139,92,246,.25); }
+
+/* Estado activo (panel abierto) */
+.adv-btn.adv-active {
+    box-shadow: inset 0 0 0 1.5px currentColor, 2px 0 10px rgba(0,0,0,.3);
+}
+
+/* Separador interno */
+.adv-sidebar::after {
+    content: '';
+    position: absolute;
+    /* no absolute needed, using flex gap */
+}

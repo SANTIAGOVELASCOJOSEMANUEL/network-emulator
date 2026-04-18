@@ -58,6 +58,7 @@ Packet.COLOR_BY_TYPE = {
     tracert    : '#f472b6',
     dhcp       : '#38bdf8',
     broadcast  : '#fbbf24',
+    'icmp-ttl' : '#f43f5e',  // ICMP Time Exceeded — rojo error
 };
 
 /** Crea un paquete básico entre dos dispositivos */

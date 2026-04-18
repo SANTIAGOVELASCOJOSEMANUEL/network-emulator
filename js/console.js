@@ -61,13 +61,25 @@ class NetworkConsole {
             bandwidth : () => this.cmdBandwidth(parts),
             isp       : () => this.cmdISP(parts),
             fail      : () => this.cmdFail(parts),
-            link      : () => this.cmdLink(parts),       // NUEVO
-            arp       : () => this.cmdARP(parts),        // NUEVO
-            route     : () => this.cmdRoute(parts),      // NUEVO
-            mac       : () => this.cmdMAC(parts),        // NUEVO
-            broadcast : () => this.cmdBroadcast(parts),  // NUEVO
-            ttl       : () => this.cmdTTL(parts),        // NUEVO
-            stats     : () => this.cmdStats(parts),      // NUEVO
+            link      : () => this.cmdLink(parts),
+            arp       : () => this.cmdARP(parts),
+            route     : () => this.cmdRoute(parts),
+            mac       : () => this.cmdMAC(parts),
+            broadcast : () => this.cmdBroadcast(parts),
+            ttl       : () => this.cmdTTL(parts),
+            stats     : () => this.cmdStats(parts),
+            nat       : () => this.cmdNAT(parts),
+            firewall  : () => this.cmdFirewall(parts),
+            fw        : () => this.cmdFirewall(parts),
+            diagnose  : () => this.cmdDiagnose(),
+            diag      : () => this.cmdDiagnose(),
+            fault     : () => this.cmdFault(parts),
+            traffic   : () => this.cmdTraffic(parts),
+            monitor   : () => this.cmdTraffic(parts),
+            cli       : () => this.cmdOpenCLI(),
+            ios       : () => this.cmdOpenCLI(),
+            log       : () => this.cmdEventLog(parts),
+            events    : () => this.cmdEventLog(parts),
             help      : () => this.cmdHelp(),
             clear     : () => this.cmdClear(),
             cls       : () => this.cmdClear(),
@@ -82,7 +94,7 @@ class NetworkConsole {
     // ─── PING (mejorado: subred, gateway, TTL) ────────────────────────
 
     cmdPing(parts) {
-        if (parts.length < 2) { this.writeToConsole('Uso: ping <ip>  |  ping <ip> ttl <n>'); return; }
+        if (parts.length < 2) { this.writeToConsole('Uso: ping <ip> [ttl <n>] [icmp]'); return; }
         if (!this.currentDevice) { this.writeToConsole('❌ Selecciona un dispositivo primero'); return; }
 
         const targetIP = parts[1];
@@ -94,39 +106,54 @@ class NetworkConsole {
         const srcIP  = this.currentDevice.ipConfig?.ipAddress || '0.0.0.0';
         const mask   = this.currentDevice.ipConfig?.subnetMask || '255.255.255.0';
 
+        // ICMP visual mode
+        if (parts.includes('icmp') || parts.includes('-v')) {
+            const write = (text) => this.writeToConsole(text);
+            this.network.icmpPingVisual(this.currentDevice, destDevice, write);
+            return;
+        }
+
         this.writeToConsole(`\nPing ${srcIP} → ${targetIP} (TTL=${ttl})`);
 
-        // Análisis de subred
-        if (srcIP !== '0.0.0.0' && targetIP !== '0.0.0.0') {
-            const same = NetUtils.inSameSubnet(srcIP, targetIP, mask);
-            this.writeToConsole(`  Subred src : ${NetUtils.networkAddress(srcIP, mask)}/${mask}`);
-            this.writeToConsole(`  Mismo segmento: ${same ? '✅ Sí — envío directo' : '❌ No — necesita gateway'}`);
-            if (!same) {
-                const gw = this.currentDevice.ipConfig?.gateway || 'no configurado';
-                this.writeToConsole(`  Gateway: ${gw}`);
-            }
+        // ── Validación de ruta IP antes de enviar cualquier cosa ─────────
+        const ipCheck = this.network._validateIPPath(this.currentDevice, destDevice);
+        if (!ipCheck.ok) {
+            this.writeToConsole(`❌ ${ipCheck.reason}`);
+            this.writeToConsole(`  Ping fallido — sin ruta IP hacia ${targetIP}`);
+            return;
+        }
+
+        // Info de ruta al usuario
+        const same = NetUtils.inSameSubnet(srcIP, targetIP, mask);
+        this.writeToConsole(`  Ruta: ${ipCheck.reason}`);
+        if (!same) {
+            this.writeToConsole(`  Gateway: ${this.currentDevice.ipConfig?.gateway}`);
         }
 
         let successful = 0;
         for (let i = 1; i <= 4; i++) {
             setTimeout(() => {
-                // LinkState: verificar pérdida en el primer enlace
-                const ruta = this.network.engine.findRoute(this.currentDevice.id, destDevice.id);
+                // Verificar LinkState del primer enlace físico (hacia el hop)
+                const hopDev = ipCheck.hop || destDevice;
+                const ruta = this.network.engine.findRoute(this.currentDevice.id, hopDev.id);
                 let lost = false;
-                if (ruta.length > 1) {
+
+                if (ruta.length === 0) {
+                    lost = true;
+                } else if (ruta.length > 1) {
                     const ls = this.network.engine.getLinkState(ruta[0], ruta[1]);
                     if (ls && !ls.isUp()) { lost = true; }
                     else if (ls && Math.random() < ls.lossRate) { lost = true; }
                 }
-                if (ruta.length === 0) lost = true;
 
                 if (!lost) {
                     successful++;
-                    // Latencia real del enlace + jitter
-                    const ls = ruta.length > 1 ? this.network.engine.getLinkState(ruta[0], ruta[1]) : null;
+                    const fullRuta = this.network.engine.findRoute(this.currentDevice.id, destDevice.id);
+                    const ls = fullRuta.length > 1 ? this.network.engine.getLinkState(fullRuta[0], fullRuta[1]) : null;
                     const base = ls ? ls.latency : 2;
-                    const time = Math.max(1, Math.round(base * (ruta.length - 1) + (Math.random() * base)));
-                    const newTTL = ttl - (ruta.length - 1);
+                    const hops = fullRuta.length - 1 || 1;
+                    const time = Math.max(1, Math.round(base * hops + (Math.random() * base)));
+                    const newTTL = ttl - hops;
                     this.writeToConsole(`  Respuesta de ${targetIP}: bytes=32 tiempo=${time}ms TTL=${newTTL}`);
                     this.network.sendPacket(this.currentDevice, destDevice, 'ping', 32, { ttl });
                 } else {
@@ -210,239 +237,171 @@ class NetworkConsole {
         }
     }
 
-    // ─── DHCP ────────────────────────────────────────────────────────
+    // ─── DHCP (mejorado — proceso real 4 pasos) ───────────────────────
 
     cmdDhcp(parts) {
-        if (parts.length < 2) { this.writeToConsole('Uso: dhcp <enable|renew|release|status>'); return; }
+        if (parts.length < 2) { this.writeToConsole('Uso: dhcp <enable|renew|release|status|leases>'); return; }
         if (!this.currentDevice) { this.writeToConsole('❌ Selecciona un dispositivo primero'); return; }
         const action = parts[1];
         const d = this.currentDevice;
 
-        if (!d.requestDHCP) { this.writeToConsole('❌ Este dispositivo no soporta DHCP cliente'); return; }
+        const write = (text, cls) => {
+            const colors = { 'dhcp-discover':'#06b6d4','dhcp-offer':'#a78bfa','dhcp-request':'#f59e0b','dhcp-ack':'#4ade80','dhcp-ok':'#4ade80','dhcp-err':'#f87171','dhcp-dim':'#475569','dhcp-section':'#06b6d4','dhcp-data':'#e2e8f0' };
+            const line = document.createElement('div');
+            line.textContent = text;
+            if (cls) line.style.color = colors[cls] || '#e2e8f0';
+            const out = document.getElementById('consoleOutput');
+            if (out) { out.appendChild(line); out.scrollTop = out.scrollHeight; }
+        };
 
-        if (action === 'enable') {
-            d.enableDHCP?.();
-            setTimeout(() => {
-                const r = d.requestDHCP();
-                if (r) { this.writeToConsole(`✅ IP asignada: ${r.ip}  GW: ${r.gateway || '?'}  DNS: ${(r.dns||[]).join(',')}`); this.network.draw(); }
-                else     this.writeToConsole('❌ Sin respuesta DHCP');
-            }, 1000);
-
-        } else if (action === 'renew') {
-            setTimeout(() => {
-                const r = d.requestDHCP();
-                if (r) { this.writeToConsole(`✅ IP renovada: ${r.ip}`); this.network.draw(); }
-                else     this.writeToConsole('❌ Sin respuesta DHCP');
-            }, 800);
-
-        } else if (action === 'release') {
-            d.setStaticIP?.('0.0.0.0', '255.255.255.0', '');
-            this.writeToConsole('📡 IP liberada');
-            this.network.draw();
-
-        } else if (action === 'status') {
-            this.writeToConsole(`DHCP: ${d.ipConfig?.dhcpEnabled ? 'habilitado' : 'deshabilitado'}`);
-            this.writeToConsole(`IP: ${d.ipConfig?.ipAddress || '0.0.0.0'}`);
-        }
-    }
-
-    // ─── ARP (NUEVO) ──────────────────────────────────────────────────
-
-    cmdARP(parts) {
-        if (!this.currentDevice) { this.writeToConsole('❌ Selecciona un dispositivo primero'); return; }
-        const action = parts[1] || 'show';
-
-        if (action === 'show' || action === '-a') {
-            this.network.showARPTable(this.currentDevice);
-
-        } else if (action === 'flush' || action === 'clear') {
-            this.currentDevice._arpCache?.flush();
-            this.writeToConsole(`✅ ARP cache de ${this.currentDevice.name} limpiado`);
-
-        } else if (action === 'request' && parts[2]) {
-            const targetIP   = parts[2];
-            const destDevice = this.network.devices.find(d => d.ipConfig?.ipAddress === targetIP);
-            if (!destDevice) { this.writeToConsole(`❌ IP ${targetIP} no encontrada`); return; }
-            this.writeToConsole(`🔍 Enviando ARP request: ¿quién tiene ${targetIP}?`);
-            // Simular ARP privado
-            this.network._sendARP(this.currentDevice, destDevice, () => {
-                this.writeToConsole(`✅ ARP resuelto: ${targetIP}`);
-            });
-
-        } else {
-            this.writeToConsole('Uso: arp show | arp flush | arp request <ip>');
-        }
-    }
-
-    // ─── ROUTE (tabla de rutas, NUEVO) ───────────────────────────────
-
-    cmdRoute(parts) {
-        if (!this.currentDevice) { this.writeToConsole('❌ Selecciona un dispositivo primero'); return; }
-        const action = parts[1] || 'show';
-
-        if (action === 'show' || action === 'print') {
-            this.network.showRoutingTable(this.currentDevice);
-
-        } else if (action === 'add' && parts.length >= 5) {
-            // route add <network> <mask> <gateway> [metric]
-            const [,, net, mask, gw, metric] = parts;
-            if (!this.currentDevice.routingTable) { this.writeToConsole('❌ Este dispositivo no tiene tabla de rutas'); return; }
-            this.currentDevice.routingTable.add(net, mask, gw, '', parseInt(metric) || 1);
-            this.writeToConsole(`✅ Ruta añadida: ${net}/${mask} via ${gw}`);
-
-        } else if (action === 'default' && parts[2]) {
-            if (!this.currentDevice.routingTable) { this.writeToConsole('❌ No tiene tabla de rutas'); return; }
-            this.currentDevice.routingTable.setDefault(parts[2]);
-            this.writeToConsole(`✅ Ruta por defecto: ${parts[2]}`);
-
-        } else if (action === 'rebuild') {
-            this.network.rebuildRoutingTables();
-
-        } else {
-            this.writeToConsole('Uso: route show | route add <red> <mask> <gw> [metric] | route default <gw> | route rebuild');
-        }
-    }
-
-    // ─── MAC TABLE (NUEVO) ────────────────────────────────────────────
-
-    cmdMAC(parts) {
-        if (!this.currentDevice) { this.writeToConsole('❌ Selecciona un dispositivo primero'); return; }
-        const action = parts[1] || 'show';
-        if (action === 'show')  this.network.showMACTable(this.currentDevice);
-        else if (action === 'flush') { this.currentDevice._macTable?.flush(); this.writeToConsole(`✅ MAC table limpiada`); }
-        else this.writeToConsole('Uso: mac show | mac flush');
-    }
-
-    // ─── LINK STATE (NUEVO) ───────────────────────────────────────────
-
-    cmdLink(parts) {
-        // link show <d1> <d2>
-        // link set <d1> <d2> loss <0.0-1.0>
-        // link set <d1> <d2> latency <ms>
-        // link set <d1> <d2> bw <Mbps>
-        // link set <d1> <d2> status <up|down>
-        if (parts.length < 3) {
-            this.writeToConsole('Uso:');
-            this.writeToConsole('  link show <dev1> <dev2>');
-            this.writeToConsole('  link set  <dev1> <dev2> loss <0.0-1.0>');
-            this.writeToConsole('  link set  <dev1> <dev2> latency <ms>');
-            this.writeToConsole('  link set  <dev1> <dev2> bw <Mbps>');
-            this.writeToConsole('  link set  <dev1> <dev2> status <up|down>');
+        if (action === 'leases' || action === 'pool') {
+            if (window.dhcpEngine) window.dhcpEngine.showLeases(write);
+            else this.writeToConsole('ℹ️ Motor DHCP no disponible');
             return;
         }
 
-        const action = parts[1];
-        const d1name = parts[2], d2name = parts[3];
-        const d1 = this.network.devices.find(d => d.name.toLowerCase() === d1name?.toLowerCase());
-        const d2 = this.network.devices.find(d => d.name.toLowerCase() === d2name?.toLowerCase());
+        if (!d.ipConfig) { this.writeToConsole('❌ Este dispositivo no tiene interfaz IP'); return; }
 
-        if (!d1 || !d2) { this.writeToConsole(`❌ Dispositivo no encontrado: ${!d1 ? d1name : d2name}`); return; }
-
-        const ls = this.network.engine.getLinkState(d1.id, d2.id);
-
-        if (action === 'show') {
-            if (!ls) { this.writeToConsole(`❌ No hay enlace entre ${d1.name} y ${d2.name}`); return; }
-            this.writeToConsole(`\n🔗 Enlace ${d1.name} ↔ ${d2.name}`);
-            this.writeToConsole(`  Estado    : ${ls.status}`);
-            this.writeToConsole(`  Ancho banda: ${ls.bandwidth} Mbps`);
-            this.writeToConsole(`  Latencia  : ${ls.latency} ms`);
-            this.writeToConsole(`  Pérdida   : ${(ls.lossRate * 100).toFixed(1)}%`);
-            this.writeToConsole(`  Cola      : ${ls.queue}/${ls.maxQueue}`);
-            this.writeToConsole(`  Paquetes descartados: ${ls.droppedPkts}`);
-
-        } else if (action === 'set' && parts.length >= 6) {
-            const prop  = parts[4];
-            const value = parts[5];
-            const props = {};
-
-            if (prop === 'loss')    props.lossRate  = parseFloat(value);
-            else if (prop === 'latency') props.latency = parseFloat(value);
-            else if (prop === 'bw')      props.bandwidth = parseFloat(value);
-            else if (prop === 'status')  props.status  = value;
-            else { this.writeToConsole(`❌ Propiedad desconocida: ${prop}`); return; }
-
-            if (this.network.configureLinkState(d1, d2, props)) {
-                this.writeToConsole(`✅ Enlace ${d1.name}↔${d2.name}: ${prop}=${value}`);
-                if (props.status === 'down') this.writeToConsole(`⚠️ Enlace caído — tráfico redirigido`);
-            }
-
-        } else {
-            this.writeToConsole('❌ Argumentos incorrectos. Escribe "link" para ayuda.');
-        }
-    }
-
-    // ─── BROADCAST (NUEVO) ───────────────────────────────────────────
-
-    cmdBroadcast(parts) {
-        if (!this.currentDevice) { this.writeToConsole('❌ Selecciona un dispositivo primero'); return; }
-        const type = parts[1] || 'broadcast';
-        this.writeToConsole(`📢 Enviando broadcast desde ${this.currentDevice.name}...`);
-        this.network.sendPacket(this.currentDevice, this.currentDevice, type, 64, { unicast: false });
-    }
-
-    // ─── TTL (NUEVO) ─────────────────────────────────────────────────
-
-    cmdTTL(parts) {
-        if (!this.currentDevice) { this.writeToConsole('❌ Selecciona un dispositivo primero'); return; }
-        if (parts.length < 3) { this.writeToConsole('Uso: ttl <ip_destino> <ttl_valor>'); return; }
-        const destIP = parts[1];
-        const ttl    = parseInt(parts[2]);
-        const dest   = this.network.devices.find(d => d.ipConfig?.ipAddress === destIP);
-        if (!dest) { this.writeToConsole(`❌ IP ${destIP} no encontrada`); return; }
-        this.writeToConsole(`📦 Enviando paquete TTL=${ttl} hacia ${dest.name}...`);
-        const pkt = this.network.sendPacket(this.currentDevice, dest, 'data', 64, { ttl });
-        if (pkt) this.writeToConsole(`  TTL inicial: ${ttl} · Saltos hasta destino: ${pkt.ruta.length - 1}`);
-        else     this.writeToConsole('❌ Sin ruta o TTL insuficiente');
-    }
-
-    // ─── STATS (NUEVO) ───────────────────────────────────────────────
-
-    cmdStats(parts) {
-        const target = parts[1];
-
-        if (target === 'network') {
-            // Estadísticas globales
-            const total = this.network.devices.reduce((s, d) => s + (d._totalPackets || 0), 0);
-            const dropped = this.network.devices.reduce((s, d) => s + (d._droppedPackets || 0), 0);
-            this.writeToConsole('\n📊 Estadísticas globales de red');
-            this.writeToConsole('═'.repeat(40));
-            this.writeToConsole(`  Dispositivos : ${this.network.devices.length}`);
-            this.writeToConsole(`  Conexiones   : ${this.network.connections.length}`);
-            this.writeToConsole(`  Paquetes TX  : ${total}`);
-            this.writeToConsole(`  Descartados  : ${dropped} (${total ? ((dropped/total)*100).toFixed(1) : 0}%)`);
-            this.writeToConsole(`  Pkt en vuelo : ${this.network.packets.length}`);
-
-            // Enlace con más pérdidas
-            let worstLink = null, worstDrop = 0;
-            this.network.connections.forEach(c => {
-                const ls = c._linkState;
-                if (ls && ls.droppedPkts > worstDrop) { worstDrop = ls.droppedPkts; worstLink = c; }
-            });
-            if (worstLink) this.writeToConsole(`  Peor enlace  : ${worstLink.from.name}↔${worstLink.to.name} (${worstDrop} drops)`);
-
-        } else if (this.currentDevice) {
-            const d = this.currentDevice;
-            this.writeToConsole(`\n📊 Estadísticas: ${d.name}`);
-            this.writeToConsole(`  Paquetes TX  : ${d._totalPackets || 0}`);
-            this.writeToConsole(`  Descartados  : ${d._droppedPackets || 0}`);
-            this.writeToConsole(`  Cola actual  : ${d._congestionQueue || 0}/${d._maxCongestionQueue || 0}`);
-            const ls_list = this.network.connections
-                .filter(c => c.from === d || c.to === d)
-                .map(c => ({ name: c.from === d ? c.to.name : c.from.name, ls: c._linkState }))
-                .filter(x => x.ls);
-            if (ls_list.length) {
-                this.writeToConsole('  Enlaces:');
-                ls_list.forEach(({ name, ls }) => {
-                    this.writeToConsole(`    → ${name.padEnd(15)} ${ls.bandwidth}Mbps  lat=${ls.latency}ms  loss=${(ls.lossRate*100).toFixed(1)}%  queue=${ls.queue}  drops=${ls.droppedPkts}`);
+        if (action === 'enable' || action === 'request' || action === 'renew') {
+            d.ipConfig.dhcpEnabled = true;
+            write('[DHCP] Iniciando proceso DHCP...', 'dhcp-section');
+            if (window.dhcpEngine) {
+                window.dhcpEngine.runDHCP(d, write, (result) => {
+                    if (result && window.eventLog) window.eventLog.add(`DHCP: ${d.name} obtuvo IP ${result.ip}`);
                 });
+            } else {
+                const r = d.requestDHCP?.();
+                if (r) { this.writeToConsole(`✅ IP: ${r.ip}`); this.network.draw(); }
+                else this.writeToConsole('❌ Sin respuesta DHCP');
             }
+
+        } else if (action === 'release') {
+            if (window.dhcpEngine) window.dhcpEngine.releaseLease(d, write);
+            else { d.ipConfig.ipAddress = '0.0.0.0'; this.writeToConsole('📡 IP liberada'); this.network.draw(); }
+            if (window.eventLog) window.eventLog.add(`DHCP: ${d.name} liberó su IP`);
+
+        } else if (action === 'status') {
+            this.writeToConsole(`DHCP: ${d.ipConfig?.dhcpEnabled ? 'habilitado' : 'estático'}`);
+            this.writeToConsole(`IP actual: ${d.ipConfig?.ipAddress || '0.0.0.0'}`);
+            if (d.ipConfig?.dhcpServer) this.writeToConsole(`Servidor: ${d.ipConfig.dhcpServer}`);
         } else {
-            this.writeToConsole('Uso: stats           — dispositivo seleccionado');
-            this.writeToConsole('     stats network   — red completa');
+            this.writeToConsole('Uso: dhcp enable | renew | release | status | leases');
         }
     }
 
-    // ─── VLAN ────────────────────────────────────────────────────────
+    // ─── NAT ─────────────────────────────────────────────────────────
+
+    cmdNAT(parts) {
+        const d = this.currentDevice;
+        if (!d) { this.writeToConsole('❌ Selecciona un dispositivo'); return; }
+        const action = parts[1] || 'show';
+        const write = (text, cls) => {
+            const colors = {'nat-section':'#06b6d4','nat-dim':'#475569','nat-data':'#e2e8f0'};
+            const line = document.createElement('div'); line.textContent = text; if (cls) line.style.color = colors[cls]||'#e2e8f0';
+            const out = document.getElementById('consoleOutput'); if (out) { out.appendChild(line); out.scrollTop = out.scrollHeight; }
+        };
+        if (!window.NATEngine) { this.writeToConsole('ℹ️ Motor NAT no disponible'); return; }
+        if (action === 'show') window.NATEngine.showTable(d, write);
+        else if (action === 'apply') { window.NATEngine.applyRules(d); this.writeToConsole('✅ Reglas NAT aplicadas'); }
+        else if (action === 'clear') { window.NATEngine.clearTable(d); this.writeToConsole('✅ Tabla NAT limpiada'); }
+        else this.writeToConsole('Uso: nat show | nat apply | nat clear');
+    }
+
+    // ─── FIREWALL ─────────────────────────────────────────────────────
+
+    cmdFirewall(parts) {
+        const d = this.currentDevice;
+        if (!d) { this.writeToConsole('❌ Selecciona un dispositivo'); return; }
+        const action = parts[1] || 'show';
+        const write = (text, cls) => {
+            const colors = {'fw-section':'#06b6d4','fw-dim':'#475569','fw-data':'#e2e8f0'};
+            const line = document.createElement('div'); line.textContent = text; if (cls) line.style.color = colors[cls]||'#e2e8f0';
+            const out = document.getElementById('consoleOutput'); if (out) { out.appendChild(line); out.scrollTop = out.scrollHeight; }
+        };
+        if (!window.FirewallEngine) { this.writeToConsole('ℹ️ Motor Firewall no disponible'); return; }
+        if (action === 'show' || action === 'rules') {
+            window.FirewallEngine.showRules(d, write);
+        } else if (action === 'add' && parts.length >= 4) {
+            window.FirewallEngine.addRule(d, parts[2], parts[3], parts[4]||'any', parts[5]||'any');
+            this.writeToConsole(`✅ Regla: ${parts[2]} ${parts[3]} ${parts[4]||'any'} → ${parts[5]||'any'}`);
+        } else if (action === 'clear') {
+            d.accessLists = {}; d._compiledRules = [];
+            this.writeToConsole('✅ Reglas firewall limpiadas');
+        } else {
+            this.writeToConsole('Uso: fw show | fw add <permit|deny> <proto> [src] [dst] | fw clear');
+        }
+    }
+
+    // ─── DIAGNÓSTICO ──────────────────────────────────────────────────
+
+    cmdDiagnose() {
+        if (!window.networkDiag) { this.writeToConsole('ℹ️ Motor de diagnóstico no disponible'); return; }
+        const write = (text, cls) => {
+            const colors = {'diag-header':'#06b6d4','diag-error':'#f87171','diag-warn':'#fbbf24','diag-ok':'#4ade80','diag-dim':'#475569'};
+            const line = document.createElement('div'); line.textContent = text; if (cls) line.style.color = colors[cls]||'#e2e8f0';
+            const out = document.getElementById('consoleOutput'); if (out) { out.appendChild(line); out.scrollTop = out.scrollHeight; }
+        };
+        window.networkDiag.showReport(write);
+    }
+
+    // ─── FAULT ────────────────────────────────────────────────────────
+
+    cmdFault(parts) {
+        const action = parts[1] || 'show';
+        if (action === 'show' || action === 'panel') {
+            window.faultSimulator?.show();
+            this.writeToConsole('💥 Panel de fallas abierto');
+        } else if (action === 'recover' || action === 'all') {
+            window.faultSimulator?.recoverAll();
+            this.writeToConsole('✅ Todas las fallas recuperadas');
+        } else if (action === 'device' && parts[2]) {
+            const dev = this.network.devices.find(d => d.name === parts[2]);
+            if (!dev) { this.writeToConsole(`❌ ${parts[2]} no encontrado`); return; }
+            dev.status = 'down';
+            this.writeToConsole(`💀 ${dev.name} caído`);
+            this.network.draw();
+            if (window.eventLog) window.eventLog.add(`Falla: ${dev.name} caído`);
+        } else {
+            this.writeToConsole('Uso: fault show | fault recover | fault device <nombre>');
+        }
+    }
+
+    // ─── TRAFFIC MONITOR ──────────────────────────────────────────────
+
+    cmdTraffic(parts) {
+        const action = parts[1] || 'show';
+        if (action === 'show' || action === 'open') {
+            window.trafficMonitor?.show();
+            this.writeToConsole('📊 Monitor de tráfico abierto');
+        } else if (action === 'stop') {
+            window.trafficMonitor?.stop();
+            this.writeToConsole('⏹ Monitor detenido');
+        } else {
+            this.writeToConsole('Uso: traffic show | traffic stop');
+        }
+    }
+
+    // ─── CLI IOS ──────────────────────────────────────────────────────
+
+    cmdOpenCLI() {
+        const d = this.currentDevice;
+        if (!d) { this.writeToConsole('❌ Selecciona un dispositivo primero (select <nombre>)'); return; }
+        if (!window.cliPanel) { this.writeToConsole('ℹ️ Panel CLI no disponible'); return; }
+        window.cliPanel.openForDevice(d);
+        this.writeToConsole(`⚡ CLI abierto para ${d.name}`);
+    }
+
+    // ─── EVENT LOG ────────────────────────────────────────────────────
+
+    cmdEventLog(parts) {
+        const action = parts[1] || 'show';
+        if (action === 'show') window.eventLog?.show();
+        else if (action === 'clear') { if (window.eventLog) { window.eventLog.events = []; window.eventLog._render(); } }
+        else window.eventLog?.show();
+        this.writeToConsole('📋 Historial de eventos');
+    }
+
+// ─── VLAN ────────────────────────────────────────────────────────
 
     cmdVlan(parts) {
         if (!this.currentDevice) { this.writeToConsole('❌ Selecciona un dispositivo'); return; }
@@ -658,10 +617,40 @@ class NetworkConsole {
         this.writeToConsole('  bandwidth [Mbps]');
         this.writeToConsole('  fail <nombre> [up|down]  — Simular falla');
         this.writeToConsole('');
+        this.writeToConsole('🆕 NUEVAS FUNCIONALIDADES:');
+        this.writeToConsole('  dhcp enable|renew|release|leases  — DHCP proceso 4 pasos visual');
+        this.writeToConsole('  nat show|apply|clear              — NAT/PAT tabla de traducción');
+        this.writeToConsole('  fw show|add|clear                 — Reglas de Firewall');
+        this.writeToConsole('  diag / diagnose                   — Diagnóstico automático de red');
+        this.writeToConsole('  fault show|recover|device <n>     — Simulación de fallas');
+        this.writeToConsole('  traffic show|stop                 — Monitor de tráfico en vivo');
+        this.writeToConsole('  cli / ios                         — Abrir CLI Cisco IOS del dispositivo');
+        this.writeToConsole('  log / events                      — Historial de eventos');
+        this.writeToConsole('');
         this.writeToConsole('🔧 GENERALES:');
         this.writeToConsole('  select <nombre>          — Seleccionar dispositivo');
         this.writeToConsole('  show devices|connections|routes|arp|mac|links|bandwidth');
         this.writeToConsole('  clear                    — Limpiar consola');
+        this.writeToConsole('');
+        this.writeToConsole('⚡ CLI IOS (NUEVO):');
+        this.writeToConsole('  cli / ios                — Abrir CLI Cisco IOS del dispositivo');
+        this.writeToConsole('  (En CLI: enable, conf t, interface, ip address, vlan, etc.)');
+        this.writeToConsole('');
+        this.writeToConsole('🌐 NAT / FIREWALL (NUEVO):');
+        this.writeToConsole('  nat show|apply|clear     — Tabla y reglas NAT/PAT');
+        this.writeToConsole('  fw show|add|clear        — Reglas de Firewall/ACL');
+        this.writeToConsole('  fw add <permit|deny> <proto> [src] [dst]');
+        this.writeToConsole('');
+        this.writeToConsole('📊 MONITOREO (NUEVO):');
+        this.writeToConsole('  traffic show|stop        — Monitor de tráfico en vivo');
+        this.writeToConsole('  diagnose                 — Diagnóstico automático de red');
+        this.writeToConsole('  fault show|recover       — Panel de simulación de fallas');
+        this.writeToConsole('  log show|clear           — Historial de eventos');
+        this.writeToConsole('');
+        this.writeToConsole('📡 DHCP REAL (NUEVO):');
+        this.writeToConsole('  dhcp enable              — DISCOVER→OFFER→REQUEST→ACK');
+        this.writeToConsole('  dhcp release             — Liberar IP');
+        this.writeToConsole('  dhcp leases              — Ver leases del servidor');
     }
 
     writeToConsole(text) {
