@@ -86,8 +86,23 @@ class NetworkDevice {
     disconnectInterface(intf){if(intf.connectedTo){const o=intf.connectedInterface;if(o){o.connectedTo=null;o.connectedInterface=null;}intf.connectedTo=null;intf.connectedInterface=null;return true;}return false;}
 }
 class Internet extends NetworkDevice {
-    constructor(id,name,x,y){super(id,name,'Internet',x,y);for(let i=0;i<8;i++)this.addInterface(`WL${i}`,'WAN','∞','wireless');this.ipConfig={ipAddress:'0.0.0.0',subnetMask:'0.0.0.0',gateway:''};}
+    constructor(id,name,x,y){
+        super(id,name,'Internet',x,y);
+        for(let i=0;i<8;i++)this.addInterface(`WL${i}`,'WAN','∞','wireless');
+        this.ipConfig={ipAddress:'8.8.8.8',subnetMask:'255.0.0.0',gateway:''};
+        // Internet actúa como servidor DHCP para routers WAN (IPs públicas)
+        this.dhcpServer={
+            poolName:'public',
+            network:'200.100.0.0/16',
+            subnetMask:'255.255.0.0',
+            gateway:'8.8.8.8',
+            dns:['8.8.8.8','1.1.1.1'],
+            leases:{},
+            range:{start:'200.100.1.1',end:'200.100.1.254'}
+        };
+    }
 }
+
 class ISP extends NetworkDevice {
     constructor(id,name,x,y,bw=1000){super(id,name,'ISP',x,y);this.bandwidth=bw;this.planName='Fibra';this.customers=[];this.publicIPs=[];this.defaultIP='200.100.50.1';
     this.addInterface('WL-UP','WAN','∞','wireless');
@@ -121,6 +136,8 @@ class Router extends NetworkDevice {
             if(intf){intf.ipConfig={ipAddress:gw,subnetMask:'255.255.255.0',vlan:vlanId};intf.vlan=vlanId;}
         }
         this.dhcpServer={poolName:'default',network:'192.168.1.0/24',subnetMask:'255.255.255.0',gateway:'192.168.1.254',dns:['8.8.8.8'],leases:{},range:{start:'192.168.1.10',end:'192.168.1.200'}};
+        // IP global del router = gateway de la primera VLAN (LAN0)
+        this.ipConfig={ipAddress:'192.168.1.254',subnetMask:'255.255.255.0',gateway:''};
     }
     getVlanForInterface(intfName){return this.vlanConfig[intfName]||null;}
     setVlan(intfName,vlanId,network,gateway){
@@ -153,11 +170,57 @@ class WirelessBridge extends NetworkDevice {
     constructor(id,name,x,y){super(id,name,'Bridge',x,y);this.ssid=`Bridge-${name}`;this.band='5GHz';this.mode='bridge';this.addInterface('WL-LINK','LAN','300Mbps','wireless');this.addInterface('ETH0','LAN','1Gbps','cobre');this.ipConfig={ipAddress:'0.0.0.0',subnetMask:'255.255.255.0',gateway:''};}
 }
 class AccessPoint extends NetworkDevice {
-    constructor(id,name,x,y){super(id,name,'AP',x,y);this.ssid=`AP-${name}`;this.band='2.4/5GHz';this.security='WPA2';this.wirelessEnabled=true;this.connectedClients=[];this.addInterface('ETH-UP','LAN','1Gbps','cobre');this.addInterface('WLAN0','LAN','300Mbps','wireless');this.ipConfig={ipAddress:'0.0.0.0',subnetMask:'255.255.255.0',gateway:''};}
+    constructor(id,name,x,y){
+        super(id,name,'AP',x,y);
+        this.ssid=`AP-${name}`;this.band='2.4/5GHz';this.security='WPA2';
+        this.wirelessEnabled=true;this.connectedClients=[];
+        // ETH-UP: uplink al switch/AC/router
+        this.addInterface('ETH-UP','LAN','1Gbps','cobre');
+        // WLAN0: interfaz uplink inalámbrica (si viene por aire del AC)
+        this.addInterface('WLAN0','LAN','300Mbps','wireless');
+        // WLAN1-WLAN4: puertos para clientes inalámbricos (laptops, celulares)
+        for(let i=1;i<=4;i++)this.addInterface(`WLAN${i}`,'LAN','300Mbps','wireless');
+        this.ipConfig={ipAddress:'0.0.0.0',subnetMask:'255.255.255.0',gateway:'',dhcpEnabled:true};
+        // El AP tiene su propio sub-pool DHCP para pasar IPs a sus clientes
+        // Se configura dinámicamente cuando el AP obtiene su propia IP
+        this.dhcpServer=null;
+    }
+    // Cuando el AP obtiene IP, configura su propio relay DHCP
+    _setupDHCPRelay(myIp, pool){
+        // AP actúa como relay: sus clientes van al mismo pool del router
+        // pero el AP excluye su propia IP del pool
+        this._relayPool = pool;
+        this._relayPool.excluded = this._relayPool.excluded||[];
+        if(!this._relayPool.excluded.includes(myIp)) this._relayPool.excluded.push(myIp);
+    }
+    requestDHCP(){
+        if(window.dhcpEngine){
+            window.dhcpEngine.runDHCP(this,
+                msg=>window.networkConsole?.writeToConsole(msg),
+                result=>{if(result&&window.simulator)window.simulator.draw();});
+            return true;
+        }
+        return null;
+    }
+    // getDHCPPool: cuando un cliente se conecta al AP, el AP relay al pool del router
+    getDHCPPool(){
+        // Buscar el pool del dispositivo al que estamos conectados (uplink)
+        const uplinkConn = (window.simulator?.connections||[]).find(c=>{
+            const myIntf = c.from===this ? c.fromInterface : c.to===this ? c.toInterface : null;
+            return myIntf && (myIntf.name==='ETH-UP'||myIntf.name==='WLAN0');
+        });
+        if(!uplinkConn) return null;
+        const uplink = uplinkConn.from===this ? uplinkConn.to : uplinkConn.from;
+        // Pedir el pool al uplink (puede ser switch, AC, router)
+        if(uplink.dhcpServer) return uplink.dhcpServer;
+        if(uplink.getDHCPPool) return uplink.getDHCPPool();
+        return null;
+    }
 }
 class AC extends NetworkDevice {
     constructor(id,name,x,y){super(id,name,'AC',x,y);this.managedAPs=[];this.addInterface('WAN0','WAN','1Gbps','cobre');for(let i=0;i<8;i++)this.addInterface(`LAN${i}`,'LAN','1Gbps','cobre');this.addInterface('MGMT','MGMT','1Gbps','cobre');
-    this.dhcpServer={poolName:'default',network:'192.168.10.0/24',subnetMask:'255.255.255.0',gateway:'192.168.10.1',dns:['8.8.8.8'],leases:{},range:{start:'192.168.10.10',end:'192.168.10.200'}};this.ipConfig={ipAddress:'192.168.10.1',subnetMask:'255.255.255.0',gateway:''};}
+    this.dhcpServer={poolName:'default',network:'192.168.10.0/24',subnetMask:'255.255.255.0',gateway:'192.168.10.1',dns:['8.8.8.8'],leases:{},range:{start:'192.168.10.10',end:'192.168.10.200'}};this.ipConfig={ipAddress:'0.0.0.0',subnetMask:'255.255.255.0',gateway:'',dhcpEnabled:true};}
+    requestDHCP(){if(window.dhcpEngine){window.dhcpEngine.runDHCP(this,msg=>window.networkConsole?.writeToConsole(msg),result=>{if(result&&window.simulator)window.simulator.draw();});return true;}return null;}
 }
 class Firewall extends NetworkDevice {
     constructor(id,name,x,y){super(id,name,'Firewall',x,y);this.rules=[];this.addInterface('WAN0','WAN','10Gbps','fibra');this.addInterface('WAN1','WAN','10Gbps','fibra');for(let i=0;i<4;i++)this.addInterface(`LAN${i}`,'LAN','1Gbps','cobre');this.addInterface('DMZ0','DMZ','1Gbps','cobre');this.ipConfig={ipAddress:'10.0.0.1',subnetMask:'255.255.255.0',gateway:''};}
@@ -239,21 +302,21 @@ class PC extends NetworkDevice {
     constructor(id,name,x,y){super(id,name,'PC',x,y);this.addInterface('ETH0','LAN','1Gbps','cobre');this.addInterface('WLAN0','LAN','300Mbps','wireless');this.ipConfig={ipAddress:'0.0.0.0',subnetMask:'255.255.255.0',gateway:'',dns:['8.8.8.8'],dhcpEnabled:true};this.routingTable=[];}
     enableDHCP(){this.ipConfig.dhcpEnabled=true;this.ipConfig.ipAddress='0.0.0.0';}
     setStaticIP(ip,mask,gw){this.ipConfig.dhcpEnabled=false;this.ipConfig.ipAddress=ip;this.ipConfig.subnetMask=mask;this.ipConfig.gateway=gw;}
-    requestDHCP(){if(!this.ipConfig.dhcpEnabled)return false;for(const conn of(window.simulator?.connections||[])){let other=null;if(conn.from===this)other=conn.to;else if(conn.to===this)other=conn.from;if(other){const pool=other.dhcpServer||(other.getDHCPPool&&other.getDHCPPool());if(pool){const base=pool.network.split('/')[0].split('.');const ip=`${base[0]}.${base[1]}.${base[2]}.${Math.floor(Math.random()*190)+10}`;this.ipConfig.ipAddress=ip;this.ipConfig.subnetMask=pool.subnetMask||'255.255.255.0';this.ipConfig.gateway=pool.gateway||'';return{ip,mask:this.ipConfig.subnetMask,gateway:this.ipConfig.gateway,dns:pool.dns||['8.8.8.8']};}}}return null;}
+    requestDHCP(){if(!this.ipConfig.dhcpEnabled)return false;if(window.dhcpEngine){window.dhcpEngine.runDHCP(this,msg=>window.networkConsole?.writeToConsole(msg),result=>{if(result&&window.simulator)window.simulator.draw();});return true;}return null;}
 }
 class Laptop extends NetworkDevice {
     constructor(id,name,x,y){super(id,name,'Laptop',x,y);this.addInterface('ETH0','LAN','1Gbps','cobre');this.addInterface('WLAN0','LAN','300Mbps','wireless');this.ipConfig={ipAddress:'0.0.0.0',subnetMask:'255.255.255.0',gateway:'',dns:['8.8.8.8'],dhcpEnabled:true};}
     enableDHCP(){this.ipConfig.dhcpEnabled=true;this.ipConfig.ipAddress='0.0.0.0';}
     setStaticIP(ip,mask,gw){this.ipConfig.dhcpEnabled=false;this.ipConfig.ipAddress=ip;this.ipConfig.subnetMask=mask;this.ipConfig.gateway=gw;}
-    requestDHCP(){for(const conn of(window.simulator?.connections||[])){let other=null;if(conn.from===this)other=conn.to;else if(conn.to===this)other=conn.from;if(other){const pool=other.dhcpServer||(other.getDHCPPool&&other.getDHCPPool());if(pool){const base=pool.network.split('/')[0].split('.');const ip=`${base[0]}.${base[1]}.${base[2]}.${Math.floor(Math.random()*190)+10}`;this.ipConfig.ipAddress=ip;return{ip};}}}return null;}
+    requestDHCP(){if(window.dhcpEngine){window.dhcpEngine.runDHCP(this,msg=>window.networkConsole?.writeToConsole(msg),result=>{if(result&&window.simulator)window.simulator.draw();});return true;}return null;}
 }
 class Phone extends NetworkDevice {
     constructor(id,name,x,y){super(id,name,'Phone',x,y);this.addInterface('WLAN0','LAN','150Mbps','wireless');this.ipConfig={ipAddress:'0.0.0.0',subnetMask:'255.255.255.0',gateway:'',dhcpEnabled:true};}
-    requestDHCP(){for(const conn of(window.simulator?.connections||[])){let other=null;if(conn.from===this)other=conn.to;else if(conn.to===this)other=conn.from;if(other){const pool=other.dhcpServer||(other.getDHCPPool&&other.getDHCPPool());if(pool){const base=pool.network.split('/')[0].split('.');const ip=`${base[0]}.${base[1]}.${base[2]}.${Math.floor(Math.random()*190)+10}`;this.ipConfig.ipAddress=ip;return{ip};}}}return null;}
+    requestDHCP(){if(window.dhcpEngine){window.dhcpEngine.runDHCP(this,msg=>window.networkConsole?.writeToConsole(msg),result=>{if(result&&window.simulator)window.simulator.draw();});return true;}return null;}
 }
 class Printer extends NetworkDevice {
     constructor(id,name,x,y){super(id,name,'Printer',x,y);this.addInterface('ETH0','LAN','100Mbps','cobre');this.addInterface('WLAN0','LAN','150Mbps','wireless');this.ipConfig={ipAddress:'0.0.0.0',subnetMask:'255.255.255.0',gateway:'',dhcpEnabled:true};}
-    requestDHCP(){for(const conn of(window.simulator?.connections||[])){let other=null;if(conn.from===this)other=conn.to;else if(conn.to===this)other=conn.from;if(other){const pool=other.dhcpServer||(other.getDHCPPool&&other.getDHCPPool());if(pool){const base=pool.network.split('/')[0].split('.');const ip=`${base[0]}.${base[1]}.${base[2]}.${Math.floor(Math.random()*190)+10}`;this.ipConfig.ipAddress=ip;return{ip};}}}return null;}
+    requestDHCP(){if(window.dhcpEngine){window.dhcpEngine.runDHCP(this,msg=>window.networkConsole?.writeToConsole(msg),result=>{if(result&&window.simulator)window.simulator.draw();});return true;}return null;}
 }
 class SDWAN extends NetworkDevice {
     constructor(id,name,x,y){
@@ -300,7 +363,7 @@ class IPPhone extends NetworkDevice {
         this.addInterface('PC-PORT','LAN','100Mbps','cobre');
         this.ipConfig={ipAddress:'0.0.0.0',subnetMask:'255.255.255.0',gateway:'',dhcpEnabled:true};
     }
-    requestDHCP(){for(const conn of(window.simulator?.connections||[])){let other=null;if(conn.from===this)other=conn.to;else if(conn.to===this)other=conn.from;if(other){const pool=other.dhcpServer||(other.getDHCPPool&&other.getDHCPPool());if(pool){const base=pool.network.split('/')[0].split('.');const ip=`${base[0]}.${base[1]}.${base[2]}.${Math.floor(Math.random()*190)+10}`;this.ipConfig.ipAddress=ip;return{ip};}}}return null;}
+    requestDHCP(){if(window.dhcpEngine){window.dhcpEngine.runDHCP(this,msg=>window.networkConsole?.writeToConsole(msg),result=>{if(result&&window.simulator)window.simulator.draw();});return true;}return null;}
 }
 
 class ControlTerminal extends NetworkDevice {
@@ -311,7 +374,7 @@ class ControlTerminal extends NetworkDevice {
         this.addInterface('RS485','SERIAL','N/A','cobre');
         this.ipConfig={ipAddress:'0.0.0.0',subnetMask:'255.255.255.0',gateway:'',dhcpEnabled:true};
     }
-    requestDHCP(){for(const conn of(window.simulator?.connections||[])){let other=null;if(conn.from===this)other=conn.to;else if(conn.to===this)other=conn.from;if(other){const pool=other.dhcpServer||(other.getDHCPPool&&other.getDHCPPool());if(pool){const base=pool.network.split('/')[0].split('.');const ip=`${base[0]}.${base[1]}.${base[2]}.${Math.floor(Math.random()*190)+10}`;this.ipConfig.ipAddress=ip;return{ip};}}}return null;}
+    requestDHCP(){if(window.dhcpEngine){window.dhcpEngine.runDHCP(this,msg=>window.networkConsole?.writeToConsole(msg),result=>{if(result&&window.simulator)window.simulator.draw();});return true;}return null;}
 }
 
 class PayTerminal extends NetworkDevice {
@@ -322,7 +385,7 @@ class PayTerminal extends NetworkDevice {
         this.addInterface('WLAN0','LAN','150Mbps','wireless');
         this.ipConfig={ipAddress:'0.0.0.0',subnetMask:'255.255.255.0',gateway:'',dhcpEnabled:true};
     }
-    requestDHCP(){for(const conn of(window.simulator?.connections||[])){let other=null;if(conn.from===this)other=conn.to;else if(conn.to===this)other=conn.from;if(other){const pool=other.dhcpServer||(other.getDHCPPool&&other.getDHCPPool());if(pool){const base=pool.network.split('/')[0].split('.');const ip=`${base[0]}.${base[1]}.${base[2]}.${Math.floor(Math.random()*190)+10}`;this.ipConfig.ipAddress=ip;return{ip};}}}return null;}
+    requestDHCP(){if(window.dhcpEngine){window.dhcpEngine.runDHCP(this,msg=>window.networkConsole?.writeToConsole(msg),result=>{if(result&&window.simulator)window.simulator.draw();});return true;}return null;}
 }
 
 class Alarm extends NetworkDevice {
@@ -333,7 +396,7 @@ class Alarm extends NetworkDevice {
         this.addInterface('RS232','SERIAL','N/A','cobre');
         this.ipConfig={ipAddress:'0.0.0.0',subnetMask:'255.255.255.0',gateway:'',dhcpEnabled:true};
     }
-    requestDHCP(){for(const conn of(window.simulator?.connections||[])){let other=null;if(conn.from===this)other=conn.to;else if(conn.to===this)other=conn.from;if(other){const pool=other.dhcpServer||(other.getDHCPPool&&other.getDHCPPool());if(pool){const base=pool.network.split('/')[0].split('.');const ip=`${base[0]}.${base[1]}.${base[2]}.${Math.floor(Math.random()*190)+10}`;this.ipConfig.ipAddress=ip;return{ip};}}}return null;}
+    requestDHCP(){if(window.dhcpEngine){window.dhcpEngine.runDHCP(this,msg=>window.networkConsole?.writeToConsole(msg),result=>{if(result&&window.simulator)window.simulator.draw();});return true;}return null;}
 }
 
 class Server extends NetworkDevice {

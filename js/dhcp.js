@@ -9,36 +9,141 @@ class DHCPEngine {
         this._counter = 1;
     }
 
-    // Encuentra el servidor DHCP alcanzable desde un dispositivo cliente
+    // Encuentra el servidor DHCP alcanzable desde un dispositivo cliente.
+    // Lógica:
+    //   • BFS desde el cliente hacia TODOS los vecinos
+    //   • Prioridad: Router/Firewall > RouterWifi > AC > Switch/SwitchPoE > AP
+    //     (nunca servir DHCP desde un AP a otro dispositivo de infraestructura)
+    //   • El gateway que se asigna = IP del primer salto real del cliente (su vecino directo)
+    //   • Si ese primer salto no tiene IP aún, usar el gateway del pool de la VLAN
+    //   • NUNCA asignar como gateway la IP del propio cliente
     _findDHCPServer(client) {
-        const visited = new Set();
-        const queue   = [client];
+        // Prioridad de tipo de servidor (menor número = mayor prioridad)
+        const PRIO = { Router:1, Firewall:1, RouterWifi:2, AC:3, Switch:4, SwitchPoE:4, AP:99 };
+
+        const visited  = new Set();
+        // Cada candidato: { server, pool, gwIntf, firstHop, prio }
+        const candidates = [];
+        // BFS
+        const queue = [{ dev: client, gwIntf: null, firstHop: null }];
         while (queue.length) {
-            const cur = queue.shift();
+            const { dev: cur, gwIntf, firstHop } = queue.shift();
             if (visited.has(cur.id)) continue;
             visited.add(cur.id);
+
             if (cur !== client && (cur.dhcpServer || cur.getDHCPPool)) {
-                return cur;
+                const prio = PRIO[cur.type] ?? 50;
+                candidates.push({ dev: cur, gwIntf, firstHop, prio });
             }
+
             this.sim.connections.forEach(c => {
-                const other = c.from === cur ? c.to : c.to === cur ? c.from : null;
-                if (other && !visited.has(other.id)) queue.push(other);
+                const isFrom = c.from === cur;
+                const other  = isFrom ? c.to : c.to === cur ? c.from : null;
+                if (other && !visited.has(other.id)) {
+                    const gwSideIntf = isFrom ? c.toInterface : c.fromInterface;
+                    const hop        = firstHop || other;   // fijado en el primer nivel
+                    queue.push({ dev: other, gwIntf: gwSideIntf || null, firstHop: hop });
+                }
             });
         }
-        return null;
+
+        if (!candidates.length) return null;
+
+        // Ordenar por prioridad y tomar el mejor
+        candidates.sort((a, b) => a.prio - b.prio);
+        const { dev: srv, gwIntf, firstHop } = candidates[0];
+
+        // IP del primer salto real del cliente (su vecino directo)
+        // Buscar la IP de la interfaz específica del firstHop que conecta hacia el cliente
+        // (por ejemplo: en el Router, LAN4 tiene 192.168.4.254, no usar ipConfig global)
+        let firstHopIP = null;
+        if (firstHop) {
+            // Encontrar la conexión entre cliente y firstHop
+            const linkConn = this.sim.connections.find(c =>
+                (c.from === client && c.to === firstHop) ||
+                (c.to === client   && c.from === firstHop)
+            );
+            if (linkConn) {
+                // Interfaz del firstHop que apunta al cliente
+                const firstHopIntf = linkConn.from === firstHop
+                    ? linkConn.fromInterface
+                    : linkConn.toInterface;
+                // Usar IP de esa interfaz si existe, sino ipConfig global
+                firstHopIP = firstHopIntf?.ipConfig?.ipAddress || firstHop.ipConfig?.ipAddress;
+            } else {
+                firstHopIP = firstHop.ipConfig?.ipAddress;
+            }
+        }
+        // Gateway válido = IP del primer salto, siempre que:
+        //   1. No sea '0.0.0.0'  2. No sea la IP del propio cliente
+        const clientIP = client.ipConfig?.ipAddress;
+        const useGW    = (firstHopIP && firstHopIP !== '0.0.0.0' && firstHopIP !== clientIP)
+                         ? firstHopIP : null;
+
+        // Caso 1: Router/RouterWifi con VLANs → pool por interfaz
+        if (gwIntf && srv.vlanConfig && srv.getVlanForInterface) {
+            const vlanCfg = srv.getVlanForInterface(gwIntf.name);
+            if (vlanCfg) {
+                const base = vlanCfg.network.split('/')[0].split('.');
+                if (!srv._vlanLeases) srv._vlanLeases = {};
+                const vKey = `vlan${vlanCfg.vlanId}`;
+                if (!srv._vlanLeases[vKey]) srv._vlanLeases[vKey] = {};
+                const gw   = useGW || vlanCfg.gateway;
+                const pool = {
+                    poolName  : `VLAN${vlanCfg.vlanId}`,
+                    network   : vlanCfg.network,
+                    subnetMask: '255.255.255.0',
+                    gateway   : gw,
+                    dns       : (srv.dhcpServer || {}).dns || ['8.8.8.8'],
+                    leases    : srv._vlanLeases[vKey],
+                    range     : {
+                        start: `${base[0]}.${base[1]}.${base[2]}.10`,
+                        end  : `${base[0]}.${base[1]}.${base[2]}.200`
+                    }
+                };
+                return { _proxyFor: srv, dhcpServer: pool, name: `${srv.name}(VLAN${vlanCfg.vlanId})` };
+            }
+        }
+
+        // Caso 2: AC, RouterWifi, Switch con dhcpServer directo
+        const rawPool = srv.dhcpServer || (srv.getDHCPPool && srv.getDHCPPool());
+        if (rawPool && useGW) rawPool.gateway = useGW;
+        return srv;
     }
 
-    // Asigna IP desde un pool de DHCP
+    // Asigna IP desde un pool de DHCP — garantiza unicidad global
     _assignIP(pool, clientId) {
-        // Revisar si ya tiene lease
-        if (this.leases[clientId]) return this.leases[clientId];
+        // Si este cliente ya tiene lease, reusar solo si pertenece a la misma red del pool
+        if (this.leases[clientId]) {
+            const cachedIP = this.leases[clientId];
+            const poolBase = (pool.network || '0.0.0.0/0').split('/')[0].split('.').slice(0,3).join('.');
+            const cachedBase = cachedIP.split('.').slice(0,3).join('.');
+            if (poolBase === cachedBase) return cachedIP;
+            // Red diferente (cambió de VLAN/puerto) → borrar lease viejo y reasignar
+            delete this.leases[clientId];
+        }
 
         const base    = (pool.network||'192.168.1.0/24').split('/')[0].split('.');
         const start   = pool.range?.start || `${base[0]}.${base[1]}.${base[2]}.10`;
         const end     = pool.range?.end   || `${base[0]}.${base[1]}.${base[2]}.200`;
         const startN  = parseInt(start.split('.')[3]);
         const endN    = parseInt(end.split('.')[3]);
-        const excl    = new Set(Object.values(pool.leases||{}).map(l=>l.ip));
+
+        // Construir conjunto de IPs ya en uso:
+        // 1) leases registrados en el pool
+        const excl = new Set(Object.values(pool.leases||{}).map(l=>l.ip));
+        // 2) IPs de todos los dispositivos en la red (previene duplicados aunque el pool no esté sincronizado)
+        if (this.sim?.devices) {
+            this.sim.devices.forEach(d => {
+                const ip = d.ipConfig?.ipAddress;
+                if (ip && ip !== '0.0.0.0') excl.add(ip);
+                // También revisar interfaces con IP propia (ej: puertos VLAN del router)
+                (d.interfaces||[]).forEach(intf => {
+                    const iip = intf.ipConfig?.ipAddress;
+                    if (iip && iip !== '0.0.0.0') excl.add(iip);
+                });
+            });
+        }
         if (pool.excluded) pool.excluded.forEach(e=>excl.add(e));
         if (pool.gateway) excl.add(pool.gateway);
 
@@ -129,6 +234,21 @@ class DHCPEngine {
 
             write(`[DHCP] ✅ Asignada ${ip} / ${mask}  GW:${gw}  DNS:${dns[0]}`, 'dhcp-ok');
             write(`[DHCP]    Servidor: ${server.name}  Lease: ${Math.round((pool.lease||86400)/3600)}h`, 'dhcp-dim');
+
+            // Si el cliente es un AC o RouterWifi con dhcpServer propio:
+            //   • Su IP propia (ipConfig) ya fue asignada arriba
+            //   • El gateway de su pool interno debe ser SU PROPIA IP nueva
+            //     (no tocar network/range — el AC sirve su propia subred a los APs)
+            if (client.dhcpServer && ip && ip !== '0.0.0.0') {
+                // El AC/RouterWifi anuncia su propia IP como gateway a sus clientes
+                client.dhcpServer.gateway = ip;
+                // Excluir su propia IP del pool para no asignarla a nadie más
+                if (!client.dhcpServer.excluded) client.dhcpServer.excluded = [];
+                if (!client.dhcpServer.excluded.includes(ip)) {
+                    client.dhcpServer.excluded.push(ip);
+                }
+                // NO tocar network/range — el AC mantiene su propia subred intacta
+            }
 
             // Reconstruir tablas de routing
             if (typeof buildRoutingTables === 'function') {

@@ -28,6 +28,31 @@ const NetworkPersistence = {
             if (d.bandwidth  !== undefined) obj.bandwidth  = d.bandwidth;
             if (d.planName   !== undefined) obj.planName   = d.planName;
             if (d.vlanConfig !== undefined) obj.vlanConfig = JSON.parse(JSON.stringify(d.vlanConfig));
+            // Guardar VLANs y configuración de puertos del switch
+            if (d.vlans !== undefined) {
+                try { obj.vlans = JSON.parse(JSON.stringify(d.vlans)); } catch(e) {}
+            }
+            if (d._vlanEngine?.portConfig) {
+                try {
+                    const pc = {};
+                    Object.entries(d._vlanEngine.portConfig).forEach(([k, v]) => {
+                        pc[k] = {
+                            mode: v.mode,
+                            vlan: v.vlan,
+                            nativeVlan: v.nativeVlan,
+                            allowedVlans: v.allowedVlans ? [...v.allowedVlans] : [],
+                        };
+                    });
+                    obj._vlanPortConfig = pc;
+                } catch(e) {}
+            }
+            // Guardar tabla de routing si es router
+            if (d.routingTable?.entries) {
+                try {
+                    const entries = d.routingTable.entries().filter(r => r._static);
+                    if (entries.length) obj._staticRoutes = entries.map(r => ({ ...r }));
+                } catch(e) {}
+            }
             if (d.inheritedVlan !== undefined) obj.inheritedVlan = d.inheritedVlan ? { ...d.inheritedVlan } : null;
             if (d.loadBalancing !== undefined) obj.loadBalancing = d.loadBalancing;
             if (d.backupMode    !== undefined) obj.backupMode    = d.backupMode;
@@ -43,6 +68,16 @@ const NetworkPersistence = {
         const connections = sim.connections.map(c => ({
             fromId: c.from.id, toId: c.to.id,
             fromIntf: c.fromInterface.name, toIntf: c.toInterface.name,
+            status: c.status || 'up',
+            speed: c.speed,
+            type: c.type,
+            // Guardar latencia/pérdida del enlace si fue personalizada
+            linkState: c._linkState ? {
+                bandwidth: c._linkState.bandwidth,
+                latency: c._linkState.latency,
+                lossRate: c._linkState.lossRate,
+                status: c._linkState.status,
+            } : null,
         }));
 
         const annotations = (sim.annotations || []).map(a => ({ ...a }));
@@ -99,15 +134,72 @@ const NetworkPersistence = {
             });
         });
 
-        // Reconstruir conexiones usando IDs
+        // Restaurar vlans y portConfig de switches ANTES de conectar
         const devMap = new Map(sim.devices.map(d => [d.id, d]));
+        sim.devices.forEach(dev => {
+            const sd = data.devices.find(x => x.id === dev.id);
+            if (!sd) return;
+            // Restaurar vlans del switch
+            if (sd.vlans && dev.vlans !== undefined) {
+                try { dev.vlans = JSON.parse(JSON.stringify(sd.vlans)); } catch(e) {}
+            }
+        });
+
+        // Reconstruir conexiones usando IDs
         (data.connections || []).forEach(sc => {
             const d1 = devMap.get(sc.fromId), d2 = devMap.get(sc.toId);
             if (!d1 || !d2) return;
             const i1 = d1.interfaces.find(i => i.name === sc.fromIntf);
             const i2 = d2.interfaces.find(i => i.name === sc.toIntf);
             if (!i1 || !i2) return;
-            sim.connectDevices(d1, d2, i1, i2, null);
+            const result = sim.connectDevices(d1, d2, i1, i2, null);
+            // Restaurar status y linkState del cable
+            if (result?.success !== false) {
+                const conn = sim.connections.find(c =>
+                    c.from === d1 && c.to === d2 &&
+                    c.fromInterface.name === sc.fromIntf
+                );
+                if (conn) {
+                    conn.status = sc.status || 'up';
+                    if (conn._linkState && sc.linkState) {
+                        conn._linkState.bandwidth = sc.linkState.bandwidth ?? conn._linkState.bandwidth;
+                        conn._linkState.latency   = sc.linkState.latency   ?? conn._linkState.latency;
+                        conn._linkState.lossRate  = sc.linkState.lossRate  ?? 0;
+                        conn._linkState.setStatus(sc.linkState.status || 'up');
+                    }
+                    // Sincronizar engine si el cable estaba caído
+                    if (conn.status === 'down') {
+                        sim.engine.setEdgeStatus(d1.id, d2.id, 'down');
+                    }
+                }
+            }
+        });
+
+        // Restaurar portConfig de VLANEngine después de conectar (el engine se crea al conectar)
+        sim.devices.forEach(dev => {
+            const sd = data.devices.find(x => x.id === dev.id);
+            if (!sd) return;
+            if (sd._vlanPortConfig && dev._vlanEngine) {
+                Object.entries(sd._vlanPortConfig).forEach(([intfName, cfg]) => {
+                    try {
+                        if (cfg.mode === 'access') {
+                            dev._vlanEngine.setAccess(intfName, cfg.vlan);
+                        } else if (cfg.mode === 'trunk') {
+                            dev._vlanEngine.setTrunk(intfName, cfg.allowedVlans || [], cfg.nativeVlan);
+                        }
+                    } catch(e) {}
+                });
+            }
+            // Restaurar rutas estáticas
+            if (sd._staticRoutes?.length && dev.routingTable) {
+                sd._staticRoutes.forEach(r => {
+                    try {
+                        dev.routingTable.add(r.network, r.mask, r.gateway, r.iface, r.metric);
+                        const entry = dev.routingTable.routes.find(x => x.network === r.network);
+                        if (entry) { entry._static = true; entry._type = r._type; }
+                    } catch(e) {}
+                });
+            }
         });
 
         // Restaurar anotaciones
@@ -121,6 +213,16 @@ const NetworkPersistence = {
     download(sim)       { downloadNetwork(sim); },
     importFile(sim, f)  { return importNetwork(sim, f); },
 };
+
+// ── Autoguardado ─────────────────────────────────────────────────────
+function startAutoSave(sim, intervalMs = 30000) {
+    return setInterval(() => {
+        if (sim.devices.length > 0) {
+            saveNetwork(sim);
+            console.debug('[AutoSave] Red guardada');
+        }
+    }, intervalMs);
+}
 
 /**
  * Guarda la red serializada en localStorage.

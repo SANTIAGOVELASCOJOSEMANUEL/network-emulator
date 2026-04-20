@@ -167,6 +167,15 @@ class NetworkRenderer {
         const D = 38;
         this._portBadge(cn.from.x + Math.cos(angle)*D, cn.from.y + Math.sin(angle)*D - 14, cn.fromInterface.name, cn.type);
         this._portBadge(cn.to.x   - Math.cos(angle)*D, cn.to.y   - Math.sin(angle)*D - 14, cn.toInterface.name,   cn.type);
+        // Icono de fallo en el centro del cable
+        const mx = (cn.from.x + cn.to.x) / 2, my = (cn.from.y + cn.to.y) / 2;
+        const r2 = 8 / zoom;
+        ctx.fillStyle = 'rgba(244,63,94,.15)'; ctx.strokeStyle = '#f43f5e'; ctx.lineWidth = 1.2/zoom;
+        ctx.beginPath(); ctx.arc(mx, my, r2, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+        ctx.strokeStyle = '#f43f5e'; ctx.lineWidth = 1.8/zoom;
+        const s = r2 * 0.55;
+        ctx.beginPath(); ctx.moveTo(mx-s, my-s); ctx.lineTo(mx+s, my+s); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(mx+s, my-s); ctx.lineTo(mx-s, my+s); ctx.stroke();
         ctx.restore();
     }
 

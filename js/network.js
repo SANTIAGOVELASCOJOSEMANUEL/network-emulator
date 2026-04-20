@@ -278,13 +278,22 @@ class NetworkSimulator {
         // Registrar en engine con LinkState real
         this.engine.addEdge(d1.id, d2.id, ls.dijkstraWeight(), 'up', ls);
 
-        // DHCP automático tras conectar
+        // DHCP automático tras conectar — delegar al DHCPEngine (VLAN-aware)
         [d1, d2].forEach(d => {
-            if (d.ipConfig?.dhcpEnabled && d.requestDHCP) {
+            if (d.ipConfig?.dhcpEnabled) {
                 setTimeout(() => {
-                    const r = d.requestDHCP();
-                    if (r && window.networkConsole) window.networkConsole.writeToConsole(`📡 ${d.name} → ${r.ip} (DHCP)`);
-                    this.draw();
+                    if (window.dhcpEngine) {
+                        window.dhcpEngine.runDHCP(
+                            d,
+                            msg => window.networkConsole?.writeToConsole(msg),
+                            result => { if (result) this.draw(); }
+                        );
+                    } else if (d.requestDHCP) {
+                        // fallback por si dhcpEngine aún no inicializó
+                        const r = d.requestDHCP();
+                        if (r && window.networkConsole) window.networkConsole.writeToConsole(`📡 ${d.name} → DHCP`);
+                        this.draw();
+                    }
                 }, 600);
             }
         });
@@ -330,6 +339,36 @@ class NetworkSimulator {
             if (d < bestD) { bestD = d; best = cn; }
         });
         if (!best) return false;
+
+        // Al desconectar: limpiar lease DHCP de ambos dispositivos que tenían dhcpEnabled
+        // para que al reconectarse en otra VLAN/puerto reciban una IP nueva del pool correcto
+        [best.from, best.to].forEach(dev => {
+            const needsReset = dev.ipConfig?.dhcpEnabled &&
+                dev.ipConfig?.ipAddress && dev.ipConfig.ipAddress !== '0.0.0.0';
+            if (!needsReset) return;
+
+            // Liberar del servidor DHCP si tiene lease registrado
+            if (window.dhcpEngine) {
+                const ip = dev.ipConfig.ipAddress;
+                // Eliminar del lease global
+                delete window.dhcpEngine.leases[dev.id];
+                // Buscar y eliminar del pool del servidor
+                this.devices.forEach(srv => {
+                    if (srv.dhcpServer?.leases?.[ip]) delete srv.dhcpServer.leases[ip];
+                    // También barrer _vlanLeases del router
+                    if (srv._vlanLeases) {
+                        Object.values(srv._vlanLeases).forEach(vl => {
+                            if (vl[ip]) delete vl[ip];
+                        });
+                    }
+                });
+            }
+            // Resetear IP del dispositivo a 0.0.0.0 para que pida DHCP al reconectar
+            dev.ipConfig.ipAddress = '0.0.0.0';
+            dev.ipConfig.subnetMask = '255.255.255.0';
+            dev.ipConfig.gateway = '';
+        });
+
         best.fromInterface.connectedTo = null; best.fromInterface.connectedInterface = null;
         best.toInterface.connectedTo = null;   best.toInterface.connectedInterface = null;
         this.connections = this.connections.filter(c => c !== best);
@@ -505,20 +544,31 @@ class NetworkSimulator {
                 );
                 if (router) {
                     this._log(`🔀 Inter-VLAN: VLAN${vlanCheck.vlanSrc} → VLAN${vlanCheck.vlanDst} vía ${router.name}`);
-                    // Fase 1: src → router (trunk, etiquetado VLAN src)
-                    this.sendPacket(src, router, type, size, {
+                    // Fase 1: src → router
+                    const pkt1 = this.sendPacket(src, router, type, size, {
                         ...opts, _interVlan: true, _vlanTag: vlanCheck.vlanSrc, ttl: (opts.ttl || 64) - 1,
                     });
-                    // Fase 2: router → dst (trunk, etiquetado VLAN dst) — con delay para animación
+                    // Fase 2: router → dst — con delay para animación secuencial
+                    const delay = pkt1 ? 700 : 400;
                     setTimeout(() => {
-                        this.sendPacket(router, dst, type, size, {
-                            ...opts, _interVlan: true, _vlanTag: vlanCheck.vlanDst, ttl: (opts.ttl || 64) - 1,
+                        const pkt2 = this.sendPacket(router, dst, type, size, {
+                            ...opts, _interVlan: true, _vlanTag: vlanCheck.vlanDst, ttl: (opts.ttl || 64) - 2,
                         });
-                    }, 600);
+                        if (!pkt2) {
+                            this._log(`❌ Inter-VLAN: router ${router.name} no pudo alcanzar ${dst.name}`);
+                            this._log(`  Verifica que ${dst.name} tenga IP en la red de VLAN${vlanCheck.vlanDst}`);
+                        }
+                    }, delay);
                     return null;
                 } else {
-                    this._log(`❌ Inter-VLAN bloqueado: no hay router con IPs en VLAN${vlanCheck.vlanSrc} y VLAN${vlanCheck.vlanDst}`);
-                    this._log(`  Conecta un router al switch con IPs en ambas redes`);
+                    const sw = vlanCheck.switchDev;
+                    this._log(`❌ Inter-VLAN bloqueado: VLAN${vlanCheck.vlanSrc} → VLAN${vlanCheck.vlanDst}`);
+                    if (sw) {
+                        const vlans = sw.vlans ? Object.keys(sw.vlans).join(', ') : 'ninguna';
+                        this._log(`  Switch: ${sw.name}  VLANs definidas: [${vlans}]`);
+                    }
+                    this._log(`  Solución: conecta un Router al switch y configura IPs en ambas subredes`);
+                    this._log(`  Ejemplo: Router LAN0 = 192.168.1.254/24 (VLAN${vlanCheck.vlanSrc}), LAN1 = 192.168.2.254/24 (VLAN${vlanCheck.vlanDst})`);
                     return null;
                 }
             }

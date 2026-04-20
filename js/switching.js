@@ -143,90 +143,173 @@ class VLANEngine {
 // ═══════════════════════════════════════════════════════════════════
 
 class InterVLANRouter {
-    static findRouter(sw, vlanSrc, vlanDst, allDevices, connections) {
-        var routerTypes = ['Router', 'RouterWifi', 'Firewall', 'SDWAN'];
 
-        var candidates = connections
-            .filter(function(c) { return c.from === sw || c.to === sw; })
-            .map(function(c)    { return c.from === sw ? c.to : c.from; })
-            .filter(function(d) { return routerTypes.includes(d.type); });
-
-        for (var i = 0; i < candidates.length; i++) {
-            var router     = candidates[i];
-            var srcVlanCfg = sw.vlans[vlanSrc];
-            var dstVlanCfg = sw.vlans[vlanDst];
-            if (!srcVlanCfg || !dstVlanCfg) continue;
-
-            var hasSrcNet = router.interfaces.some(function(intf) {
-                var ip = intf.ipConfig && intf.ipConfig.ipAddress;
-                if (!ip || ip === '0.0.0.0') return false;
-                return NetUtils.inSameSubnet(ip, srcVlanCfg.gateway, intf.ipConfig.subnetMask || '255.255.255.0');
-            });
-
-            var hasDstNet = router.interfaces.some(function(intf) {
-                var ip = intf.ipConfig && intf.ipConfig.ipAddress;
-                if (!ip || ip === '0.0.0.0') return false;
-                return NetUtils.inSameSubnet(ip, dstVlanCfg.gateway, intf.ipConfig.subnetMask || '255.255.255.0');
-            });
-
-            if (hasSrcNet && hasDstNet) return router;
-
-            if (router.routingTable instanceof RoutingTable) {
-                var r1 = router.routingTable.lookup(srcVlanCfg.gateway);
-                var r2 = router.routingTable.lookup(dstVlanCfg.gateway);
-                if (r1 && r2) return router;
+    /**
+     * Encuentra el switch con VLANEngine que conecta al dispositivo dado.
+     * Busca transitivamente a través de otros switches (stack de switches).
+     */
+    static _findSwitchFor(dev, connections) {
+        var switchTypes = ['Switch', 'SwitchPoE'];
+        var visited = new Set();
+        var queue = [dev];
+        while (queue.length) {
+            var cur = queue.shift();
+            if (visited.has(cur.id)) continue;
+            visited.add(cur.id);
+            var neighbors = connections
+                .filter(function(c) { return c.from === cur || c.to === cur; })
+                .map(function(c) { return c.from === cur ? c.to : c.from; });
+            for (var j = 0; j < neighbors.length; j++) {
+                var nb = neighbors[j];
+                if (switchTypes.includes(nb.type)) {
+                    if (nb._vlanEngine) return nb;        // switch con VLAN configurado
+                    if (!visited.has(nb.id)) queue.push(nb); // switch sin VLAN → seguir buscando
+                }
             }
         }
         return null;
     }
 
+    /**
+     * Obtiene la VLAN asignada al puerto del switch al que está conectado el dispositivo.
+     */
+    static _vlanOf(dev, sw, connections) {
+        var conn = connections.find(function(c) {
+            return (c.from === dev && c.to === sw) || (c.to === dev && c.from === sw);
+        });
+        if (!conn) return 1;
+        var intfName = conn.from === sw
+            ? (conn.fromInterface && conn.fromInterface.name)
+            : (conn.toInterface   && conn.toInterface.name);
+        return sw._vlanEngine.getVlanForPort(intfName);
+    }
+
+    /**
+     * Busca un router capaz de hacer inter-VLAN routing entre dos VLANs.
+     * Estrategia (en orden):
+     *  1. Router directamente conectado al switch con IP en ambas subredes VLAN.
+     *  2. Router con vlanConfig que cubre ambas VLANs (router-on-a-stick configurado).
+     *  3. Cualquier router alcanzable con tabla de rutas que cubre ambas redes.
+     *  4. Fallback: primer router conectado al switch (si el switch tiene las VLANs).
+     */
+    static findRouter(sw, vlanSrc, vlanDst, allDevices, connections) {
+        var routerTypes = ['Router', 'RouterWifi', 'Firewall', 'SDWAN'];
+
+        // Routers directamente conectados al switch
+        var directRouters = connections
+            .filter(function(c) { return c.from === sw || c.to === sw; })
+            .map(function(c)    { return c.from === sw ? c.to : c.from; })
+            .filter(function(d) { return routerTypes.includes(d.type); });
+
+        // Todos los routers en la red (para búsqueda transitiva)
+        var allRouters = allDevices.filter(function(d) { return routerTypes.includes(d.type); });
+
+        var srcVlanCfg = sw.vlans && sw.vlans[vlanSrc];
+        var dstVlanCfg = sw.vlans && sw.vlans[vlanDst];
+
+        // Helper: colecta todas las IPs de un router (ipConfig global + todas las interfaces)
+        function routerIPs(router) {
+            var ips = [];
+            if (router.ipConfig && router.ipConfig.ipAddress && router.ipConfig.ipAddress !== '0.0.0.0') {
+                ips.push({ ip: router.ipConfig.ipAddress, mask: router.ipConfig.subnetMask || '255.255.255.0' });
+            }
+            router.interfaces.forEach(function(intf) {
+                var ip = intf.ipConfig && intf.ipConfig.ipAddress;
+                if (ip && ip !== '0.0.0.0') {
+                    ips.push({ ip: ip, mask: intf.ipConfig.subnetMask || '255.255.255.0' });
+                }
+            });
+            return ips;
+        }
+
+        // Helper: ¿tiene el router IP en la red de una VLAN?
+        function routerCoversVlan(router, vlanCfg) {
+            if (!vlanCfg) return false;
+            var gw   = vlanCfg.gateway;
+            var mask = '255.255.255.0';
+            // vlanConfig del propio router
+            if (router.vlanConfig) {
+                var keys = Object.keys(router.vlanConfig);
+                for (var k = 0; k < keys.length; k++) {
+                    var vc = router.vlanConfig[keys[k]];
+                    if (vc && vc.gateway === gw) return true;
+                }
+            }
+            // IPs de interfaces / ipConfig global
+            var ips = routerIPs(router);
+            for (var p = 0; p < ips.length; p++) {
+                if (NetUtils.inSameSubnet(ips[p].ip, gw, ips[p].mask)) return true;
+            }
+            // Tabla de rutas
+            if (router.routingTable instanceof RoutingTable) {
+                if (router.routingTable.lookup(gw)) return true;
+            }
+            return false;
+        }
+
+        // 1. Buscar en routers directamente conectados al switch
+        for (var i = 0; i < directRouters.length; i++) {
+            var r = directRouters[i];
+            if (routerCoversVlan(r, srcVlanCfg) && routerCoversVlan(r, dstVlanCfg)) return r;
+        }
+
+        // 2. Buscar en todos los routers de la red (transitivo)
+        for (var j = 0; j < allRouters.length; j++) {
+            var ar = allRouters[j];
+            if (directRouters.includes(ar)) continue; // ya se revisó
+            if (routerCoversVlan(ar, srcVlanCfg) && routerCoversVlan(ar, dstVlanCfg)) return ar;
+        }
+
+        // 3. Fallback: si el switch tiene vlans definidas y hay al menos un router conectado,
+        //    asumir que ese router puede manejar el routing (útil cuando las VLANs
+        //    están solo en el switch y el router tiene la IP global del gateway)
+        if (srcVlanCfg && dstVlanCfg && directRouters.length > 0) {
+            return directRouters[0];
+        }
+
+        return null;
+    }
+
+    /**
+     * Verifica si se necesita inter-VLAN routing entre src y dst.
+     * Ahora soporta:
+     *  - Mismo switch con VLANs distintas
+     *  - Switches distintos conectados entre sí con VLANs distintas
+     */
     static check(src, dst, allDevices, connections) {
         var switchTypes = ['Switch', 'SwitchPoE'];
 
-        var srcSwitch = connections
-            .filter(function(c) { return c.from === src || c.to === src; })
-            .map(function(c)    { return c.from === src ? c.to : c.from; })
-            .find(function(d)   { return switchTypes.includes(d.type); });
+        // Buscar el switch (con VLANEngine) más cercano a cada dispositivo
+        var srcSwitch = InterVLANRouter._findSwitchFor(src, connections);
+        var dstSwitch = InterVLANRouter._findSwitchFor(dst, connections);
 
-        var dstSwitch = connections
-            .filter(function(c) { return c.from === dst || c.to === dst; })
-            .map(function(c)    { return c.from === dst ? c.to : c.from; })
-            .find(function(d)   { return switchTypes.includes(d.type); });
+        // Si ninguno está en un switch con VLAN, no hace falta inter-VLAN
+        if (!srcSwitch && !dstSwitch) return { needed: false };
 
-        if (!srcSwitch || srcSwitch !== dstSwitch) return { needed: false };
-
-        var sw = srcSwitch;
+        // Usar el switch del src como referencia si existe, si no el del dst
+        var sw = srcSwitch || dstSwitch;
         if (!sw._vlanEngine) return { needed: false };
 
-        var srcConn = connections.find(function(c) {
-            return (c.from === src && c.to === sw) || (c.to === src && c.from === sw);
-        });
-        var dstConn = connections.find(function(c) {
-            return (c.from === dst && c.to === sw) || (c.to === dst && c.from === sw);
-        });
+        // Obtener VLAN de cada dispositivo
+        var vlanSrc = srcSwitch ? InterVLANRouter._vlanOf(src, srcSwitch, connections) : 1;
+        var vlanDst = dstSwitch ? InterVLANRouter._vlanOf(dst, dstSwitch, connections) : 1;
 
-        if (!srcConn || !dstConn) return { needed: false };
-
-        var srcIntf = srcConn.from === sw
-            ? (srcConn.fromInterface && srcConn.fromInterface.name)
-            : (srcConn.toInterface   && srcConn.toInterface.name);
-
-        var dstIntf = dstConn.from === sw
-            ? (dstConn.fromInterface && dstConn.fromInterface.name)
-            : (dstConn.toInterface   && dstConn.toInterface.name);
-
-        var vlanSrc = sw._vlanEngine.getVlanForPort(srcIntf);
-        var vlanDst = sw._vlanEngine.getVlanForPort(dstIntf);
-
+        // Si están en la misma VLAN, no necesita routing
         if (vlanSrc === vlanDst) return { needed: false };
+
+        // Determinar el switch que tiene la configuración VLAN completa
+        // (puede ser srcSwitch o dstSwitch si son distintos)
+        var masterSw = (srcSwitch && srcSwitch.vlans) ? srcSwitch
+                     : (dstSwitch && dstSwitch.vlans)  ? dstSwitch
+                     : sw;
 
         return {
             needed    : true,
             vlanSrc   : vlanSrc,
             vlanDst   : vlanDst,
-            switchDev : sw,
-            srcIntf   : srcIntf,
-            dstIntf   : dstIntf
+            switchDev : masterSw,
+            srcSwitch : srcSwitch,
+            dstSwitch : dstSwitch,
         };
     }
 }

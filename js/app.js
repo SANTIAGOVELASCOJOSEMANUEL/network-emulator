@@ -9,6 +9,21 @@ document.addEventListener('DOMContentLoaded', () => {
     window.networkConsole = netConsole;
     const $ = id => document.getElementById(id);
 
+    // ── Autocargar topología guardada ────────────────────────────────
+    try {
+        const loaded = loadNetwork(simulator);
+        if (loaded) {
+            setTimeout(() => {
+                updateCounts();
+                simulator.fitAll();
+                netConsole.writeToConsole('📂 Topología restaurada automáticamente');
+            }, 300);
+        }
+    } catch(e) { console.warn('AutoLoad falló:', e); }
+
+    // ── Autoguardado cada 30 segundos ────────────────────────────────
+    startAutoSave(simulator, 30000);
+
     let mode = 'select';
     let isDragging = false, dragDev = null, dragOffX = 0, dragOffY = 0;
     let dragAnnotation = null;
@@ -199,12 +214,14 @@ document.addEventListener('DOMContentLoaded', () => {
         $('delCableMode')?.classList.toggle('active', m === 'delcable');
         $('panMode')?.classList.toggle('active', m === 'pan');
         $('textMode')?.classList.toggle('active', m === 'text');
-        const labels = { select: 'Selección', add: 'Agregar', cable: 'Cable', delcable: 'Del.Cable', pan: 'Pan', text: 'Texto' };
-        const colors  = { select: '#94a3b8', add: '#f59e0b', cable: '#38bdf8', delcable: '#f43f5e', pan: '#a78bfa', text: '#4ade80' };
+        $('failCableMode')?.classList.toggle('active', m === 'failcable');
+        $('failDeviceMode')?.classList.toggle('active', m === 'faildevice');
+        const labels = { select: 'Selección', add: 'Agregar', cable: 'Cable', delcable: 'Del.Cable', pan: 'Pan', text: 'Texto', failcable: 'Fallar Cable', faildevice: 'Fallar Equipo' };
+        const colors  = { select: '#94a3b8', add: '#f59e0b', cable: '#38bdf8', delcable: '#f43f5e', pan: '#a78bfa', text: '#4ade80', failcable: '#fb923c', faildevice: '#f43f5e' };
         $('modeStatus').textContent = labels[m] || m;
         $('modeStatus').style.color = colors[m] || '#94a3b8';
         if (m !== 'cable') { cableStart = null; cableStartIntf = null; simulator.hideConnPopup(); }
-        simulator.canvas.style.cursor = m === 'delcable' ? 'crosshair' : m === 'pan' ? 'grab' : m === 'text' ? 'text' : 'default';
+        simulator.canvas.style.cursor = (m === 'delcable' || m === 'failcable' || m === 'faildevice') ? 'crosshair' : m === 'pan' ? 'grab' : m === 'text' ? 'text' : 'default';
     }
 
     $('cableMode')?.addEventListener('click', () => mode === 'cable' ? setMode('select') : setMode('cable'));
@@ -243,8 +260,32 @@ document.addEventListener('DOMContentLoaded', () => {
     $('fitAll')?.addEventListener('click', () => simulator.fitAll());
 
     // ── Simulation ───────────────────────────────────
-    $('startSimulation')?.addEventListener('click', () => { simulator.startSimulation(); $('connectionStatus').textContent = '▶ Activo'; $('connectionStatus').className = 'status-value online'; });
-    $('stopSimulation')?.addEventListener('click',  () => { simulator.stopSimulation();  $('connectionStatus').textContent = '⏹ Detenido'; $('connectionStatus').className = 'status-value offline'; });
+    // ── Simulation ───────────────────────────────────
+    $('startSimulation')?.addEventListener('click', () => {
+        simulator.startSimulation();
+        $('connectionStatus').textContent = '▶ Activo';
+        $('connectionStatus').className = 'status-value online';
+        if ($('startSimulation')) $('startSimulation').style.opacity = '0.5';
+        if ($('stopSimulation'))  $('stopSimulation').style.opacity  = '1';
+    });
+    $('stopSimulation')?.addEventListener('click', () => {
+        simulator.stopSimulation();
+        simulator.draw();
+        $('connectionStatus').textContent = '⏹ Detenido';
+        $('connectionStatus').className = 'status-value offline';
+        if ($('startSimulation')) $('startSimulation').style.opacity = '1';
+        if ($('stopSimulation'))  $('stopSimulation').style.opacity  = '0.5';
+    });
+
+    // ── Fallar Cable ────────────────────────────────
+    $('failCableMode')?.addEventListener('click', () => {
+        mode === 'failcable' ? setMode('select') : setMode('failcable');
+    });
+
+    // ── Fallar / Restaurar Equipo ───────────────────
+    $('failDeviceMode')?.addEventListener('click', () => {
+        mode === 'faildevice' ? setMode('select') : setMode('faildevice');
+    });
 
     // ── Advanced feature toolbar buttons ─────────────────────────────
     function toggleAdvBtn(id) {
@@ -712,7 +753,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        if (mode === 'delcable') return;
+        if (mode === 'delcable' || mode === 'failcable' || mode === 'faildevice') return;
 
         if (dev) {
             simulator.selectDevice(dev);
@@ -736,7 +777,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isDragging && dragDev) { dragDev.x = wc.x - dragOffX; dragDev.y = wc.y - dragOffY; simulator.draw(); return; }
         if (dragAnnotation) { dragAnnotation.x = wc.x; dragAnnotation.y = wc.y; simulator.draw(); return; }
 
-        // Tooltip — solo sobre puntos de interfaz
+        // Tooltip — sobre interfaces (modo cable) y sobre cables (todos los modos)
         const dev = simulator.findDeviceAt(wc.x, wc.y);
         const tt = document.getElementById('portTooltip');
         if (dev && mode === 'cable') {
@@ -756,24 +797,61 @@ document.addEventListener('DOMContentLoaded', () => {
                 const conn = closestIntf.connectedTo ? `<div class="pt-conn">↔ ${closestIntf.connectedTo.name} [${closestIntf.connectedInterface?.name ?? '?'}]</div>` : `<div class="pt-free">libre</div>`;
                 tt.innerHTML = `<div class="pt-name">${closestIntf.name}</div><div class="${col}">${closestIntf.mediaType} · ${closestIntf.speed}</div>${conn}`;
             } else if (tt) tt.style.display = 'none';
-        } else { if (tt) tt.style.display = 'none'; }
+        } else {
+            // En cualquier otro modo: tooltip sobre cables con info de VLAN
+            const hovConn = findClosestConn(wc, 10 / simulator.zoom);
+            if (hovConn && tt) {
+                tt.style.display = 'block';
+                tt.style.left = (e.clientX + 14) + 'px';
+                tt.style.top  = (e.clientY - 8)  + 'px';
+                // Recopilar VLANs del cable
+                const vlanInfo = _getCableVlanInfo(hovConn);
+                const stBadge = hovConn.status === 'down'
+                    ? '<span style="color:#f43f5e;font-weight:700">⚠ FALLO</span>'
+                    : '<span style="color:#4ade80">✔ activo</span>';
+                tt.innerHTML = `<div class="pt-name">${hovConn.from.name} ↔ ${hovConn.to.name}</div>`
+                    + `<div class="pt-media-cobre">${hovConn.fromInterface.name} / ${hovConn.toInterface.name} · ${hovConn.speed || hovConn.type}</div>`
+                    + vlanInfo
+                    + `<div style="margin-top:3px">${stBadge}</div>`;
+            } else if (tt) tt.style.display = 'none';
+        }
 
-        if (mode === 'delcable') {
+        // Highlight cable en modo delcable / failcable
+        if (mode === 'delcable' || mode === 'failcable') {
             const closest = findClosestConn(wc);
             simulator.draw();
             if (closest) {
                 const ctx = simulator.ctx;
+                const hCol = mode === 'failcable' ? 'rgba(251,146,60,.9)' : 'rgba(244,63,94,.8)';
+                const sCol = mode === 'failcable' ? '#fb923c' : '#f43f5e';
                 ctx.save(); ctx.setTransform(1,0,0,1,0,0); ctx.translate(simulator.panX, simulator.panY); ctx.scale(simulator.zoom, simulator.zoom);
-                ctx.strokeStyle = 'rgba(244,63,94,.8)'; ctx.lineWidth = 4/simulator.zoom;
-                ctx.shadowColor = '#f43f5e'; ctx.shadowBlur = 8/simulator.zoom;
+                ctx.strokeStyle = hCol; ctx.lineWidth = 4/simulator.zoom;
+                ctx.shadowColor = sCol; ctx.shadowBlur = 8/simulator.zoom;
                 ctx.beginPath(); ctx.moveTo(closest.from.x, closest.from.y); ctx.lineTo(closest.to.x, closest.to.y); ctx.stroke();
+                ctx.restore();
+            }
+        }
+
+        // Highlight equipo en modo faildevice
+        if (mode === 'faildevice') {
+            simulator.draw();
+            if (dev) {
+                const ctx = simulator.ctx;
+                ctx.save(); ctx.setTransform(1,0,0,1,0,0); ctx.translate(simulator.panX, simulator.panY); ctx.scale(simulator.zoom, simulator.zoom);
+                const hw = 32/simulator.zoom, hh = 44/simulator.zoom;
+                ctx.strokeStyle = dev.status === 'down' ? '#4ade80' : '#f43f5e';
+                ctx.lineWidth = 2.5/simulator.zoom;
+                ctx.shadowColor = dev.status === 'down' ? '#4ade80' : '#f43f5e';
+                ctx.shadowBlur = 10/simulator.zoom;
+                ctx.beginPath(); ctx.roundRect(dev.x - hw, dev.y - hh/2 - 10/simulator.zoom, hw*2, hh, 6/simulator.zoom); ctx.stroke();
                 ctx.restore();
             }
         }
     });
 
-    function findClosestConn(wc) {
-        let best = null, bestD = 12 / simulator.zoom;
+    function findClosestConn(wc, threshold) {
+        const maxD = threshold !== undefined ? threshold : 12 / simulator.zoom;
+        let best = null, bestD = maxD;
         simulator.connections.forEach(cn => {
             const d = ptToSeg(wc.x, wc.y, cn.from.x, cn.from.y, cn.to.x, cn.to.y);
             if (d < bestD) { bestD = d; best = cn; }
@@ -782,11 +860,92 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     function ptToSeg(px,py,ax,ay,bx,by){const dx=bx-ax,dy=by-ay;if(!dx&&!dy)return Math.hypot(px-ax,py-ay);const t=Math.max(0,Math.min(1,((px-ax)*dx+(py-ay)*dy)/(dx*dx+dy*dy)));return Math.hypot(px-ax-t*dx,py-ay-t*dy);}
 
+    // Construye HTML con info de VLAN para el tooltip de un cable
+    function _getCableVlanInfo(cn) {
+        const vlanColors = ['#38bdf8','#a78bfa','#4ade80','#fb923c','#f43f5e','#facc15'];
+        const vlans = new Set();
+        // Revisar VLAN en interfaces del cable
+        [cn.fromInterface, cn.toInterface].forEach(intf => {
+            if (intf?.vlan) vlans.add(intf.vlan);
+            if (intf?.ipConfig?.vlan) vlans.add(intf.ipConfig.vlan);
+        });
+        // Revisar vlanEngine del switch origen
+        [cn.from, cn.to].forEach(dev => {
+            if (dev._vlanEngine) {
+                [cn.fromInterface, cn.toInterface].forEach(intf => {
+                    try {
+                        const cfg = dev._vlanEngine.getPort(intf.name);
+                        if (cfg?.vlan) vlans.add(cfg.vlan);
+                        if (cfg?.allowedVlans) cfg.allowedVlans.forEach(v => vlans.add(v));
+                    } catch(e) {}
+                });
+            }
+            if (dev.inheritedVlan?.vlanId) vlans.add(dev.inheritedVlan.vlanId);
+        });
+        if (vlans.size === 0) return '<div style="color:#94a3b8;font-size:9px;margin-top:2px">VLAN: no configurada</div>';
+        const badges = [...vlans].sort((a,b)=>a-b).map(v => {
+            const c = vlanColors[(v-1) % vlanColors.length];
+            return `<span style="background:${c}22;border:1px solid ${c};color:${c};border-radius:4px;padding:1px 5px;font-size:9px;margin-right:3px">VLAN ${v}</span>`;
+        }).join('');
+        return `<div style="margin-top:3px">${badges}</div>`;
+    }
+
     simulator.canvas.addEventListener('click', e => {
         if (mode === 'delcable') {
             const sc = sCoords(e), wc = simulator.screenToWorld(sc.x, sc.y);
             const del = simulator.deleteConnectionAt(wc.x, wc.y);
             if (del) { netConsole.writeToConsole(`✂️ Cable eliminado`); updateCounts(); _snapshot(); }
+            return;
+        }
+
+        // ── Fallar / Restaurar Cable ───────────────────────────────────
+        if (mode === 'failcable') {
+            const sc = sCoords(e), wc = simulator.screenToWorld(sc.x, sc.y);
+            const cn = findClosestConn(wc);
+            if (cn) {
+                const wasFailed = cn.status === 'down';
+                const newStatus = wasFailed ? 'up' : 'down';
+                cn.status = newStatus;
+                // Sincronizar con LinkState (motor de paquetes)
+                if (cn._linkState) cn._linkState.setStatus(newStatus);
+                // Sincronizar con NetworkEngine (Dijkstra)
+                simulator.engine.setEdgeStatus(cn.from.id, cn.to.id, newStatus);
+                // Recalcular rutas porque la topología cambió
+                buildRoutingTables(simulator.devices, simulator.connections);
+                simulator.draw();
+                _snapshot();
+                const icon = wasFailed ? '🟢' : '🔴';
+                netConsole.writeToConsole(`${icon} Cable ${cn.from.name}↔${cn.to.name}: ${wasFailed ? 'RESTAURADO' : 'FALLADO'}`);
+                netConsole.writeToConsole(`   Routing recalculado automáticamente`);
+            }
+            return;
+        }
+
+        // ── Fallar / Restaurar Equipo ──────────────────────────────────
+        if (mode === 'faildevice') {
+            const sc = sCoords(e), wc = simulator.screenToWorld(sc.x, sc.y);
+            const dev = simulator.findDeviceAt(wc.x, wc.y);
+            if (dev) {
+                const wasDown = dev.status === 'down';
+                const newStatus = wasDown ? 'up' : 'down';
+                dev.status = newStatus;
+                // Propagar a todos sus cables + engine + LinkState
+                simulator.connections.forEach(cn => {
+                    if (cn.from === dev || cn.to === dev) {
+                        cn.status = newStatus;
+                        if (cn._linkState) cn._linkState.setStatus(newStatus);
+                        simulator.engine.setEdgeStatus(cn.from.id, cn.to.id, newStatus);
+                    }
+                });
+                // Recalcular rutas
+                buildRoutingTables(simulator.devices, simulator.connections);
+                simulator.draw();
+                _snapshot();
+                const icon = wasDown ? '🟢' : '🔴';
+                netConsole.writeToConsole(`${icon} Equipo ${dev.name}: ${wasDown ? 'RESTAURADO' : 'FALLADO'}`);
+                if (!wasDown) netConsole.writeToConsole(`   ${simulator.connections.filter(c=>c.from===dev||c.to===dev).length} enlace(s) desactivados`);
+                netConsole.writeToConsole(`   Routing recalculado automáticamente`);
+            }
             return;
         }
     });
@@ -891,6 +1050,29 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         const levelCount = Object.keys(byLevel).length;
 
+        // Orden de tipos de dispositivo para agrupar visualmente dentro del nivel
+        const TYPE_ORDER = [
+            'Internet','ISP','SDWAN','ONT','OLT',
+            'Firewall','Router','RouterWifi','Bridge','AC',
+            'Switch','SwitchPoE','AP',
+            'Server','DVR','ControlTerminal',
+            'PC','Laptop','IPPhone','Phone','Printer','Camera','PayTerminal','Alarm'
+        ];
+        const typeRank = t => { const i = TYPE_ORDER.indexOf(t); return i < 0 ? 999 : i; };
+
+        // Ordenar nodos dentro de cada nivel:
+        // primero por tipo (jerarquía), luego por número de conexiones (desc), luego por nombre
+        Object.values(byLevel).forEach(nodes => {
+            nodes.sort((a, b) => {
+                const tr = typeRank(a.type) - typeRank(b.type);
+                if (tr !== 0) return tr;
+                const ca = adjMap.get(a.id)?.length || 0;
+                const cb = adjMap.get(b.id)?.length || 0;
+                if (cb !== ca) return cb - ca;
+                return a.name.localeCompare(b.name);
+            });
+        });
+
         // Espaciado fijo en espacio-mundo (sin depender de zoom/pan)
         const W = 200, H = 160;
         const maxInLevel = Math.max(...Object.values(byLevel).map(n => n.length));
@@ -929,36 +1111,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ── Example network ───────────────────────────────
     function buildExample() {
-        simulator.clear();
-        const net   = simulator.addDevice('Internet',  700, 60);
-        const isp1  = simulator.addDevice('ISP',       480, 180);
-        const isp2  = simulator.addDevice('ISP',       920, 180);
-        const fw    = simulator.addDevice('Firewall',  700, 300);
-        const rtr   = simulator.addDevice('Router',    700, 430);
-        const sw1   = simulator.addDevice('Switch',    430, 560);
-        const swPoe = simulator.addDevice('SwitchPoE', 970, 560);
-        const ac    = simulator.addDevice('AC',        180, 560);
-        const ap1   = simulator.addDevice('AP',        180, 700);
-        const ap2   = simulator.addDevice('AP',        310, 700);
-        const cam1  = simulator.addDevice('Camera',    880, 700);
-        const cam2  = simulator.addDevice('Camera',   1060, 700);
-        const pc1   = simulator.addDevice('PC',        360, 700);
-        const laptop= simulator.addDevice('Laptop',    120, 820);
-        const phone = simulator.addDevice('Phone',     240, 820);
-        const iph   = simulator.addDevice('IPPhone',   500, 700);
-        const alarm = simulator.addDevice('Alarm',     560, 820);
-        const srv   = simulator.addDevice('Server',    700, 700);
-        [
-            [net, isp1], [net, isp2], [isp1, fw], [isp2, fw], [fw, rtr],
-            [rtr, sw1], [rtr, swPoe], [rtr, ac],
-            [ac, ap1], [ac, ap2], [swPoe, cam1], [swPoe, cam2],
-            [sw1, pc1], [sw1, iph], [sw1, alarm], [sw1, srv],
-            [ap1, laptop], [ap2, phone],
-        ].forEach(([d1, d2]) => {
-            if (!d1 || !d2) return;
-            const r = simulator.connectDevices(d1, d2, null, null, null);
-            if (!r.success)(window._origConsole || console).log(`SKIP: ${d1.name}↔${d2.name}: ${r.message}`);
-        });
+        const EXAMPLE_DATA = {"version":5,"nextId":54,"devices":[{"id":"dev1","type":"Internet","name":"Internet1","x":606.15343645401,"y":173.9529715382099,"status":"up","ipConfig":{"ipAddress":"8.8.8.8","subnetMask":"255.0.0.0","gateway":""},"interfaces":[{"name":"WL0","type":"WAN","speed":"∞","mediaType":"wireless","vlan":1,"status":"up","mac":"F1:12:2B:AA:E0:86","ipConfig":null},{"name":"WL1","type":"WAN","speed":"∞","mediaType":"wireless","vlan":1,"status":"up","mac":"9C:84:E3:E2:99:29","ipConfig":null},{"name":"WL2","type":"WAN","speed":"∞","mediaType":"wireless","vlan":1,"status":"up","mac":"D5:58:E4:2E:86:DB","ipConfig":null},{"name":"WL3","type":"WAN","speed":"∞","mediaType":"wireless","vlan":1,"status":"up","mac":"79:07:D2:31:9E:46","ipConfig":null},{"name":"WL4","type":"WAN","speed":"∞","mediaType":"wireless","vlan":1,"status":"up","mac":"C7:D5:BC:9B:76:51","ipConfig":null},{"name":"WL5","type":"WAN","speed":"∞","mediaType":"wireless","vlan":1,"status":"up","mac":"2B:A1:2C:8C:85:26","ipConfig":null},{"name":"WL6","type":"WAN","speed":"∞","mediaType":"wireless","vlan":1,"status":"up","mac":"DB:97:56:DD:F3:15","ipConfig":null},{"name":"WL7","type":"WAN","speed":"∞","mediaType":"wireless","vlan":1,"status":"up","mac":"7F:D9:19:40:A4:A0","ipConfig":null}]},{"id":"dev2","type":"ISP","name":"ISP2","x":433.10963363793115,"y":272.92621396512243,"status":"up","ipConfig":{"ipAddress":"200.100.50.1","subnetMask":"255.255.255.0","gateway":"","public":true},"interfaces":[{"name":"WL-UP","type":"WAN","speed":"∞","mediaType":"wireless","vlan":1,"status":"up","mac":"39:C2:18:E6:4E:2A","ipConfig":null},{"name":"FIBRA0","type":"WAN","speed":"1000Mbps","mediaType":"fibra","vlan":1,"status":"up","mac":"7B:0F:6C:8C:97:E5","ipConfig":null},{"name":"FIBRA1","type":"WAN","speed":"1000Mbps","mediaType":"fibra","vlan":1,"status":"up","mac":"65:24:91:B2:4A:F6","ipConfig":null},{"name":"COBRE0","type":"WAN","speed":"100Mbps","mediaType":"cobre","vlan":1,"status":"up","mac":"10:8A:4B:8E:2C:8A","ipConfig":null},{"name":"COBRE1","type":"WAN","speed":"100Mbps","mediaType":"cobre","vlan":1,"status":"up","mac":"FE:28:11:B1:AE:06","ipConfig":null}],"bandwidth":1000,"planName":"Fibra"},{"id":"dev3","type":"Firewall","name":"Firewall3","x":602.1524236721353,"y":361.9021591771953,"status":"up","ipConfig":{"ipAddress":"10.0.0.1","subnetMask":"255.255.255.0","gateway":""},"interfaces":[{"name":"WAN0","type":"WAN","speed":"10Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"DC:F5:9F:B1:E4:66","ipConfig":null},{"name":"WAN1","type":"WAN","speed":"10Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"FC:A2:FC:00:1C:E4","ipConfig":null},{"name":"LAN0","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"22:9D:5D:79:65:BB","ipConfig":null},{"name":"LAN1","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"EE:04:46:73:C1:F7","ipConfig":null},{"name":"LAN2","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"58:9A:F3:AE:E1:A7","ipConfig":null},{"name":"LAN3","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"4C:D8:32:5A:0B:0E","ipConfig":null},{"name":"DMZ0","type":"DMZ","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"95:80:C8:4F:9D:FA","ipConfig":null}]},{"id":"dev4","type":"Router","name":"Router4","x":599.1516640857293,"y":517.8599957286935,"status":"up","ipConfig":{"ipAddress":"192.168.1.254","subnetMask":"255.255.255.0","gateway":""},"interfaces":[{"name":"WAN0","type":"WAN","speed":"10Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"CA:34:7B:7F:82:48","ipConfig":null},{"name":"WAN1","type":"WAN","speed":"10Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"43:13:D9:B1:24:EE","ipConfig":null},{"name":"WAN2","type":"WAN","speed":"10Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"08:31:39:D5:06:ED","ipConfig":null},{"name":"WAN3","type":"WAN","speed":"10Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"EC:20:27:14:3A:E4","ipConfig":null},{"name":"LAN0","type":"LAN","speed":"10Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"A3:E9:EA:46:8F:42","ipConfig":{"ipAddress":"192.168.1.254","subnetMask":"255.255.255.0","vlan":1}},{"name":"LAN1","type":"LAN","speed":"10Gbps","mediaType":"fibra","vlan":2,"status":"up","mac":"B9:84:A5:F2:DA:55","ipConfig":{"ipAddress":"192.168.2.254","subnetMask":"255.255.255.0","vlan":2}},{"name":"LAN2","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":3,"status":"up","mac":"67:78:7E:1A:7B:6E","ipConfig":{"ipAddress":"192.168.3.254","subnetMask":"255.255.255.0","vlan":3}},{"name":"LAN3","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":4,"status":"up","mac":"51:40:6E:7D:80:45","ipConfig":{"ipAddress":"192.168.4.254","subnetMask":"255.255.255.0","vlan":4}},{"name":"LAN4","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":5,"status":"up","mac":"3E:E7:53:C7:C6:6F","ipConfig":{"ipAddress":"192.168.5.254","subnetMask":"255.255.255.0","vlan":5}},{"name":"LAN5","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":6,"status":"up","mac":"3B:9F:21:B8:F5:ED","ipConfig":{"ipAddress":"192.168.6.254","subnetMask":"255.255.255.0","vlan":6}},{"name":"WLAN0","type":"LAN","speed":"300Mbps","mediaType":"wireless","vlan":1,"status":"up","mac":"47:24:FE:3A:8A:8F","ipConfig":null}],"bandwidth":{"total":0,"used":0,"isps":[]},"vlanConfig":{"LAN0":{"vlanId":1,"network":"192.168.1.0/24","gateway":"192.168.1.254","dhcp":true},"LAN1":{"vlanId":2,"network":"192.168.2.0/24","gateway":"192.168.2.254","dhcp":true},"LAN2":{"vlanId":3,"network":"192.168.3.0/24","gateway":"192.168.3.254","dhcp":true},"LAN3":{"vlanId":4,"network":"192.168.4.0/24","gateway":"192.168.4.254","dhcp":true},"LAN4":{"vlanId":5,"network":"192.168.5.0/24","gateway":"192.168.5.254","dhcp":true},"LAN5":{"vlanId":6,"network":"192.168.6.0/24","gateway":"192.168.6.254","dhcp":true}},"loadBalancing":false,"backupMode":false},{"id":"dev5","type":"RouterWifi","name":"RouterWifi5","x":42.53453793926298,"y":885.690716001119,"status":"up","ipConfig":{"ipAddress":"192.168.1.1","subnetMask":"255.255.255.0","gateway":""},"interfaces":[{"name":"WAN0","type":"WAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"58:72:3E:47:D8:B2","ipConfig":null},{"name":"LAN0","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"AC:85:5E:29:6F:45","ipConfig":null},{"name":"LAN1","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"8D:D6:EC:3D:9A:21","ipConfig":null},{"name":"LAN2","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"CC:93:3E:7D:88:E8","ipConfig":null},{"name":"LAN3","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"32:86:F3:97:E0:41","ipConfig":null},{"name":"WLAN-OUT","type":"LAN","speed":"300Mbps","mediaType":"wireless","vlan":1,"status":"up","mac":"9F:56:E1:BA:50:C7","ipConfig":null}],"ssid":"WiFi-RouterWifi5","bandwidth":{"total":0,"used":0},"vlanConfig":{"LAN0":{"vlanId":1,"network":"192.168.1.0/24","gateway":"192.168.1.1","dhcp":true},"LAN1":{"vlanId":2,"network":"192.168.2.0/24","gateway":"192.168.2.1","dhcp":true},"LAN2":{"vlanId":3,"network":"192.168.3.0/24","gateway":"192.168.3.1","dhcp":true},"LAN3":{"vlanId":4,"network":"192.168.4.0/24","gateway":"192.168.4.1","dhcp":true}},"loadBalancing":false,"backupMode":false},{"id":"dev6","type":"AC","name":"AC6","x":338.0828934069542,"y":516.1736399129773,"status":"up","ipConfig":{"ipAddress":"192.168.5.13","subnetMask":"255.255.255.0","gateway":"192.168.5.254","dns":["8.8.8.8"],"dhcpEnabled":true,"dhcpServer":"Router4(VLAN5)","leaseTime":86400},"interfaces":[{"name":"WAN0","type":"WAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"E0:4A:03:85:22:48","ipConfig":null},{"name":"LAN0","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"C5:F3:E9:67:5D:52","ipConfig":null},{"name":"LAN1","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"C6:98:EC:F2:A1:54","ipConfig":null},{"name":"LAN2","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"12:C9:D2:30:A2:1D","ipConfig":null},{"name":"LAN3","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"09:83:7A:49:E8:42","ipConfig":null},{"name":"LAN4","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"2F:A3:0A:E9:E2:83","ipConfig":null},{"name":"LAN5","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"A4:67:7F:76:6F:8B","ipConfig":null},{"name":"LAN6","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"53:5F:55:60:75:9D","ipConfig":null},{"name":"LAN7","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"36:BB:5A:2C:6A:B4","ipConfig":null},{"name":"MGMT","type":"MGMT","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"EF:72:55:3D:37:06","ipConfig":null}]},{"id":"dev7","type":"Bridge","name":"Bridge7","x":206.67358863746273,"y":715.0540651377318,"status":"up","ipConfig":{"ipAddress":"0.0.0.0","subnetMask":"255.255.255.0","gateway":""},"interfaces":[{"name":"WL-LINK","type":"LAN","speed":"300Mbps","mediaType":"wireless","vlan":1,"status":"up","mac":"15:85:9B:DC:3F:6E","ipConfig":null},{"name":"ETH0","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"FC:2F:54:47:BA:80","ipConfig":null}],"ssid":"Bridge-Bridge7"},{"id":"dev8","type":"Bridge","name":"Bridge8","x":54.470677702775134,"y":725.1158090754196,"status":"up","ipConfig":{"ipAddress":"0.0.0.0","subnetMask":"255.255.255.0","gateway":""},"interfaces":[{"name":"WL-LINK","type":"LAN","speed":"300Mbps","mediaType":"wireless","vlan":1,"status":"up","mac":"D2:DE:D8:EF:52:5E","ipConfig":null},{"name":"ETH0","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"20:5F:5E:FE:B5:DA","ipConfig":null}],"ssid":"Bridge-Bridge8"},{"id":"dev9","type":"SDWAN","name":"SDWAN9","x":603.152676867604,"y":50.98621579568218,"status":"up","ipConfig":{"ipAddress":"10.0.0.1","subnetMask":"255.255.255.0","gateway":"","public":true},"interfaces":[{"name":"WAN0","type":"WAN","speed":"∞","mediaType":"wireless","vlan":1,"status":"up","mac":"7E:63:1C:17:89:6B","ipConfig":null},{"name":"WAN1","type":"WAN","speed":"∞","mediaType":"wireless","vlan":1,"status":"up","mac":"E4:24:ED:81:05:F5","ipConfig":null},{"name":"WAN2","type":"WAN","speed":"∞","mediaType":"wireless","vlan":1,"status":"up","mac":"3B:9A:5E:7B:48:5C","ipConfig":null},{"name":"WAN3","type":"WAN","speed":"∞","mediaType":"wireless","vlan":1,"status":"up","mac":"4B:8D:B1:C6:72:15","ipConfig":null},{"name":"LAN0","type":"LAN","speed":"10Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"B7:3A:7D:31:2B:E6","ipConfig":null},{"name":"LAN1","type":"LAN","speed":"10Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"10:2A:62:4E:08:7B","ipConfig":null},{"name":"LAN2","type":"LAN","speed":"10Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"D4:52:A2:0F:1E:AC","ipConfig":null},{"name":"LAN3","type":"LAN","speed":"10Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"08:F5:00:B6:B3:AA","ipConfig":null},{"name":"MGMT","type":"MGMT","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"16:B7:E9:D1:CD:22","ipConfig":null}],"loadBalancing":true},{"id":"dev10","type":"ISP","name":"ISP10","x":764.1934413380587,"y":261.92918702879876,"status":"up","ipConfig":{"ipAddress":"200.100.50.1","subnetMask":"255.255.255.0","gateway":"","public":true},"interfaces":[{"name":"WL-UP","type":"WAN","speed":"∞","mediaType":"wireless","vlan":1,"status":"up","mac":"54:46:92:22:FB:42","ipConfig":null},{"name":"FIBRA0","type":"WAN","speed":"1000Mbps","mediaType":"fibra","vlan":1,"status":"up","mac":"5F:8E:A8:29:35:94","ipConfig":null},{"name":"FIBRA1","type":"WAN","speed":"1000Mbps","mediaType":"fibra","vlan":1,"status":"up","mac":"51:6F:F1:DE:C9:1C","ipConfig":null},{"name":"COBRE0","type":"WAN","speed":"100Mbps","mediaType":"cobre","vlan":1,"status":"up","mac":"F0:35:7F:74:DB:EF","ipConfig":null},{"name":"COBRE1","type":"WAN","speed":"100Mbps","mediaType":"cobre","vlan":1,"status":"up","mac":"E5:7A:99:F7:0D:00","ipConfig":null}],"bandwidth":1000,"planName":"Fibra"},{"id":"dev11","type":"Switch","name":"Switch11","x":422.6258056200691,"y":693.3242901787282,"status":"up","ipConfig":null,"interfaces":[{"name":"FIB-IN","type":"UPLINK","speed":"10Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"B2:AD:08:78:E2:B7","ipConfig":null},{"name":"FIB-OUT","type":"UPLINK","speed":"10Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"77:11:A3:AD:5D:05","ipConfig":null},{"name":"port2","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"46:75:45:B8:90:D6","ipConfig":null},{"name":"port3","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"05:95:B2:02:38:0E","ipConfig":null},{"name":"port4","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"4A:FD:32:D4:6B:15","ipConfig":null},{"name":"port5","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"AC:E2:8C:BE:E4:4F","ipConfig":null},{"name":"port6","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"8F:D8:29:B1:29:A2","ipConfig":null},{"name":"port7","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"1A:9D:9C:71:8E:0A","ipConfig":null},{"name":"port8","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"CD:BB:47:A3:29:10","ipConfig":null},{"name":"port9","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"D0:0D:79:71:15:A7","ipConfig":null},{"name":"port10","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"30:EC:AF:F8:FD:FD","ipConfig":null},{"name":"port11","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"3A:4D:11:1E:4A:59","ipConfig":null},{"name":"port12","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"75:DF:D4:25:EB:E5","ipConfig":null},{"name":"port13","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"53:76:DD:1C:98:39","ipConfig":null},{"name":"port14","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"D4:1C:25:BF:3D:B1","ipConfig":null},{"name":"port15","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"C8:0C:B9:99:98:31","ipConfig":null},{"name":"port16","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"8A:FA:45:ED:E6:5F","ipConfig":null},{"name":"port17","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"0A:44:93:1D:64:5A","ipConfig":null},{"name":"port18","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"74:3A:A3:44:0D:4A","ipConfig":null},{"name":"port19","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"F5:7D:BF:E5:A7:AD","ipConfig":null},{"name":"port20","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"37:83:EE:87:CD:68","ipConfig":null},{"name":"port21","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"52:33:0F:81:72:A9","ipConfig":null},{"name":"port22","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"3B:CE:D6:A7:DA:AD","ipConfig":null},{"name":"port23","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"34:92:43:3F:84:F2","ipConfig":null}],"ports":24,"vlans":{"1":{"name":"default","network":"192.168.1.0/24","gateway":"192.168.1.254"},"4":{"name":"VLAN4","network":"192.168.4.0/24","gateway":"192.168.4.254"}},"_vlanPortConfig":{},"inheritedVlan":{"vlanId":4,"network":"192.168.4.0/24","gateway":"192.168.4.254","dhcp":true}},{"id":"dev12","type":"SwitchPoE","name":"SwitchPoE12","x":700.6216747802551,"y":668.4314745025466,"status":"up","ipConfig":null,"interfaces":[{"name":"FIB-IN","type":"UPLINK","speed":"10Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"3D:B5:10:B7:1A:A8","ipConfig":null},{"name":"FIB-OUT","type":"UPLINK","speed":"10Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"2A:63:38:CA:90:85","ipConfig":null},{"name":"poe2","type":"LAN-POE","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"10:62:CD:F3:37:E1","ipConfig":null},{"name":"poe3","type":"LAN-POE","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"41:38:90:FF:AF:47","ipConfig":null},{"name":"poe4","type":"LAN-POE","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"D0:3E:EC:D1:50:19","ipConfig":null},{"name":"poe5","type":"LAN-POE","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"65:55:9C:C5:F3:F6","ipConfig":null},{"name":"poe6","type":"LAN-POE","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"58:47:77:E4:59:3A","ipConfig":null},{"name":"poe7","type":"LAN-POE","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"0A:1A:12:0C:DF:FA","ipConfig":null},{"name":"poe8","type":"LAN-POE","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"21:E6:FA:E8:05:54","ipConfig":null},{"name":"poe9","type":"LAN-POE","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"12:BD:6D:C8:CC:BB","ipConfig":null},{"name":"poe10","type":"LAN-POE","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"9D:01:8B:80:99:5C","ipConfig":null},{"name":"poe11","type":"LAN-POE","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"43:89:FC:9E:9D:D5","ipConfig":null},{"name":"poe12","type":"LAN-POE","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"B6:A1:59:7F:7E:D3","ipConfig":null},{"name":"poe13","type":"LAN-POE","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"5E:01:75:85:A6:BF","ipConfig":null},{"name":"poe14","type":"LAN-POE","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"4C:A4:E4:F2:4E:29","ipConfig":null},{"name":"poe15","type":"LAN-POE","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"9C:C5:1C:12:07:75","ipConfig":null}],"ports":16,"vlans":{"1":{"name":"default","network":"192.168.1.0/24","gateway":"192.168.1.254"}},"_vlanPortConfig":{},"inheritedVlan":{"vlanId":2,"network":"192.168.2.0/24","gateway":"192.168.2.254","dhcp":true}},{"id":"dev13","type":"ONT","name":"ONT13","x":1138.014126128973,"y":518.3524897177313,"status":"up","ipConfig":{"ipAddress":"192.168.100.1","subnetMask":"255.255.255.0","gateway":""},"interfaces":[{"name":"PON-IN","type":"PON","speed":"1Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"F2:23:68:28:F9:4A","ipConfig":null},{"name":"ETH0","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"86:A4:0A:B5:72:68","ipConfig":{"ipAddress":"0.0.0.0","subnetMask":"255.255.255.0","gateway":""}},{"name":"ETH1","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"E7:F7:B3:E9:54:A7","ipConfig":{"ipAddress":"0.0.0.0","subnetMask":"255.255.255.0","gateway":""}},{"name":"ETH2","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"14:BE:1A:E1:F5:29","ipConfig":{"ipAddress":"0.0.0.0","subnetMask":"255.255.255.0","gateway":""}},{"name":"ETH3","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"01:10:31:E9:9C:6D","ipConfig":{"ipAddress":"0.0.0.0","subnetMask":"255.255.255.0","gateway":""}}]},{"id":"dev14","type":"OLT","name":"OLT14","x":897.3033602603821,"y":518.7228298310062,"status":"up","ipConfig":{"ipAddress":"192.168.0.1","subnetMask":"255.255.255.0","gateway":""},"interfaces":[{"name":"UPLINK-FIB","type":"UPLINK","speed":"10Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"2F:4F:35:49:CC:B5","ipConfig":null},{"name":"UPLINK-FIB2","type":"UPLINK","speed":"10Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"47:7C:65:43:97:97","ipConfig":null},{"name":"PON0","type":"PON","speed":"2.4Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"99:79:3D:C6:65:4C","ipConfig":null},{"name":"PON1","type":"PON","speed":"2.4Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"17:36:A9:15:FB:1A","ipConfig":null},{"name":"PON2","type":"PON","speed":"2.4Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"56:A0:D7:4D:71:28","ipConfig":null},{"name":"PON3","type":"PON","speed":"2.4Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"85:EC:AD:EA:0E:60","ipConfig":null},{"name":"PON4","type":"PON","speed":"2.4Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"8B:A9:D8:79:B8:41","ipConfig":null},{"name":"PON5","type":"PON","speed":"2.4Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"51:88:32:54:35:5E","ipConfig":null},{"name":"PON6","type":"PON","speed":"2.4Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"2D:DF:D8:BC:41:EF","ipConfig":null},{"name":"PON7","type":"PON","speed":"2.4Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"E9:6C:A8:38:44:52","ipConfig":null},{"name":"PON8","type":"PON","speed":"2.4Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"45:83:74:41:0D:01","ipConfig":null},{"name":"PON9","type":"PON","speed":"2.4Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"11:05:E4:C0:90:1F","ipConfig":null},{"name":"PON10","type":"PON","speed":"2.4Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"5D:2A:A2:6A:71:DD","ipConfig":null},{"name":"PON11","type":"PON","speed":"2.4Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"94:CA:7F:04:B9:9B","ipConfig":null},{"name":"PON12","type":"PON","speed":"2.4Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"02:08:9E:6A:3E:22","ipConfig":null},{"name":"PON13","type":"PON","speed":"2.4Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"79:8E:89:8A:74:4D","ipConfig":null},{"name":"PON14","type":"PON","speed":"2.4Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"9E:C9:85:59:BE:02","ipConfig":null},{"name":"PON15","type":"PON","speed":"2.4Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"05:C1:1F:CD:61:6B","ipConfig":null}]},{"id":"dev15","type":"AP","name":"AP15","x":157.17084512925254,"y":520.9491554195674,"status":"up","ipConfig":{"ipAddress":"192.168.5.13","subnetMask":"255.255.255.0","gateway":"192.168.5.10","dns":["8.8.8.8"],"dhcpEnabled":true,"dhcpServer":"Router4(VLAN5)","leaseTime":86400},"interfaces":[{"name":"ETH-UP","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"A9:94:81:26:D3:39","ipConfig":null},{"name":"WLAN0","type":"LAN","speed":"300Mbps","mediaType":"wireless","vlan":1,"status":"up","mac":"88:9E:D5:61:2E:54","ipConfig":null},{"name":"WLAN1","type":"LAN","speed":"300Mbps","mediaType":"wireless","vlan":1,"status":"up","mac":"62:87:38:8F:4F:49","ipConfig":null},{"name":"WLAN2","type":"LAN","speed":"300Mbps","mediaType":"wireless","vlan":1,"status":"up","mac":"1E:09:29:2F:F1:BE","ipConfig":null},{"name":"WLAN3","type":"LAN","speed":"300Mbps","mediaType":"wireless","vlan":1,"status":"up","mac":"9F:59:08:AE:15:75","ipConfig":null},{"name":"WLAN4","type":"LAN","speed":"300Mbps","mediaType":"wireless","vlan":1,"status":"up","mac":"DB:88:A1:13:80:C7","ipConfig":null}],"ssid":"AP-AP15"},{"id":"dev17","type":"PC","name":"PC17","x":602.5766388499802,"y":921.4832154333727,"status":"up","ipConfig":{"ipAddress":"192.168.4.16","subnetMask":"255.255.255.0","gateway":"192.168.4.254","dns":["8.8.8.8"],"dhcpEnabled":true,"dhcpServer":"Router4(VLAN4)","leaseTime":86400},"interfaces":[{"name":"ETH0","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"FD:95:28:E5:78:2B","ipConfig":null},{"name":"WLAN0","type":"LAN","speed":"300Mbps","mediaType":"wireless","vlan":1,"status":"up","mac":"A6:E9:B7:8B:25:33","ipConfig":null}]},{"id":"dev18","type":"Server","name":"Server18","x":204.14130952617762,"y":822.6275727150966,"status":"up","ipConfig":{"ipAddress":"0.0.0.0","subnetMask":"255.255.255.0","gateway":"","dns":["8.8.8.8"],"dhcpEnabled":false},"interfaces":[{"name":"ETH0","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"C3:36:9F:58:26:9E","ipConfig":null},{"name":"ETH1","type":"LAN","speed":"10Gbps","mediaType":"fibra","vlan":1,"status":"up","mac":"F9:77:D7:30:6C:D5","ipConfig":null},{"name":"MGMT","type":"MGMT","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"9C:F8:57:16:0E:FC","ipConfig":null}]},{"id":"dev19","type":"Laptop","name":"Laptop19","x":4.0647947241795634,"y":521.6560044977899,"status":"up","ipConfig":{"ipAddress":"192.168.5.13","subnetMask":"255.255.255.0","gateway":"192.168.5.11","dns":["8.8.8.8"],"dhcpEnabled":true,"dhcpServer":"Router4(VLAN5)","leaseTime":86400},"interfaces":[{"name":"ETH0","type":"LAN","speed":"1Gbps","mediaType":"cobre","vlan":1,"status":"up","mac":"06:D2:5F:09:5C:94","ipConfig":null},{"name":"WLAN0","type":"LAN","speed":"300Mbps","mediaType":"wireless","vlan":1,"status":"up","mac":"67:BB:D0:7D:E7:53","ipConfig":null}]},{"id":"dev20","type":"Phone","name":"Phone20","x":-158.3117900422804,"y":874.8025399475002,"status":"up","ipConfig":{"ipAddress":"192.168.4.16","subnetMask":"255.255.255.0","gateway":"192.168.1.1","dns":["8.8.8.8"],"dhcpEnabled":true,"dhcpServer":"Router4(VLAN4)","leaseTime":86400},"interfaces":[{"name":"WLAN0","type":"LAN","speed":"150Mbps","mediaType":"wireless","vlan":1,"status":"up","mac":"8B:A0:A1:88:C8:73","ipConfig":null}]},{"id":"dev21","type":"Printer","name":"Printer21","x":511.9787518736661,"y":963.0891738099283,"status":"up","ipConfig":{"ipAddress":"192.168.4.16","subnetMask":"255.255.255.0","gateway":"192.168.4.254","dns":["8.8.8.8"],"dhcpEnabled":true,"dhcpServer":"Router4(VLAN4)","leaseTime":86400},"interfaces":[{"name":"ETH0","type":"LAN","speed":"100Mbps","mediaType":"cobre","vlan":1,"status":"up","mac":"D5:10:45:92:C8:DE","ipConfig":null},{"name":"WLAN0","type":"LAN","speed":"150Mbps","mediaType":"wireless","vlan":1,"status":"up","mac":"B7:7A:52:A4:2A:20","ipConfig":null}]},{"id":"dev22","type":"Camera","name":"Camera22","x":977.0252906448078,"y":716.4059321354981,"status":"up","ipConfig":{"ipAddress":"0.0.0.0","subnetMask":"255.255.255.0","gateway":""},"interfaces":[{"name":"ETH-POE","type":"LAN","speed":"100Mbps","mediaType":"cobre","vlan":1,"status":"up","mac":"6F:24:78:9C:6B:DD","ipConfig":null}]},{"id":"dev23","type":"DVR","name":"DVR23","x":788.3046759912099,"y":823.8347325417628,"status":"up","ipConfig":{"ipAddress":"192.168.2.12","subnetMask":"255.255.255.0","gateway":"192.168.2.254","dns":["8.8.8.8"],"dhcpEnabled":true,"dhcpServer":"Router4(VLAN2)","leaseTime":86400},"interfaces":[{"name":"ETH0","type":"LAN","speed":"100Mbps","mediaType":"cobre","vlan":1,"status":"up","mac":"20:13:1A:65:5E:07","ipConfig":null},{"name":"HDMI","type":"OUT","speed":"N/A","mediaType":"cobre","vlan":1,"status":"up","mac":"FB:E3:09:58:8F:5B","ipConfig":null},{"name":"CAM0","type":"CAM-IN","speed":"100Mbps","mediaType":"cobre","vlan":1,"status":"up","mac":"C2:7C:69:10:8E:35","ipConfig":null},{"name":"CAM1","type":"CAM-IN","speed":"100Mbps","mediaType":"cobre","vlan":1,"status":"up","mac":"99:E9:2F:92:97:B6","ipConfig":null},{"name":"CAM2","type":"CAM-IN","speed":"100Mbps","mediaType":"cobre","vlan":1,"status":"up","mac":"59:98:8D:83:4F:5D","ipConfig":null},{"name":"CAM3","type":"CAM-IN","speed":"100Mbps","mediaType":"cobre","vlan":1,"status":"up","mac":"C9:C7:3A:4E:67:D0","ipConfig":null},{"name":"CAM4","type":"CAM-IN","speed":"100Mbps","mediaType":"cobre","vlan":1,"status":"up","mac":"E1:29:74:CD:D0:8A","ipConfig":null},{"name":"CAM5","type":"CAM-IN","speed":"100Mbps","mediaType":"cobre","vlan":1,"status":"up","mac":"AC:95:0A:DA:FE:A1","ipConfig":null},{"name":"CAM6","type":"CAM-IN","speed":"100Mbps","mediaType":"cobre","vlan":1,"status":"up","mac":"E8:29:5E:27:2C:8C","ipConfig":null},{"name":"CAM7","type":"CAM-IN","speed":"100Mbps","mediaType":"cobre","vlan":1,"status":"up","mac":"F0:42:28:96:61:E3","ipConfig":null}]},{"id":"dev24","type":"Alarm","name":"Alarm24","x":1003.0055442074408,"y":878.6975385002545,"status":"up","ipConfig":{"ipAddress":"192.168.2.12","subnetMask":"255.255.255.0","gateway":"192.168.2.254","dns":["8.8.8.8"],"dhcpEnabled":true,"dhcpServer":"Router4(VLAN2)","leaseTime":86400},"interfaces":[{"name":"ETH0","type":"LAN","speed":"100Mbps","mediaType":"cobre","vlan":1,"status":"up","mac":"D9:EA:92:19:24:75","ipConfig":null},{"name":"RS232","type":"SERIAL","speed":"N/A","mediaType":"cobre","vlan":1,"status":"up","mac":"31:96:63:56:01:4F","ipConfig":null}],"panel":"Paradox","armed":false},{"id":"dev25","type":"PayTerminal","name":"PayTerminal25","x":228.79398804096,"y":970.8791709154365,"status":"up","ipConfig":{"ipAddress":"192.168.4.16","subnetMask":"255.255.255.0","gateway":"192.168.4.254","dns":["8.8.8.8"],"dhcpEnabled":true,"dhcpServer":"Router4(VLAN4)","leaseTime":86400},"interfaces":[{"name":"ETH0","type":"LAN","speed":"100Mbps","mediaType":"cobre","vlan":1,"status":"up","mac":"69:BE:DC:3B:8A:43","ipConfig":null},{"name":"WLAN0","type":"LAN","speed":"150Mbps","mediaType":"wireless","vlan":1,"status":"up","mac":"DB:BB:AE:95:DF:1C","ipConfig":null}],"brand":"Genérico"},{"id":"dev26","type":"ControlTerminal","name":"ControlTerminal26","x":617.4416652623147,"y":808.4370843792497,"status":"up","ipConfig":{"ipAddress":"192.168.4.16","subnetMask":"255.255.255.0","gateway":"192.168.4.254","dns":["8.8.8.8"],"dhcpEnabled":true,"dhcpServer":"Router4(VLAN4)","leaseTime":86400},"interfaces":[{"name":"ETH0","type":"LAN","speed":"100Mbps","mediaType":"cobre","vlan":1,"status":"up","mac":"E5:2B:BE:66:C7:3D","ipConfig":null},{"name":"RS485","type":"SERIAL","speed":"N/A","mediaType":"cobre","vlan":1,"status":"up","mac":"AA:00:6F:B3:03:AF","ipConfig":null}],"zone":"Zona-1"},{"id":"dev27","type":"IPPhone","name":"IPPhone27","x":409.35675030126345,"y":972.1775037663547,"status":"up","ipConfig":{"ipAddress":"192.168.4.16","subnetMask":"255.255.255.0","gateway":"192.168.4.254","dns":["8.8.8.8"],"dhcpEnabled":true,"dhcpServer":"Router4(VLAN4)","leaseTime":86400},"interfaces":[{"name":"ETH-POE","type":"LAN","speed":"100Mbps","mediaType":"cobre","vlan":1,"status":"up","mac":"C6:94:1C:50:86:2B","ipConfig":null},{"name":"PC-PORT","type":"LAN","speed":"100Mbps","mediaType":"cobre","vlan":1,"status":"up","mac":"A7:2D:02:E3:49:0C","ipConfig":null}],"extension":"100","sipServer":""}],"connections":[{"fromId":"dev9","toId":"dev1","fromIntf":"WAN0","toIntf":"WL0","status":"up","speed":"∞","type":"wireless","linkState":{"bandwidth":10000,"latency":5,"lossRate":0,"status":"up"}},{"fromId":"dev2","toId":"dev1","fromIntf":"WL-UP","toIntf":"WL1","status":"up","speed":"∞","type":"wireless","linkState":{"bandwidth":10000,"latency":5,"lossRate":0,"status":"up"}},{"fromId":"dev1","toId":"dev10","fromIntf":"WL2","toIntf":"WL-UP","status":"up","speed":"∞","type":"wireless","linkState":{"bandwidth":10000,"latency":5,"lossRate":0,"status":"up"}},{"fromId":"dev2","toId":"dev3","fromIntf":"FIBRA0","toIntf":"WAN0","status":"up","speed":"1Gbps","type":"fibra","linkState":{"bandwidth":1000,"latency":0.5,"lossRate":0,"status":"up"}},{"fromId":"dev10","toId":"dev3","fromIntf":"FIBRA0","toIntf":"WAN1","status":"up","speed":"1Gbps","type":"fibra","linkState":{"bandwidth":1000,"latency":0.5,"lossRate":0,"status":"up"}},{"fromId":"dev3","toId":"dev4","fromIntf":"LAN0","toIntf":"LAN2","status":"up","speed":"1Gbps","type":"cobre","linkState":{"bandwidth":1000,"latency":1,"lossRate":0,"status":"up"}},{"fromId":"dev4","toId":"dev14","fromIntf":"LAN0","toIntf":"UPLINK-FIB","status":"up","speed":"10Gbps","type":"fibra","linkState":{"bandwidth":10000,"latency":0.5,"lossRate":0,"status":"up"}},{"fromId":"dev14","toId":"dev13","fromIntf":"PON0","toIntf":"PON-IN","status":"up","speed":"1Gbps","type":"fibra","linkState":{"bandwidth":1000,"latency":0.5,"lossRate":0,"status":"up"}},{"fromId":"dev4","toId":"dev12","fromIntf":"LAN1","toIntf":"FIB-IN","status":"up","speed":"10Gbps","type":"fibra","linkState":{"bandwidth":10000,"latency":0.5,"lossRate":0,"status":"up"}},{"fromId":"dev12","toId":"dev22","fromIntf":"poe2","toIntf":"ETH-POE","status":"up","speed":"100Mbps","type":"cobre","linkState":{"bandwidth":100,"latency":1,"lossRate":0,"status":"up"}},{"fromId":"dev12","toId":"dev23","fromIntf":"poe3","toIntf":"ETH0","status":"up","speed":"100Mbps","type":"cobre","linkState":{"bandwidth":100,"latency":1,"lossRate":0,"status":"up"}},{"fromId":"dev12","toId":"dev24","fromIntf":"poe4","toIntf":"ETH0","status":"up","speed":"100Mbps","type":"cobre","linkState":{"bandwidth":100,"latency":1,"lossRate":0,"status":"up"}},{"fromId":"dev11","toId":"dev4","fromIntf":"port2","toIntf":"LAN3","status":"up","speed":"1Gbps","type":"cobre","linkState":{"bandwidth":1000,"latency":1,"lossRate":0,"status":"up"}},{"fromId":"dev11","toId":"dev26","fromIntf":"port3","toIntf":"ETH0","status":"up","speed":"100Mbps","type":"cobre","linkState":{"bandwidth":100,"latency":1,"lossRate":0,"status":"up"}},{"fromId":"dev26","toId":"dev11","fromIntf":"RS485","toIntf":"port4","status":"up","speed":"1Gbps","type":"cobre","linkState":{"bandwidth":1000,"latency":1,"lossRate":0,"status":"up"}},{"fromId":"dev17","toId":"dev11","fromIntf":"ETH0","toIntf":"port5","status":"up","speed":"1Gbps","type":"cobre","linkState":{"bandwidth":1000,"latency":1,"lossRate":0,"status":"up"}},{"fromId":"dev21","toId":"dev11","fromIntf":"ETH0","toIntf":"port6","status":"up","speed":"100Mbps","type":"cobre","linkState":{"bandwidth":100,"latency":1,"lossRate":0,"status":"up"}},{"fromId":"dev11","toId":"dev27","fromIntf":"port7","toIntf":"ETH-POE","status":"up","speed":"100Mbps","type":"cobre","linkState":{"bandwidth":100,"latency":1,"lossRate":0,"status":"up"}},{"fromId":"dev11","toId":"dev18","fromIntf":"port8","toIntf":"ETH0","status":"up","speed":"1Gbps","type":"cobre","linkState":{"bandwidth":1000,"latency":1,"lossRate":0,"status":"up"}},{"fromId":"dev11","toId":"dev7","fromIntf":"port9","toIntf":"ETH0","status":"up","speed":"1Gbps","type":"cobre","linkState":{"bandwidth":1000,"latency":1,"lossRate":0,"status":"up"}},{"fromId":"dev7","toId":"dev8","fromIntf":"WL-LINK","toIntf":"WL-LINK","status":"up","speed":"300Mbps","type":"wireless","linkState":{"bandwidth":300,"latency":5,"lossRate":0,"status":"up"}},{"fromId":"dev5","toId":"dev8","fromIntf":"WAN0","toIntf":"ETH0","status":"up","speed":"1Gbps","type":"cobre","linkState":{"bandwidth":1000,"latency":1,"lossRate":0,"status":"up"}},{"fromId":"dev20","toId":"dev5","fromIntf":"WLAN0","toIntf":"WLAN-OUT","status":"up","speed":"150Mbps","type":"wireless","linkState":{"bandwidth":150,"latency":5,"lossRate":0,"status":"up"}},{"fromId":"dev25","toId":"dev11","fromIntf":"ETH0","toIntf":"port10","status":"up","speed":"100Mbps","type":"cobre","linkState":{"bandwidth":100,"latency":1,"lossRate":0,"status":"up"}},{"fromId":"dev6","toId":"dev4","fromIntf":"WAN0","toIntf":"LAN4","status":"up","speed":"1Gbps","type":"cobre","linkState":{"bandwidth":1000,"latency":1,"lossRate":0,"status":"up"}},{"fromId":"dev6","toId":"dev15","fromIntf":"LAN0","toIntf":"ETH-UP","status":"up","speed":"1Gbps","type":"cobre","linkState":{"bandwidth":1000,"latency":1,"lossRate":0,"status":"up"}},{"fromId":"dev15","toId":"dev19","fromIntf":"WLAN0","toIntf":"WLAN0","status":"up","speed":"300Mbps","type":"wireless","linkState":{"bandwidth":300,"latency":5,"lossRate":0,"status":"up"}}],"annotations":[]};
+        NetworkPersistence._deserialize(simulator, EXAMPLE_DATA);
         simulator.draw(); updateCounts(); simulator.fitAll();
         netConsole.writeToConsole('🌐 Red de ejemplo lista');
     }
