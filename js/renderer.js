@@ -26,6 +26,115 @@ class NetworkRenderer {
         this._lastFrame   = 0;
         this._frameTarget = 1000 / 60; // ~16.67 ms
         this._rafId       = null;
+        // ── Caché de íconos PNG/SVG ──────────────────────────────────
+        // Estado por tipo: null = no intentado, 'loading' = cargando,
+        // HTMLImageElement = listo para dibujar, false = no existe (usar fallback)
+        this._iconCache   = {};
+        // Mapa de tipo de dispositivo → nombre de archivo en assets/icons/
+        this._iconFiles   = {
+            'Internet'        : 'internet',
+            'ISP'             : 'isp',
+            'Router'          : 'router',
+            'RouterWifi'      : 'router-wifi',
+            'Switch'          : 'switch',
+            'SwitchPoE'       : 'switch-poe',
+            'Firewall'        : 'firewall',
+            'AC'              : 'ac',
+            'ONT'             : 'ont',
+            'AP'              : 'ap',
+            'Bridge'          : 'bridge',
+            'Camera'          : 'camera',
+            'PC'              : 'pc',
+            'Laptop'          : 'laptop',
+            'Phone'           : 'phone',
+            'Printer'         : 'printer',
+            'SDWAN'           : 'sdwan',
+            'OLT'             : 'olt',
+            'DVR'             : 'dvr',
+            'IPPhone'         : 'ipphone',
+            'ControlTerminal' : 'control-terminal',
+            'PayTerminal'     : 'pay-terminal',
+            'Alarm'           : 'alarm',
+            'Server'          : 'server',
+        };
+    }
+
+    /**
+     * Intenta cargar el ícono PNG/SVG para un tipo de dispositivo.
+     * Si existe → lo cachea como HTMLImageElement.
+     * Si no existe → cachea false para no reintentar.
+     * La carga es asíncrona; en el primer frame usa el fallback geométrico
+     * y en cuanto la imagen esté lista se renderiza automáticamente.
+     * @param {string} type — tipo de dispositivo (e.g. 'Router')
+     */
+    _loadIcon(type) {
+        if (this._iconCache[type] !== undefined) return; // ya cargado o intentado
+        const base = this._iconFiles[type];
+        if (!base) { this._iconCache[type] = false; return; }
+
+        this._iconCache[type] = 'loading';
+        // Intentar PNG primero, luego SVG
+        const tryLoad = (ext) => new Promise((resolve) => {
+            const img = new Image();
+            img.onload  = () => resolve(img);
+            img.onerror = () => resolve(null);
+            img.src = `assets/icons/${base}.${ext}`;
+        });
+
+        (async () => {
+            let img = await tryLoad('png');
+            if (!img) img = await tryLoad('svg');
+            this._iconCache[type] = img || false;
+            // Forzar redibujado para que aparezca el ícono recién cargado
+            if (img) this.sim.draw();
+        })();
+    }
+
+    /**
+     * Dibuja el ícono personalizado si existe; devuelve true si lo dibujó.
+     * Devuelve false si debe usarse el fallback geométrico.
+     * @param {string} type
+     * @param {number} cx — centro X en coordenadas mundo
+     * @param {number} cy — centro Y en coordenadas mundo
+     * @param {number} s  — tamaño base (radio del área del ícono)
+     * @returns {boolean}
+     */
+    _drawCustomIcon(type, cx, cy, s) {
+        this._loadIcon(type);
+        const img = this._iconCache[type];
+        if (!img || img === 'loading') return false;
+
+        const ctx  = this.ctx;
+        const zoom = this.zoom;
+        const dark = this.dark;
+
+        // Area cuadrada centrada en (cx, cy)
+        const size   = s * 1.7;
+        const half   = size / 2;
+        const left   = cx - half;
+        const top    = cy - half;
+        const radius = 5 / zoom;
+
+        ctx.save();
+
+        // Clip: la imagen no se sale del area del icono
+        ctx.beginPath();
+        ctx.roundRect(left, top, size, size, radius);
+        ctx.clip();
+
+        // Blend: elimina fondo blanco en dark (screen) y fondo negro en light (multiply)
+        // Si el PNG tiene canal alpha real, esto no cambia nada visible
+        ctx.globalCompositeOperation = dark ? 'screen' : 'multiply';
+
+        // Escalar manteniendo proporcion (object-fit: contain)
+        const ar = img.naturalWidth / img.naturalHeight;
+        let iw, ih;
+        if (ar >= 1) { iw = size; ih = size / ar; }
+        else         { ih = size; iw = size * ar; }
+
+        ctx.drawImage(img, cx - iw / 2, cy - ih / 2, iw, ih);
+        ctx.restore();
+        return true;
     }
 
     get ctx()  { return this.sim.ctx; }
@@ -342,6 +451,18 @@ class NetworkRenderer {
 
     _drawCard(d) {
         const { ctx, zoom, dark, sim } = this;
+
+        // ── Modo "ícono flotante" ────────────────────────────────────
+        // Si hay imagen personalizada cargada para este tipo, se omite la card
+        // y el ícono se dibuja grande y directo en el canvas, igual que en
+        // herramientas profesionales de diagramas de red (GNS3, NetBox, etc.)
+        const cachedImg = this._iconCache[d.type];
+        if (cachedImg && cachedImg !== 'loading') {
+            this._drawFloatingIcon(d);
+            return;
+        }
+
+        // ── Modo card clásico (fallback geométrico) ──────────────────
         const w  = sim.cardW(d), h = sim.cardH();
         const x  = d.x - w / 2, y = d.y - h / 2;
         const accent = this._typeAccent(d.type);
@@ -431,11 +552,126 @@ class NetworkRenderer {
     }
 
     // ═══════════════════════════════════════════
+    //  FLOATING ICON MODE
+    // ═══════════════════════════════════════════
+    /**
+     * Renderiza el dispositivo sin card: solo el ícono PNG/SVG grande,
+     * nombre e IP flotando sobre el canvas. Estilo GNS3 / NetBox.
+     *
+     * Dimensiones equivalentes a la card original para que los cables
+     * y los puntos de interfaz sigan conectando en el lugar correcto.
+     */
+    _drawFloatingIcon(d) {
+        const { ctx, zoom, dark, sim } = this;
+        const img    = this._iconCache[d.type];
+        const accent = this._typeAccent(d.type);
+        const alive  = d.status !== 'down';
+
+        // Tamaño del ícono flotante — igual de grande que GNS3
+        const iconSize = 38 / zoom;
+        const cx = d.x;
+        const cy = d.y - 4 / zoom;   // ligeramente arriba para dejar espacio al texto
+
+        // ── Glow de selección ────────────────────────────────────────
+        if (d.selected) {
+            ctx.save();
+            ctx.shadowColor = accent;
+            ctx.shadowBlur  = 20 / zoom;
+            ctx.globalAlpha = 0.35;
+            ctx.fillStyle   = accent;
+            ctx.beginPath();
+            ctx.arc(cx, cy, iconSize * 0.72, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+
+        // ── Imagen PNG/SVG ───────────────────────────────────────────
+        ctx.save();
+        // Sombra suave bajo el ícono para darle profundidad
+        ctx.shadowColor  = 'rgba(0,0,0,0.6)';
+        ctx.shadowBlur   = 10 / zoom;
+        ctx.shadowOffsetY = 3 / zoom;
+
+        // Escalar manteniendo proporción
+        const ar = img.naturalWidth / img.naturalHeight;
+        let iw = iconSize * 2, ih = iconSize * 2;
+        if (ar >= 1) { ih = iw / ar; } else { iw = ih * ar; }
+
+        ctx.drawImage(img, cx - iw / 2, cy - ih / 2, iw, ih);
+        ctx.restore();
+
+        // ── Nombre ───────────────────────────────────────────────────
+        const short = d.name.length > 14 ? d.name.substring(0, 14) : d.name;
+        const nameY = cy + ih / 2 + 11 / zoom;
+        ctx.save();
+        // Sombra de texto para legibilidad sobre cualquier fondo
+        ctx.shadowColor  = dark ? 'rgba(0,0,0,0.9)' : 'rgba(255,255,255,0.9)';
+        ctx.shadowBlur   = 4 / zoom;
+        ctx.fillStyle    = dark ? '#e2f0ff' : '#0d2340';
+        ctx.font         = `700 ${Math.max(7,10) / zoom}px "Exo 2",sans-serif`;
+        ctx.textAlign    = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(short, cx, nameY);
+        ctx.restore();
+
+        // ── IP ────────────────────────────────────────────────────────
+        if (d.ipConfig?.ipAddress && d.ipConfig.ipAddress !== '0.0.0.0') {
+            ctx.save();
+            ctx.shadowColor  = dark ? 'rgba(0,0,0,0.9)' : 'rgba(255,255,255,0.9)';
+            ctx.shadowBlur   = 3 / zoom;
+            ctx.fillStyle    = accent;
+            ctx.font         = `${Math.max(5,7.5) / zoom}px "Space Mono",monospace`;
+            ctx.textAlign    = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(d.ipConfig.ipAddress, cx, nameY + 12 / zoom);
+            ctx.restore();
+        }
+
+        // ── Status dot ───────────────────────────────────────────────
+        ctx.save();
+        ctx.fillStyle = alive ? accent : '#f43f5e';
+        if (d.selected) { ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 5 / zoom; }
+        ctx.beginPath();
+        ctx.arc(cx - iconSize * 0.72, cy + ih / 2 + 6 / zoom, 2.5 / zoom, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // ── Puntos de interfaz ────────────────────────────────────────
+        // Redibujar usando las mismas posiciones que _iPos para que los cables conecten
+        const n = d.interfaces.length;
+        d.interfaces.forEach((intf, i) => {
+            const { x: ix, y: iy } = sim._iPos(d, i, n);
+            ctx.save();
+            const col = intf.connectedTo
+                ? accent
+                : intf.mediaType === 'fibra'    ? '#f59e0b'
+                : intf.mediaType === 'wireless' ? '#a78bfa'
+                : '#374151';
+            ctx.fillStyle = col;
+            if (intf.connectedTo && d.selected) { ctx.shadowColor = col; ctx.shadowBlur = 4 / zoom; }
+            ctx.beginPath();
+            ctx.arc(ix, iy, 3 / zoom, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        });
+    }
+
+    // ═══════════════════════════════════════════
     //  ICONS
     // ═══════════════════════════════════════════
     _drawIcon(d, cx, cy, s) {
         const { ctx, zoom } = this;
         ctx.save(); ctx.setLineDash([]); ctx.shadowBlur = 0;
+
+        // ── Intentar ícono personalizado PNG/SVG ─────────────────────
+        // Si existe en assets/icons/, se dibuja y se omite el fallback geométrico.
+        // Si no existe (o aún está cargando por primera vez), se usa el fallback.
+        if (this._drawCustomIcon(d.type, cx, cy, s)) {
+            ctx.restore();
+            return;
+        }
+
+        // ── Fallback: ícono geométrico canvas ────────────────────────
         const acc = this._typeAccent(d.type);
         ctx.strokeStyle = acc; ctx.fillStyle = acc;
         ctx.lineWidth = 1.5 / zoom;
