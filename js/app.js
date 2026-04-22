@@ -19,6 +19,16 @@ document.addEventListener('DOMContentLoaded', () => {
         window._arpVizInit(simulator);
     }
 
+    // ── RoutingVisualizer — convergencia OSPF/RIP dinámica ───────────
+    if (typeof window._rvInit === 'function') {
+        window._rvInit(simulator);
+    }
+
+    // ── LabGuide — laboratorio guiado ────────────────────────────────
+    if (typeof window._labInit === 'function') {
+        window._labInit(simulator);
+    }
+
     // ── Autocargar topología guardada ────────────────────────────────
     try {
         const loaded = loadNetwork(simulator);
@@ -773,6 +783,7 @@ document.addEventListener('DOMContentLoaded', () => {
             updateInterfacesTab(dev);
             updateStatsTab(dev);
             if (window.arpVisualizer) window.arpVisualizer.updateARPTab(dev);
+            if (window.routingVisualizer) window.routingVisualizer.updateRoutesTab(dev);
         } else {
             if (simulator.selectedDevice) simulator.selectedDevice.selected = false;
             simulator.selectedDevice = null;

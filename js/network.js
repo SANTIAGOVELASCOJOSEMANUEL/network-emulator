@@ -1409,8 +1409,9 @@ class NetworkSimulator {
         this.devices = []; this.connections = []; this.packets = [];
         this.annotations = []; this.selectedDevice = null;
         this.nextId = 1; this.engine = new NetworkEngine();
-        if (window.packetAnimator) window.packetAnimator.reset();
-        if (window.arpVisualizer)  window.arpVisualizer.reset();
+        if (window.packetAnimator)    window.packetAnimator.reset();
+        if (window.arpVisualizer)     window.arpVisualizer.reset();
+        if (window.routingVisualizer) window.routingVisualizer.reset();
         this.draw();
     }
     resetZoom() { this.zoom = 1; this.panX = 0; this.panY = 0; this.draw(); }

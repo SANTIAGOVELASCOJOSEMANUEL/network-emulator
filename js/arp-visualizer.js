@@ -332,92 +332,201 @@ class ARPVisualizer {
 
         let html = '';
         const isSwitchType = ['Switch', 'SwitchPoE'].includes(device.type);
+        const isRouterType = ['Router', 'RouterWifi', 'Firewall', 'SDWAN', 'ISP'].includes(device.type);
 
-        // ── Tabla ARP (solo hosts, routers, firewalls) ───────────────
+        // ── Cabecera del dispositivo ─────────────────────────────────
+        const devIP  = device.ipConfig?.ipAddress || '—';
+        const devGW  = device.ipConfig?.gateway   || '—';
+        const devMac = device.interfaces?.[0]?.mac || '—';
+        html += `<div class="arp-table-section arp-dev-header">
+  <div class="arp-dev-row"><span class="arp-dev-lbl">Dispositivo</span><span class="arp-dev-val">${device.name} (${device.type})</span></div>
+  <div class="arp-dev-row"><span class="arp-dev-lbl">IP</span><span class="td-ip">${devIP}</span></div>
+  <div class="arp-dev-row"><span class="arp-dev-lbl">Gateway</span><span class="td-ip">${devGW}</span></div>
+  <div class="arp-dev-row"><span class="arp-dev-lbl">MAC</span><span class="td-mac">${devMac}</span></div>
+</div>`;
+
+        // ── Tabla ARP — todos los tipos excepto switch puro ──────────
         if (!isSwitchType) {
+            // _arpCache puede estar directamente en el device o sin inicializar
             const cache   = device._arpCache;
-            const entries = cache ? cache.entries() : [];
+            const rawTable = cache?.table || {};
+            // Filtrar entradas expiradas en tiempo real
+            const entries = Object.entries(rawTable)
+                .filter(([, v]) => !v.expiresAt || Date.now() < v.expiresAt)
+                .map(([ip, v]) => ({ ip, ...v }));
+
             html += `<div class="arp-table-section">
-  <div class="arp-table-title">📋 Tabla ARP — ${device.name}</div>`;
+  <div class="arp-table-title">📋 Tabla ARP
+    <span class="arp-badge">${entries.length}</span>
+    ${entries.length ? `<button class="arp-flush-btn-inline" id="arp-flush-${device.id}">flush</button>` : ''}
+  </div>`;
             if (entries.length === 0) {
                 html += `<div class="arp-empty">Caché vacía — envía un ping para poblarla</div>`;
             } else {
                 html += `<table class="arp-tbl">
-  <thead><tr><th>IP</th><th>MAC</th><th>TTL</th></tr></thead>
-  <tbody>`;
+  <thead><tr><th>IP</th><th>MAC</th><th>Dispositivo</th><th>TTL</th></tr></thead><tbody>`;
                 entries.forEach(e => {
-                    const remaining = Math.max(0, Math.round((e.expiresAt - Date.now()) / 1000));
+                    const remaining = e.expiresAt
+                        ? Math.max(0, Math.round((e.expiresAt - Date.now()) / 1000)) + 's'
+                        : '∞';
                     const srcDev = this.sim.devices.find(d => d.id === e.deviceId);
-                    const devName = srcDev ? ` (${srcDev.name})` : '';
+                    const bar = e.expiresAt
+                        ? `<div class="arp-ttl-bar"><div class="arp-ttl-fill" style="width:${Math.round((e.expiresAt - Date.now()) / 300)}%"></div></div>`
+                        : '';
                     html += `<tr>
   <td class="td-ip">${e.ip}</td>
-  <td class="td-mac">${e.mac}</td>
-  <td>${remaining}s${devName}</td>
+  <td class="td-mac">${e.mac || '—'}</td>
+  <td>${srcDev ? srcDev.name : '?'}</td>
+  <td>${remaining}${bar}</td>
 </tr>`;
                 });
-                html += `</tbody></table>
-<button class="arp-flush-btn" id="arp-flush-${device.id}">🗑 Flush ARP</button>`;
+                html += `</tbody></table>`;
             }
             html += `</div>`;
         }
 
-        // ── Tabla MAC (switches) ─────────────────────────────────────
-        if (isSwitchType || device.type === 'Router') {
-            const macTable  = device._macTable;
-            const macEntries = macTable ? macTable.entries() : [];
+        // ── Tabla MAC — switches y también routers ───────────────────
+        if (isSwitchType || isRouterType) {
+            const macTable   = device._macTable;
+            const rawMac     = macTable?.table || {};
+            const macEntries = Object.entries(rawMac)
+                .filter(([, v]) => !v.learnedAt || (Date.now() - v.learnedAt < (macTable?.ttlMs || 300000)))
+                .map(([mac, v]) => ({ mac, ...v }));
+
             html += `<div class="arp-table-section">
-  <div class="arp-table-title">🔷 Tabla MAC — ${device.name}</div>`;
+  <div class="arp-table-title">🔷 Tabla MAC
+    <span class="arp-badge">${macEntries.length}</span>
+    ${macEntries.length ? `<button class="arp-flush-btn-inline" id="mac-flush-${device.id}">flush</button>` : ''}
+  </div>`;
             if (macEntries.length === 0) {
                 html += `<div class="arp-empty">Sin entradas — el tráfico L2 la populará</div>`;
             } else {
                 html += `<table class="arp-tbl">
-  <thead><tr><th>MAC</th><th>Puerto</th><th>Dispositivo</th></tr></thead>
-  <tbody>`;
+  <thead><tr><th>MAC</th><th>Puerto</th><th>Dispositivo</th><th>Edad</th></tr></thead><tbody>`;
                 macEntries.forEach(e => {
                     const srcDev = this.sim.devices.find(d => d.id === e.deviceId);
+                    const age = e.learnedAt
+                        ? Math.round((Date.now() - e.learnedAt) / 1000) + 's'
+                        : '—';
                     html += `<tr>
   <td class="td-mac">${e.mac}</td>
-  <td class="td-port">${e.port}</td>
+  <td class="td-port">${e.port || '—'}</td>
   <td>${srcDev ? srcDev.name : '?'}</td>
+  <td>${age}</td>
 </tr>`;
                 });
-                html += `</tbody></table>
-<button class="arp-flush-btn" id="mac-flush-${device.id}">🗑 Flush MAC</button>`;
+                html += `</tbody></table>`;
             }
             html += `</div>`;
         }
 
-        // ── Interfaces del dispositivo con MACs ──────────────────────
-        if (device.interfaces && device.interfaces.length) {
+        // ── Tabla de Rutas — routers ─────────────────────────────────
+        if (isRouterType && device.routingTable) {
+            const rt = device.routingTable;
+            const routes = (rt.entries ? rt.entries() : rt.routes || []);
             html += `<div class="arp-table-section">
-  <div class="arp-table-title">🔌 Interfaces de ${device.name}</div>
+  <div class="arp-table-title">🗺 Tabla de Rutas
+    <span class="arp-badge">${routes.length}</span>
+  </div>`;
+            if (routes.length === 0) {
+                html += `<div class="arp-empty">Sin rutas — conecta el dispositivo a la red</div>`;
+            } else {
+                html += `<div class="arp-rt-legend">C=conectada  R=RIP  S=estática  S*=default</div>
+<table class="arp-tbl">
+  <thead><tr><th>Tipo</th><th>Red</th><th>Via</th><th>Métrica</th></tr></thead><tbody>`;
+                routes.forEach(r => {
+                    const tipo = r._type || r.type || 'C';
+                    const net  = r.network || r.destination || '?';
+                    const mask = r.mask || '255.255.255.0';
+                    const gw   = r.gateway || r.nexthop || r.nextHop || 'directa';
+                    const met  = r.metric ?? '—';
+                    const typeColor = tipo === 'C' ? '#4ade80' : tipo === 'R' ? '#38bdf8' : tipo.startsWith('S') ? '#facc15' : '#a78bfa';
+                    html += `<tr>
+  <td style="color:${typeColor};font-weight:700">${tipo}</td>
+  <td class="td-ip">${net}/${this._maskToCidr(mask)}</td>
+  <td class="td-ip">${gw}</td>
+  <td>${met}</td>
+</tr>`;
+                });
+                html += `</tbody></table>`;
+            }
+            html += `</div>`;
+        }
+
+        // ── Interfaces ───────────────────────────────────────────────
+        if (device.interfaces?.length) {
+            html += `<div class="arp-table-section">
+  <div class="arp-table-title">🔌 Interfaces (${device.interfaces.length})</div>
   <table class="arp-tbl">
-    <thead><tr><th>Interfaz</th><th>MAC</th><th>IP</th></tr></thead>
-    <tbody>`;
+    <thead><tr><th>Nombre</th><th>MAC</th><th>IP</th><th>Estado</th></tr></thead><tbody>`;
             device.interfaces.forEach(intf => {
-                const ip = intf.ipAddress || device.ipConfig?.ipAddress || '—';
+                const ip   = intf.ipConfig?.ipAddress || intf.ipAddress || (device.interfaces.length === 1 ? devIP : '—');
+                const st   = intf.status === 'down' ? '<span style="color:#f43f5e">↓ down</span>' : '<span style="color:#4ade80">↑ up</span>';
                 html += `<tr>
   <td class="td-port">${intf.name}</td>
   <td class="td-mac">${intf.mac || '—'}</td>
   <td class="td-ip">${ip}</td>
+  <td>${st}</td>
 </tr>`;
             });
             html += `</tbody></table></div>`;
         }
 
+        // Inyectar CSS extra si no existe
+        if (!document.getElementById('arp-tab-extra-style')) {
+            const s = document.createElement('style');
+            s.id = 'arp-tab-extra-style';
+            s.textContent = `
+.arp-dev-header { background:rgba(56,189,248,.05); border-radius:6px; padding:6px 8px !important; }
+.arp-dev-row { display:flex; justify-content:space-between; align-items:center; padding:2px 0; font-size:10px; }
+.arp-dev-lbl { color:var(--text-dim,#64748b); }
+.arp-dev-val { color:var(--text-bright,#f8fafc); font-weight:600; }
+.arp-badge { display:inline-block; background:rgba(56,189,248,.15); color:#38bdf8; border-radius:8px; padding:0 5px; font-size:8px; margin-left:4px; }
+.arp-flush-btn-inline {
+  background:none; border:1px solid rgba(244,63,94,.3); color:#f43f5e;
+  border-radius:3px; padding:0 5px; font-size:8px; cursor:pointer;
+  font-family:'Space Mono',monospace; margin-left:4px;
+  transition: background .15s;
+}
+.arp-flush-btn-inline:hover { background:rgba(244,63,94,.15); }
+.arp-ttl-bar { height:2px; background:rgba(255,255,255,.1); border-radius:1px; margin-top:2px; overflow:hidden; }
+.arp-ttl-fill { height:100%; background:#4ade80; border-radius:1px; transition:width 1s linear; }
+.arp-rt-legend { font-size:8px; color:var(--text-dim,#64748b); padding:2px 0 4px; letter-spacing:.3px; }
+`;
+            document.head.appendChild(s);
+        }
+
         body.innerHTML = html || `<p class="arp-empty">No hay tablas disponibles para este dispositivo.</p>`;
 
-        // Event listeners flush
-        const flushARP = document.getElementById(`arp-flush-${device.id}`);
-        if (flushARP) flushARP.addEventListener('click', () => {
-            device._arpCache?.flush();
-            this.updateARPTab(device);
-        });
-        const flushMAC = document.getElementById(`mac-flush-${device.id}`);
-        if (flushMAC) flushMAC.addEventListener('click', () => {
-            device._macTable?.flush();
-            this.updateARPTab(device);
-        });
+        // Listeners flush inline
+        const fARP = document.getElementById(`arp-flush-${device.id}`);
+        if (fARP) fARP.addEventListener('click', () => { device._arpCache?.flush(); this.updateARPTab(device); });
+        const fMAC = document.getElementById(`mac-flush-${device.id}`);
+        if (fMAC) fMAC.addEventListener('click', () => { device._macTable?.flush(); this.updateARPTab(device); });
+    }
+
+    /** Convierte máscara en notación CIDR */
+    _maskToCidr(mask) {
+        if (!mask || mask === '0.0.0.0') return '0';
+        try {
+            return mask.split('.').reduce((acc, oct) => {
+                let n = parseInt(oct);
+                let bits = 0;
+                while (n) { bits += n & 1; n >>= 1; }
+                return acc + bits;
+            }, 0).toString();
+        } catch { return '?'; }
+    }
+
+    /** Auto-refresh del tab ARP/MAC cada segundo si está activo */
+    _startAutoRefresh() {
+        if (this._refreshTimer) return;
+        this._refreshTimer = setInterval(() => {
+            const tab = document.getElementById('tab-arp');
+            if (!tab?.classList.contains('active')) return;
+            const dev = this.sim.selectedDevice;
+            if (dev) this.updateARPTab(dev);
+        }, 1000);
     }
 
     /* ── Hook al renderer para dibujar destellos en canvas ──────── */
@@ -687,6 +796,7 @@ window._arpVizInit = function(sim) {
         if (oldContent) oldContent.remove();
     }
     window.arpVisualizer = new ARPVisualizer(sim);
+    window.arpVisualizer._startAutoRefresh();
     console.log('[ARPVisualizer] ✅ Inicializado');
     return window.arpVisualizer;
 };
