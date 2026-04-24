@@ -1,3 +1,66 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Uploaded to: SVG Repo, www.svgrepo.com, Generator: SVG Repo Mixer Tools -->
-<svg width="800px" height="800px" viewBox="0 0 1024 1024" class="icon"  version="1.1" xmlns="http://www.w3.org/2000/svg"><path d="M537 830.3l-470-230v-242l470 212z" fill="#37BBEF" /><path d="M499.7 735.6L86.4 536.2V428l413.3 193.8z" fill="#FFFFFF" /><path d="M537 830.3l420-230v-240l-420 210z" fill="#2481BA" /><path d="M67 358.3l470 212 420-210-494.4-166.6z" fill="#3ED6FF" /><path d="M159.8 503.5v-18.6l-37.6-17.5v18.5l-13.2-6.1v51.4l63.9 30.5v-52z" fill="#113B42" /><path d="M125 532l2.5 1.2v-33.5l-2.5-1.2zM134.8 536.6l2.5 1.3v-33.6l-2.5-1.2zM144.6 541.3l2.5 1.2v-33.6l-2.5-1.2zM154.4 512.3V546l2.5 1.2v-33.7z" fill="#FFFFFF" /><path d="M259.3 550.1v-19l-37.6-17.5v18.9l-13.2-6.1v52.4l63.9 30.6v-53.2z" fill="#113B42" /><path d="M224.5 579.5l2.5 1.2v-34.2l-2.5-1.2zM234.3 584.1l2.5 1.2v-34.2l-2.5-1.2zM244.1 588.8l2.5 1.2v-34.3l-2.5-1.2zM253.9 559.1v34.4l2.5 1.2v-34.4z" fill="#FFFFFF" /><path d="M358.8 596.7v-19.4l-37.7-17.5v19.3l-13.1-6.2v53.5l63.9 30.6v-54.2z" fill="#113B42" /><path d="M324 626.9l2.5 1.3v-34.9l-2.5-1.2zM333.8 631.6l2.5 1.2v-34.9l-2.5-1.2zM343.6 636.3l2.5 1.2v-35l-2.5-1.2zM353.4 605.9v35l2.5 1.3v-35.1z" fill="#FFFFFF" /><path d="M458.2 643.2v-19.7L420.6 606v19.6l-13.1-6.1V674l63.9 30.6v-55.2z" fill="#113B42" /><path d="M423.5 674.4l2.5 1.2v-35.5l-2.5-1.2zM433.3 679.1l2.5 1.2v-35.6l-2.5-1.2zM443.1 683.8l2.5 1.2v-35.7l-2.5-1.2zM452.9 652.7v35.7l2.5 1.2v-35.7z" fill="#FFFFFF" /><path d="M127.5 583.8m-6.8 0a6.8 6.8 0 1 0 13.6 0 6.8 6.8 0 1 0-13.6 0Z" fill="#7C1919" /><path d="M233.5 635m-6.8 0a6.8 6.8 0 1 0 13.6 0 6.8 6.8 0 1 0-13.6 0Z" fill="#197F42" /><path d="M332.2 682.7m-6.8 0a6.8 6.8 0 1 0 13.6 0 6.8 6.8 0 1 0-13.6 0Z" fill="#197F42" /><path d="M433.8 732m-6.8 0a6.8 6.8 0 1 0 13.6 0 6.8 6.8 0 1 0-13.6 0Z" fill="#197F42" /></svg>
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <title>AP Gateway Ruijie style Cisco colors</title>
+
+  <!-- Sombra base -->
+  <ellipse cx="32" cy="58" rx="24" ry="3" fill="#005aaa" opacity="0.25"/>
+
+  <!-- Cuerpo principal del gateway (caja horizontal estilo rack) -->
+  <rect x="4" y="20" width="56" height="30" rx="3" fill="#1ba0d7"/>
+  <!-- Cara superior clara -->
+  <rect x="4" y="20" width="56" height="5" rx="3" fill="#5bc8f5"/>
+  <rect x="4" y="23" width="56" height="2" fill="#5bc8f5"/>
+  <!-- Lado derecho sombra -->
+  <rect x="57" y="20" width="3" height="30" rx="0" fill="#005aaa"/>
+  <rect x="57" y="47" width="3" height="3" rx="2" fill="#005aaa"/>
+  <!-- Cara inferior sombra -->
+  <rect x="4" y="47" width="56" height="3" rx="2" fill="#0070d2"/>
+
+  <!-- Panel frontal interno -->
+  <rect x="7" y="24" width="50" height="20" rx="2" fill="#0070d2"/>
+
+  <!-- ── Sección izquierda: logo / nombre ── -->
+  <rect x="9" y="26" width="14" height="16" rx="1" fill="#005aaa"/>
+  <!-- Símbolo AP/wireless en el logo -->
+  <path d="M 12 36 Q 16 30 20 36" fill="none" stroke="#5bc8f5" stroke-width="1.4" stroke-linecap="round"/>
+  <path d="M 13.5 38 Q 16 34 18.5 38" fill="none" stroke="#5bc8f5" stroke-width="1.4" stroke-linecap="round"/>
+  <circle cx="16" cy="39.5" r="1.2" fill="#ffffff"/>
+
+  <!-- ── Puertos WAN (2) ── -->
+  <rect x="25" y="27" width="6" height="5" rx="1" fill="#005aaa"/>
+  <rect x="26" y="28" width="4" height="3" rx="0.5" fill="#1ba0d7"/>
+  <rect x="33" y="27" width="6" height="5" rx="1" fill="#005aaa"/>
+  <rect x="34" y="28" width="4" height="3" rx="0.5" fill="#1ba0d7"/>
+
+  <!-- Etiqueta WAN -->
+  <text x="28" y="35.5" text-anchor="middle" font-family="Arial" font-size="4" font-weight="bold" fill="#5bc8f5">WAN</text>
+
+  <!-- ── Puertos LAN (4) ── -->
+  <rect x="25" y="37" width="5" height="4" rx="1" fill="#005aaa"/>
+  <rect x="25.5" y="37.5" width="4" height="3" rx="0.5" fill="#1ba0d7"/>
+  <rect x="31" y="37" width="5" height="4" rx="1" fill="#005aaa"/>
+  <rect x="31.5" y="37.5" width="4" height="3" rx="0.5" fill="#1ba0d7"/>
+  <rect x="37" y="37" width="5" height="4" rx="1" fill="#005aaa"/>
+  <rect x="37.5" y="37.5" width="4" height="3" rx="0.5" fill="#1ba0d7"/>
+  <rect x="43" y="37" width="5" height="4" rx="1" fill="#005aaa"/>
+  <rect x="43.5" y="37.5" width="4" height="3" rx="0.5" fill="#1ba0d7"/>
+
+  <!-- Etiqueta LAN -->
+  <text x="37" y="35.5" text-anchor="middle" font-family="Arial" font-size="4" font-weight="bold" fill="#5bc8f5">LAN</text>
+
+  <!-- ── LEDs de estado ── -->
+  <circle cx="51" cy="28" r="1.5" fill="#ffffff" opacity="0.9"/>
+  <circle cx="51" cy="33" r="1.5" fill="#ffffff" opacity="0.6"/>
+  <circle cx="51" cy="38" r="1.5" fill="#ffffff" opacity="0.6"/>
+  <circle cx="51" cy="43" r="1.5" fill="#ffffff" opacity="0.4"/>
+
+  <!-- Patas del dispositivo -->
+  <rect x="8"  y="50" width="6" height="3" rx="1" fill="#005aaa"/>
+  <rect x="50" y="50" width="6" height="3" rx="1" fill="#005aaa"/>
+
+  <!-- Ondas WiFi arriba (representa gestión de APs) -->
+  <path d="M 20 14 Q 32 6 44 14" fill="none" stroke="#1ba0d7" stroke-width="2" stroke-linecap="round" opacity="0.6"/>
+  <path d="M 24 17 Q 32 11 40 17" fill="none" stroke="#1ba0d7" stroke-width="2" stroke-linecap="round" opacity="0.9"/>
+  <circle cx="32" cy="19" r="1.8" fill="#0070d2"/>
+  <circle cx="32" cy="19" r="1" fill="#ffffff"/>
+
+</svg>

@@ -1,1 +1,68 @@
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 50 51" fill="#fff" fill-rule="evenodd" stroke="#000" stroke-linecap="round" stroke-linejoin="round"><use xlink:href="#A" x=".5" y=".5"/><symbol id="A" overflow="visible"><g stroke="#fff" stroke-linejoin="miter" fill="#126d99" stroke-width=".787"><path d="M48.785 28.722l-4.721 5.901H6.689l5.901-6.294 36.195.393z"/><path d="M6.689 41.31v-6.689h35.802v6.689H6.689zM6.295 6.297H42.49v26.752H6.295V6.297z"/><path d="M42.489 33.048l5.901-5.901V0l-5.901 6.295v26.752zm0 8.262v-6.689l6.294-5.901v6.689l-6.294 5.901z"/></g><use xlink:href="#C" stroke="none" fill="#126d99"/><g stroke="#fff" stroke-linejoin="miter" stroke-width=".787"><use xlink:href="#C" fill="none"/><g fill="#126d99"><path d="M48.391.001H13.377L6.295 6.296H42.49L48.391.001zM41.31 49.966v-1.967l4.721-6.688v4.328l-4.721 4.328z"/><path d="M41.31 47.998H0l4.721-6.688h41.31l-4.721 6.688z"/><path d="M41.31 47.998v1.967H0v-1.967h41.31z"/></g></g><use xlink:href="#D" stroke="none" fill="#126d99"/><use xlink:href="#D" stroke="#fff" stroke-linejoin="miter" fill="none" stroke-width=".787"/></symbol><defs ><path id="C" d="M12.192 9.056h23.999c1.574 0 3.147 1.574 3.147 3.147v14.95c0 1.574-1.574 2.754-3.147 2.754H12.192c-1.574 0-2.754-1.18-2.754-2.754v-14.95c0-1.574 1.18-3.147 2.754-3.147z"/><path id="D" d="M20.847 13.777c-4.328-.787-6.688 1.574-6.295 3.147v.393c-3.147.393-2.36 4.328-.787 4.328-.393 2.754 3.541 4.328 5.901 2.754v-.393c.393 2.754 9.049 2.754 10.622 1.18h.393c3.541 0 5.114-2.36 4.328-4.328h.393c1.18-.393 1.18-3.147-.787-3.541v-.393c.787-1.574-1.18-3.541-4.328-3.147h-.393c-1.967-1.967-8.262-1.967-9.049 0z"/></defs></svg>
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <title>Server icon Cisco Packet Tracer style</title>
+
+  <!-- Sombra base -->
+  <ellipse cx="32" cy="61" rx="22" ry="2" fill="#005aaa" opacity="0.25"/>
+
+  <!-- Rack del servidor (3U apilados) -->
+
+  <!-- Unidad 1 -->
+  <rect x="8" y="10" width="48" height="13" rx="2" fill="#1ba0d7"/>
+  <rect x="8" y="10" width="48" height="3"  rx="2" fill="#5bc8f5"/>
+  <rect x="53" y="10" width="3" height="13" rx="0" fill="#005aaa"/>
+  <rect x="8"  y="20" width="48" height="3" rx="2" fill="#0070d2"/>
+  <rect x="11" y="13" width="30" height="7" rx="1" fill="#0070d2"/>
+  <!-- Ranura HDD U1 -->
+  <rect x="12" y="14" width="8" height="5" rx="0.8" fill="#005aaa"/>
+  <rect x="12.5" y="14.5" width="7" height="4" rx="0.5" fill="#1ba0d7"/>
+  <rect x="21" y="14" width="8" height="5" rx="0.8" fill="#005aaa"/>
+  <rect x="21.5" y="14.5" width="7" height="4" rx="0.5" fill="#1ba0d7"/>
+  <rect x="30" y="14" width="8" height="5" rx="0.8" fill="#005aaa"/>
+  <rect x="30.5" y="14.5" width="7" height="4" rx="0.5" fill="#1ba0d7"/>
+  <circle cx="46" cy="15" r="1.3" fill="#1ba0d7" opacity="0.9"/>
+  <circle cx="46" cy="18" r="1.3" fill="#1ba0d7" opacity="0.7"/>
+  <circle cx="50" cy="15" r="1.3" fill="#1ba0d7" opacity="0.5"/>
+  <circle cx="50" cy="18" r="1.3" fill="#1ba0d7" opacity="0.4"/>
+
+  <!-- Unidad 2 -->
+  <rect x="8" y="25" width="48" height="13" rx="2" fill="#1ba0d7"/>
+  <rect x="8" y="25" width="48" height="3"  rx="2" fill="#5bc8f5"/>
+  <rect x="53" y="25" width="3" height="13" rx="0" fill="#005aaa"/>
+  <rect x="8"  y="35" width="48" height="3" rx="2" fill="#0070d2"/>
+  <rect x="11" y="28" width="30" height="7" rx="1" fill="#0070d2"/>
+  <rect x="12" y="29" width="8" height="5" rx="0.8" fill="#005aaa"/>
+  <rect x="12.5" y="29.5" width="7" height="4" rx="0.5" fill="#1ba0d7"/>
+  <rect x="21" y="29" width="8" height="5" rx="0.8" fill="#005aaa"/>
+  <rect x="21.5" y="29.5" width="7" height="4" rx="0.5" fill="#1ba0d7"/>
+  <rect x="30" y="29" width="8" height="5" rx="0.8" fill="#005aaa"/>
+  <rect x="30.5" y="29.5" width="7" height="4" rx="0.5" fill="#1ba0d7"/>
+  <circle cx="46" cy="30" r="1.3" fill="#1ba0d7" opacity="0.9"/>
+  <circle cx="46" cy="33" r="1.3" fill="#1ba0d7" opacity="0.7"/>
+  <circle cx="50" cy="30" r="1.3" fill="#1ba0d7" opacity="0.5"/>
+  <circle cx="50" cy="33" r="1.3" fill="#1ba0d7" opacity="0.4"/>
+
+  <!-- Unidad 3 -->
+  <rect x="8" y="40" width="48" height="13" rx="2" fill="#1ba0d7"/>
+  <rect x="8" y="40" width="48" height="3"  rx="2" fill="#5bc8f5"/>
+  <rect x="53" y="40" width="3" height="13" rx="0" fill="#005aaa"/>
+  <rect x="8"  y="50" width="48" height="3" rx="2" fill="#0070d2"/>
+  <rect x="11" y="43" width="30" height="7" rx="1" fill="#0070d2"/>
+  <rect x="12" y="44" width="8" height="5" rx="0.8" fill="#005aaa"/>
+  <rect x="12.5" y="44.5" width="7" height="4" rx="0.5" fill="#1ba0d7"/>
+  <rect x="21" y="44" width="8" height="5" rx="0.8" fill="#005aaa"/>
+  <rect x="21.5" y="44.5" width="7" height="4" rx="0.5" fill="#1ba0d7"/>
+  <rect x="30" y="44" width="8" height="5" rx="0.8" fill="#005aaa"/>
+  <rect x="30.5" y="44.5" width="7" height="4" rx="0.5" fill="#1ba0d7"/>
+  <circle cx="46" cy="45" r="1.3" fill="#1ba0d7" opacity="0.9"/>
+  <circle cx="46" cy="48" r="1.3" fill="#1ba0d7" opacity="0.7"/>
+  <circle cx="50" cy="45" r="1.3" fill="#1ba0d7" opacity="0.5"/>
+  <circle cx="50" cy="48" r="1.3" fill="#1ba0d7" opacity="0.4"/>
+
+  <!-- Patas rack -->
+  <rect x="9"  y="53" width="8" height="3" rx="1" fill="#005aaa"/>
+  <rect x="47" y="53" width="8" height="3" rx="1" fill="#005aaa"/>
+
+  <!-- Etiqueta -->
+  <text x="32" y="61" text-anchor="middle" font-family="Arial" font-size="5" font-weight="bold" fill="#0070d2">SERVER</text>
+
+</svg>

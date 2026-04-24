@@ -1,0 +1,48 @@
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <title>Mobile Phone icon Cisco Packet Tracer style</title>
+
+  <!-- Cuerpo del smartphone -->
+  <rect x="16" y="4" width="32" height="56" rx="5" fill="#1ba0d7"/>
+  <!-- Cara superior clara -->
+  <rect x="16" y="4" width="32" height="7" rx="5" fill="#5bc8f5"/>
+  <rect x="16" y="8" width="32" height="3" fill="#5bc8f5"/>
+  <!-- Sombra lateral derecha -->
+  <rect x="44" y="4" width="4" height="56" rx="0" fill="#005aaa"/>
+  <rect x="44" y="55" width="4" height="5" rx="4" fill="#005aaa"/>
+  <!-- Sombra inferior -->
+  <rect x="16" y="55" width="32" height="5" rx="4" fill="#0070d2"/>
+
+  <!-- Altavoz superior -->
+  <rect x="25" y="7" width="14" height="2.5" rx="1.5" fill="#0070d2" opacity="0.6"/>
+
+  <!-- Cámara frontal -->
+  <circle cx="40" cy="8" r="1.5" fill="#0070d2"/>
+  <circle cx="40" cy="8" r="0.8" fill="#003366"/>
+
+  <!-- Pantalla -->
+  <rect x="19" y="13" width="26" height="36" rx="2" fill="#003366"/>
+  <rect x="19" y="13" width="26" height="5" rx="2" fill="#001f3f"/>
+
+  <!-- Contenido en pantalla -->
+  <line x1="23" y1="22" x2="39" y2="22" stroke="#1ba0d7" stroke-width="1.2" stroke-linecap="round" opacity="0.7"/>
+  <line x1="23" y1="26" x2="36" y2="26" stroke="#1ba0d7" stroke-width="1"   stroke-linecap="round" opacity="0.5"/>
+  <line x1="23" y1="30" x2="38" y2="30" stroke="#1ba0d7" stroke-width="1"   stroke-linecap="round" opacity="0.5"/>
+  <line x1="23" y1="34" x2="35" y2="34" stroke="#1ba0d7" stroke-width="1"   stroke-linecap="round" opacity="0.5"/>
+
+  <!-- Ícono señal WiFi en pantalla -->
+  <path d="M 27 40 Q 32 36 37 40" fill="none" stroke="#5bc8f5" stroke-width="1.2" stroke-linecap="round"/>
+  <path d="M 29 43 Q 32 40 35 43" fill="none" stroke="#5bc8f5" stroke-width="1.2" stroke-linecap="round"/>
+  <circle cx="32" cy="45" r="1.2" fill="#5bc8f5"/>
+
+  <!-- Botón home -->
+  <circle cx="32" cy="55" r="3" fill="#0070d2"/>
+  <circle cx="32" cy="55" r="2" fill="#1ba0d7"/>
+
+  <!-- Botón lateral volumen -->
+  <rect x="14" y="20" width="2" height="6" rx="1" fill="#005aaa"/>
+  <rect x="14" y="28" width="2" height="4" rx="1" fill="#005aaa"/>
+
+  <!-- Botón power -->
+  <rect x="48" y="22" width="2" height="5" rx="1" fill="#005aaa"/>
+
+</svg>

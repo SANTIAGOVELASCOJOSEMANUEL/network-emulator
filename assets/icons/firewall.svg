@@ -1,3 +1,77 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Uploaded to: SVG Repo, www.svgrepo.com, Generator: SVG Repo Mixer Tools -->
-<svg width="800px" height="800px" viewBox="0 0 1024 1024" class="icon"  version="1.1" xmlns="http://www.w3.org/2000/svg"><path d="M762.1 956.3l-660-230v-552l660 192z" fill="#37BBEF" /><path d="M762.1 956.3l160-170v-550l-160 130z" fill="#2481BA" /><path d="M102.1 174.3l660 192 160-130L297.7 79.7z" fill="#3ED6FF" /><path d="M922.1 410.9v-25.7l-160 129.7v2.7l-244.3-74.8V309.1h-20v127.6l-262-80.2V222.2h-20v128.1l-113.7-34.8v20.9L335.8 408v112l-233.7-74.9v21l113.7 36.4v121.9L102.1 588v21l233.7 74.9v123.9l20 7V690.3l280 89.7v132.3l20 7V786.4l106.3 34.1v2.3l160-153.8v-28.6l-160 153.8v5.3l-244.3-78.3V599.3l244.3 78.3v1.4l160-141.8v-27.1l-160 141.8v4.8l-106.3-34.1V505.9l106.3 32.5v2.1l160-129.6zM497.8 714.8l-262-84V509l262 84v121.8z m138-98.6l-280-89.7V414.1l280 85.7v116.4z" fill="#FFFFFF" /><path d="M70.1 169.3l695.6 195.6 189.6-129.2-657.6-168z" fill="#3ED6FF" /><path d="M68.7 190.7v-21.4l697 195.6v24.8z" fill="#369BCE" /><path d="M955.3 235.7v23.8L765.7 389.7v-24.8z" fill="#1A6D96" /></svg>
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <title>Firewall icon Cisco Packet Tracer style</title>
+
+  <!-- Sombra base -->
+  <ellipse cx="32" cy="59" rx="24" ry="2.5" fill="#005aaa" opacity="0.25"/>
+
+  <!-- Cuerpo principal (caja rack horizontal) -->
+  <rect x="4" y="18" width="56" height="34" rx="3" fill="#1ba0d7"/>
+  <!-- Cara superior clara -->
+  <rect x="4" y="18" width="56" height="5" rx="3" fill="#5bc8f5"/>
+  <rect x="4" y="21" width="56" height="2" fill="#5bc8f5"/>
+  <!-- Sombra lateral derecha -->
+  <rect x="57" y="18" width="3" height="34" rx="0" fill="#005aaa"/>
+  <rect x="57" y="49" width="3" height="3" rx="2" fill="#005aaa"/>
+  <!-- Sombra inferior -->
+  <rect x="4" y="49" width="56" height="3" rx="2" fill="#0070d2"/>
+
+  <!-- Panel frontal -->
+  <rect x="7" y="23" width="50" height="23" rx="2" fill="#0070d2"/>
+
+  <!-- ── Sección izquierda: icono llama firewall ── -->
+  <rect x="9" y="25" width="13" height="19" rx="1" fill="#005aaa"/>
+  <!-- Llama -->
+  <path d="M 15.5 41 C 15.5 41 11 38 12 34 C 13 30 15 31 15 31 C 15 31 13.5 28 16 26.5 C 16 26.5 15.5 29.5 17.5 30.5 C 17.5 30.5 18 28 19.5 27 C 19.5 27 18.5 30 19.5 31.5 C 20.5 33 21 30.5 21 30.5 C 22 33 21 36 19.5 37.5 C 18.5 38.5 18 40 18 41 Z" fill="#e85d04"/>
+  <path d="M 15.5 41 C 15.5 41 12.5 38.5 13.5 35.5 C 14 34 15.5 34.5 15.5 34.5 C 15.5 34.5 15 32.5 16.5 31.5 C 16.5 31.5 16 33.5 17.5 34 C 18.5 34.5 19 32.5 19.5 32 C 20 33.5 19.5 36 18 37.5 C 17 38.5 17 40 17 41 Z" fill="#f48c06"/>
+  <path d="M 15.5 41 C 15.5 41 14 39 14.5 37 C 15 35.5 16 36 16 36 C 16 36 16 34.5 17 34 C 17 34 16.5 35.5 17.5 36 C 18 36.5 18 35 18.5 34.5 C 19 35.5 18.5 37.5 17.5 38.5 C 16.5 39.5 16.5 41 16.5 41 Z" fill="#ffd166"/>
+
+  <!-- ── Puerto WAN — rojo ── -->
+  <rect x="24" y="26" width="7" height="5" rx="1" fill="#9b0e1c"/>
+  <rect x="24.5" y="26.5" width="6" height="4" rx="0.5" fill="#e63946"/>
+  <text x="27.5" y="35" text-anchor="middle" font-family="Arial" font-size="3.5" font-weight="bold" fill="#e63946">WAN</text>
+
+  <!-- ── Puerto DMZ — naranja ── -->
+  <rect x="33" y="26" width="7" height="5" rx="1" fill="#7c3d00"/>
+  <rect x="33.5" y="26.5" width="6" height="4" rx="0.5" fill="#e85d04"/>
+  <text x="36.5" y="35" text-anchor="middle" font-family="Arial" font-size="3.5" font-weight="bold" fill="#e85d04">DMZ</text>
+
+  <!-- ── Puertos LAN (3) — verdes ── -->
+  <rect x="24" y="36" width="5" height="4" rx="1" fill="#1a4d2e"/>
+  <rect x="24.5" y="36.5" width="4" height="3" rx="0.5" fill="#2dc653"/>
+
+  <rect x="30" y="36" width="5" height="4" rx="1" fill="#1a4d2e"/>
+  <rect x="30.5" y="36.5" width="4" height="3" rx="0.5" fill="#2dc653"/>
+
+  <rect x="36" y="36" width="5" height="4" rx="1" fill="#1a4d2e"/>
+  <rect x="36.5" y="36.5" width="4" height="3" rx="0.5" fill="#2dc653"/>
+
+  <text x="32" y="44" text-anchor="middle" font-family="Arial" font-size="3.5" font-weight="bold" fill="#2dc653">LAN</text>
+
+  <!-- ── Puerto MGMT — amarillo ── -->
+  <rect x="43" y="26" width="7" height="5" rx="1" fill="#7c5e00"/>
+  <rect x="43.5" y="26.5" width="6" height="4" rx="0.5" fill="#ffd166"/>
+  <text x="46.5" y="35" text-anchor="middle" font-family="Arial" font-size="3" font-weight="bold" fill="#ffd166">MGMT</text>
+
+  <!-- ── Puerto CONSOLE — azul claro ── -->
+  <rect x="43" y="36" width="7" height="4" rx="1" fill="#005aaa"/>
+  <rect x="43.5" y="36.5" width="6" height="3" rx="0.5" fill="#5bc8f5"/>
+  <text x="46.5" y="44" text-anchor="middle" font-family="Arial" font-size="3" font-weight="bold" fill="#5bc8f5">CON</text>
+
+  <!-- ── LEDs de estado ── -->
+  <circle cx="53" cy="27" r="1.4" fill="#2dc653"/>
+  <circle cx="53" cy="31" r="1.4" fill="#2dc653"/>
+  <circle cx="53" cy="35" r="1.4" fill="#ffd166"/>
+  <circle cx="53" cy="39" r="1.4" fill="#e63946"/>
+  <circle cx="53" cy="43" r="1.4" fill="#ffffff" opacity="0.4"/>
+
+  <!-- Patas -->
+  <rect x="8"  y="52" width="6" height="3" rx="1" fill="#005aaa"/>
+  <rect x="50" y="52" width="6" height="3" rx="1" fill="#005aaa"/>
+
+  <!-- Escudo de seguridad arriba -->
+  <path d="M 32 6 L 38 9 L 38 14 C 38 17 32 19 32 19 C 32 19 26 17 26 14 L 26 9 Z" fill="#0070d2"/>
+  <path d="M 32 7.5 L 37 10 L 37 14 C 37 16.5 32 18 32 18 C 32 18 27 16.5 27 14 L 27 10 Z" fill="#1ba0d7"/>
+  <!-- Check en el escudo -->
+  <polyline points="29.5,13.5 31.5,15.5 34.5,11.5" fill="none" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+</svg>

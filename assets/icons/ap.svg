@@ -1,0 +1,52 @@
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <title>Access Point Ruijie style Cisco colors</title>
+
+  <!-- Sombra base en el techo -->
+  <ellipse cx="32" cy="58" rx="18" ry="3" fill="#005aaa" opacity="0.3"/>
+
+  <!-- Cuerpo principal domo circular (vista desde abajo/frente) -->
+  <!-- Capa exterior del domo -->
+  <circle cx="32" cy="34" r="22" fill="#0070d2"/>
+  <!-- Cara superior clara -->
+  <ellipse cx="32" cy="20" rx="22" ry="8" fill="#1ba0d7"/>
+  <!-- Gradiente visual con capas -->
+  <circle cx="32" cy="34" r="22" fill="#1ba0d7" opacity="0.4" clip-path="url(#topHalf)"/>
+
+  <defs>
+    <clipPath id="topHalf">
+      <rect x="0" y="0" width="64" height="34"/>
+    </clipPath>
+    <clipPath id="bottomHalf">
+      <rect x="0" y="34" width="64" height="30"/>
+    </clipPath>
+  </defs>
+
+  <!-- Anillos concéntricos estilo Ruijie (ranuras del domo) -->
+  <circle cx="32" cy="34" r="18" fill="none" stroke="#005aaa" stroke-width="1.2" opacity="0.7"/>
+  <circle cx="32" cy="34" r="13" fill="none" stroke="#005aaa" stroke-width="1.2" opacity="0.7"/>
+  <circle cx="32" cy="34" r="8"  fill="none" stroke="#005aaa" stroke-width="1.2" opacity="0.7"/>
+
+  <!-- Ranuras radiales estilo ventilación Ruijie -->
+  <line x1="32" y1="12" x2="32" y2="56" stroke="#005aaa" stroke-width="1" opacity="0.4"/>
+  <line x1="10" y1="34" x2="54" y2="34" stroke="#005aaa" stroke-width="1" opacity="0.4"/>
+  <line x1="16" y1="18" x2="48" y2="50" stroke="#005aaa" stroke-width="1" opacity="0.4"/>
+  <line x1="48" y1="18" x2="16" y2="50" stroke="#005aaa" stroke-width="1" opacity="0.4"/>
+
+  <!-- Centro del AP — LED indicador -->
+  <circle cx="32" cy="34" r="5" fill="#ffffff"/>
+  <circle cx="32" cy="34" r="3.5" fill="#5bc8f5"/>
+  <circle cx="32" cy="34" r="2" fill="#ffffff"/>
+
+  <!-- Montura al techo (parte superior) -->
+  <rect x="26" y="8" width="12" height="5" rx="2" fill="#005aaa"/>
+  <rect x="26" y="8" width="12" height="2" rx="2" fill="#1ba0d7"/>
+
+  <!-- Tornillos de montaje -->
+  <circle cx="28" cy="10" r="1.2" fill="#0070d2"/>
+  <circle cx="36" cy="10" r="1.2" fill="#0070d2"/>
+
+  <!-- Ondas WiFi pequeñas debajo del domo -->
+  <path d="M 22 52 Q 32 48 42 52" fill="none" stroke="#1ba0d7" stroke-width="1.5" stroke-linecap="round" opacity="0.8"/>
+  <path d="M 26 56 Q 32 53 38 56" fill="none" stroke="#1ba0d7" stroke-width="1.5" stroke-linecap="round" opacity="0.6"/>
+
+</svg>

@@ -1,0 +1,63 @@
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <title>POS Payment Terminal icon Cisco Packet Tracer style</title>
+
+  <!-- Sombra base -->
+  <ellipse cx="32" cy="61" rx="16" ry="2" fill="#005aaa" opacity="0.25"/>
+
+  <!-- Base del terminal -->
+  <rect x="18" y="54" width="28" height="6" rx="3" fill="#0070d2"/>
+  <rect x="18" y="54" width="28" height="3" rx="3" fill="#1ba0d7"/>
+
+  <!-- Cuerpo principal inclinado (efecto con rectángulo) -->
+  <rect x="16" y="8" width="32" height="48" rx="4" fill="#1ba0d7"/>
+  <!-- Cara superior clara -->
+  <rect x="16" y="8" width="32" height="6" rx="4" fill="#5bc8f5"/>
+  <rect x="16" y="11" width="32" height="3" fill="#5bc8f5"/>
+  <!-- Sombra lateral derecha -->
+  <rect x="44" y="8" width="4" height="48" rx="0" fill="#005aaa"/>
+  <rect x="44" y="52" width="4" height="4" rx="3" fill="#005aaa"/>
+  <!-- Sombra inferior -->
+  <rect x="16" y="52" width="32" height="4" rx="3" fill="#0070d2"/>
+
+  <!-- Pantalla táctil -->
+  <rect x="19" y="11" width="26" height="20" rx="2" fill="#001f3f"/>
+  <rect x="19" y="11" width="26" height="4"  rx="2" fill="#003366"/>
+
+  <!-- Contenido pantalla — monto -->
+  <text x="32" y="20" text-anchor="middle" font-family="Arial" font-size="4" fill="#5bc8f5">TOTAL</text>
+  <text x="32" y="27" text-anchor="middle" font-family="Arial" font-size="6" font-weight="bold" fill="#ffffff">$125.00</text>
+
+  <!-- Lector de tarjeta (ranura) -->
+  <rect x="19" y="33" width="26" height="5" rx="1" fill="#0070d2"/>
+  <rect x="20" y="34" width="24" height="3" rx="0.5" fill="#005aaa"/>
+  <line x1="21" y1="35.5" x2="43" y2="35.5" stroke="#1ba0d7" stroke-width="0.8" opacity="0.6"/>
+  <text x="32" y="41" text-anchor="middle" font-family="Arial" font-size="3" fill="#5bc8f5">INSERT CARD</text>
+
+  <!-- Teclado numérico PIN pad -->
+  <rect x="19" y="42" width="26" height="11" rx="1" fill="#0070d2"/>
+  <!-- Fila 1: 1 2 3 -->
+  <rect x="21" y="43" width="6" height="3" rx="0.8" fill="#005aaa"/>
+  <text x="24" y="45.5" text-anchor="middle" font-family="Arial" font-size="3.5" font-weight="bold" fill="#5bc8f5">1</text>
+  <rect x="28" y="43" width="6" height="3" rx="0.8" fill="#005aaa"/>
+  <text x="31" y="45.5" text-anchor="middle" font-family="Arial" font-size="3.5" font-weight="bold" fill="#5bc8f5">2</text>
+  <rect x="35" y="43" width="6" height="3" rx="0.8" fill="#005aaa"/>
+  <text x="38" y="45.5" text-anchor="middle" font-family="Arial" font-size="3.5" font-weight="bold" fill="#5bc8f5">3</text>
+  <!-- Fila 2: 4 5 6 -->
+  <rect x="21" y="47" width="6" height="3" rx="0.8" fill="#005aaa"/>
+  <text x="24" y="49.5" text-anchor="middle" font-family="Arial" font-size="3.5" font-weight="bold" fill="#5bc8f5">4</text>
+  <rect x="28" y="47" width="6" height="3" rx="0.8" fill="#005aaa"/>
+  <text x="31" y="49.5" text-anchor="middle" font-family="Arial" font-size="3.5" font-weight="bold" fill="#5bc8f5">5</text>
+  <rect x="35" y="47" width="6" height="3" rx="0.8" fill="#005aaa"/>
+  <text x="38" y="49.5" text-anchor="middle" font-family="Arial" font-size="3.5" font-weight="bold" fill="#5bc8f5">6</text>
+
+  <!-- Botones OK / C -->
+  <rect x="21" y="51" width="9" height="3" rx="0.8" fill="#9b0e1c"/>
+  <text x="25.5" y="53.5" text-anchor="middle" font-family="Arial" font-size="3.5" font-weight="bold" fill="#ffffff">C</text>
+  <rect x="32" y="51" width="9" height="3" rx="0.8" fill="#1a4d2e"/>
+  <text x="36.5" y="53.5" text-anchor="middle" font-family="Arial" font-size="3.5" font-weight="bold" fill="#ffffff">OK</text>
+
+  <!-- Indicador NFC / contactless -->
+  <path d="M 20 15 Q 22 13 24 15" fill="none" stroke="#5bc8f5" stroke-width="1" stroke-linecap="round" opacity="0.7"/>
+  <path d="M 19 17 Q 22 13.5 25 17" fill="none" stroke="#5bc8f5" stroke-width="1" stroke-linecap="round" opacity="0.5"/>
+
+</svg>

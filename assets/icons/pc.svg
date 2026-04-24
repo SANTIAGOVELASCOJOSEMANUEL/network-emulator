@@ -1,58 +1,61 @@
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 59 53" fill="#fff"
-    fill-rule="evenodd" stroke="#000" stroke-linecap="round" stroke-linejoin="round">
-    <style>
-        <![CDATA[
-        .B {
-            stroke: #fff
-        }
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <title>PC Desktop icon Cisco Packet Tracer style</title>
 
-        .C {
-            stroke-linejoin: miter
-        }
+  <!-- Monitor -->
+  <rect x="10" y="6" width="44" height="32" rx="3" fill="#1ba0d7"/>
+  <rect x="10" y="6"  width="44" height="5" rx="3" fill="#5bc8f5"/>
+  <rect x="10" y="9"  width="44" height="2"         fill="#5bc8f5"/>
+  <rect x="51" y="6"  width="3"  height="32" rx="0" fill="#005aaa"/>
+  <rect x="10" y="35" width="44" height="3"  rx="2" fill="#0070d2"/>
 
-        .D {
-            fill: #0f73a0
-        }
+  <!-- Pantalla -->
+  <rect x="13" y="9" width="38" height="25" rx="1" fill="#003366"/>
+  <rect x="13" y="9" width="38" height="5"  rx="1" fill="#001f3f"/>
+  <!-- Contenido -->
+  <line x1="17" y1="19" x2="43" y2="19" stroke="#1ba0d7" stroke-width="1.2" stroke-linecap="round" opacity="0.7"/>
+  <line x1="17" y1="23" x2="39" y2="23" stroke="#1ba0d7" stroke-width="1"   stroke-linecap="round" opacity="0.5"/>
+  <line x1="17" y1="27" x2="41" y2="27" stroke="#1ba0d7" stroke-width="1"   stroke-linecap="round" opacity="0.5"/>
+  <!-- Íconos OS en barra superior -->
+  <circle cx="17" cy="11.5" r="1.5" fill="#e63946" opacity="0.8"/>
+  <circle cx="21" cy="11.5" r="1.5" fill="#ffd166" opacity="0.8"/>
+  <circle cx="25" cy="11.5" r="1.5" fill="#2dc653" opacity="0.8"/>
 
-        .E {
-            stroke-width: .787
-        }
+  <!-- Cuello -->
+  <rect x="28" y="38" width="8" height="6" rx="1" fill="#005aaa"/>
 
-        .F {
-            fill: #0b719f
-        }
+  <!-- Base monitor -->
+  <rect x="20" y="43" width="24" height="4" rx="2" fill="#0070d2"/>
+  <rect x="20" y="43" width="24" height="2" rx="2" fill="#1ba0d7"/>
 
-        .G {
-            stroke-linecap: square
-        }
-        ]]>
-    </style>
-    <use xlink:href="#A" x=".5" y=".5" />
-    <symbol id="A" overflow="visible">
-        <path d="M49.573 44.459v-9.443H0v9.443h49.573z" class="B C D E" />
-        <path d="M34.229 40.131h12.59z" stroke="none" class="F" />
-        <path d="M34.229 40.131h12.59" fill="none" class="B C E G" />
-        <path d="M34.229 39.737h12.59z" stroke="none" class="F" />
-        <g class="B C E">
-            <path d="M34.229 39.737h12.59" fill="none" class="G" />
-            <g class="D">
-                <path
-                    d="M57.835 35.409v-8.262l-8.262 7.869v9.443l8.262-9.049zM40.917 51.933v-1.967l4.328-6.295v3.934l-4.328 4.328z" />
-                <path d="M40.917 49.966v1.967H1.18v-1.967h39.737z" />
-                <path
-                    d="M40.917 49.966H1.18l4.328-6.295h39.737l-4.328 6.295zm16.918-22.819H8.262L0 35.016h49.573l8.262-7.869z" />
-                <path d="M42.885 30.295V5.508H9.049v24.787h33.836z" />
-            </g>
-        </g>
-        <use xlink:href="#C" stroke="none" class="D" />
-        <g class="B C E">
-            <use xlink:href="#C" fill="none" />
-            <path d="M48.786 0H14.557L9.049 5.508h33.836L48.786 0z" class="D" />
-            <path d="M48.787 25.18V0l-5.901 5.508v24.787l5.901-5.115z" class="F" />
-        </g>
-    </symbol>
-    <defs>
-        <path id="C"
-            d="M11.798 11.023c0-2.754 2.361-3.148 2.361-3.148h22.819c3.148 0 3.148 3.148 3.148 3.148v14.164c0 1.574-2.754 2.361-2.754 2.361H14.552c-1.967 0-2.754-2.361-2.754-2.361z" />
-    </defs>
+  <!-- Torre PC -->
+  <rect x="6" y="36" width="14" height="22" rx="2" fill="#1ba0d7"/>
+  <rect x="6" y="36" width="14" height="4"  rx="2" fill="#5bc8f5"/>
+  <rect x="17" y="36" width="3"  height="22" rx="0" fill="#005aaa"/>
+  <rect x="6"  y="55" width="14" height="3"  rx="2" fill="#0070d2"/>
+
+  <!-- Ranura CD/DVD -->
+  <rect x="8" y="41" width="10" height="2" rx="1" fill="#005aaa"/>
+  <rect x="8.5" y="41.5" width="8" height="1" rx="0.5" fill="#1ba0d7"/>
+
+  <!-- Botón power torre -->
+  <circle cx="11" cy="46" r="2" fill="#0070d2"/>
+  <circle cx="11" cy="46" r="1.2" fill="#1ba0d7"/>
+
+  <!-- USB puertos torre -->
+  <rect x="8" y="49" width="3" height="2" rx="0.5" fill="#005aaa"/>
+  <rect x="8.5" y="49.5" width="2" height="1" rx="0.3" fill="#1ba0d7"/>
+  <rect x="8" y="52" width="3" height="2" rx="0.5" fill="#005aaa"/>
+  <rect x="8.5" y="52.5" width="2" height="1" rx="0.3" fill="#1ba0d7"/>
+
+  <!-- LED torre -->
+  <circle cx="15" cy="46" r="1.2" fill="#1ba0d7" opacity="0.8"/>
+
+  <!-- Teclado -->
+  <rect x="22" y="51" width="28" height="8" rx="2" fill="#0070d2"/>
+  <rect x="22" y="51" width="28" height="2" rx="2" fill="#1ba0d7"/>
+  <rect x="24" y="53" width="6"  height="2" rx="0.5" fill="#005aaa"/>
+  <rect x="31" y="53" width="10" height="2" rx="0.5" fill="#005aaa"/>
+  <rect x="42" y="53" width="6"  height="2" rx="0.5" fill="#005aaa"/>
+  <rect x="24" y="56" width="22" height="2" rx="0.5" fill="#005aaa"/>
+
 </svg>

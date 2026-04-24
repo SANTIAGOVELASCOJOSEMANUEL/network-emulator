@@ -1,0 +1,48 @@
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <title>Control Terminal icon Cisco Packet Tracer style</title>
+
+  <!-- Sombra base -->
+  <ellipse cx="32" cy="61" rx="18" ry="2" fill="#005aaa" opacity="0.25"/>
+
+  <!-- Base / soporte -->
+  <rect x="22" y="54" width="20" height="4" rx="2" fill="#0070d2"/>
+  <rect x="22" y="54" width="20" height="2" rx="2" fill="#1ba0d7"/>
+  <rect x="18" y="57" width="28" height="3" rx="2" fill="#005aaa"/>
+
+  <!-- Cuello monitor -->
+  <rect x="29" y="48" width="6" height="8" rx="1" fill="#005aaa"/>
+
+  <!-- Marco del monitor -->
+  <rect x="8" y="10" width="48" height="40" rx="4" fill="#1ba0d7"/>
+  <!-- Cara superior clara -->
+  <rect x="8" y="10" width="48" height="6" rx="4" fill="#5bc8f5"/>
+  <rect x="8" y="13" width="48" height="3" fill="#5bc8f5"/>
+  <!-- Sombra lateral derecha -->
+  <rect x="52" y="10" width="4" height="40" rx="0" fill="#005aaa"/>
+  <rect x="52" y="46" width="4" height="4" rx="3" fill="#005aaa"/>
+  <!-- Sombra inferior -->
+  <rect x="8" y="46" width="48" height="4" rx="3" fill="#0070d2"/>
+
+  <!-- Pantalla -->
+  <rect x="11" y="13" width="42" height="33" rx="2" fill="#001f3f"/>
+  <rect x="11" y="13" width="42" height="5"  rx="2" fill="#003366"/>
+
+  <!-- Barra superior tipo OS -->
+  <rect x="11" y="13" width="42" height="5" rx="2" fill="#003366"/>
+  <circle cx="15" cy="15.5" r="1.5" fill="#e63946" opacity="0.8"/>
+  <circle cx="19" cy="15.5" r="1.5" fill="#ffd166" opacity="0.8"/>
+  <circle cx="23" cy="15.5" r="1.5" fill="#2dc653" opacity="0.8"/>
+
+  <!-- Contenido terminal CLI -->
+  <text x="14" y="24" font-family="monospace" font-size="4" fill="#2dc653">$ ping 192.168.1.1</text>
+  <text x="14" y="29" font-family="monospace" font-size="4" fill="#5bc8f5">Reply from 192.168.1.1</text>
+  <text x="14" y="34" font-family="monospace" font-size="4" fill="#5bc8f5">TTL=64 time=1ms</text>
+  <text x="14" y="39" font-family="monospace" font-size="4" fill="#2dc653">$ show ip route</text>
+  <!-- Cursor parpadeante -->
+  <rect x="14" y="41" width="3" height="4" rx="0.5" fill="#5bc8f5" opacity="0.9"/>
+
+  <!-- Botón power -->
+  <circle cx="32" cy="48" r="2.5" fill="#0070d2"/>
+  <circle cx="32" cy="48" r="1.5" fill="#1ba0d7"/>
+
+</svg>
