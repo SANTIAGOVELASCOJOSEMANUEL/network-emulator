@@ -356,6 +356,569 @@ const LABS = [
             },
         ],
     },
+
+    // ─────────────────────────────────────────────────────────────────
+    //  NUEVOS LABS (6–11)
+    // ─────────────────────────────────────────────────────────────────
+
+    {
+        id   : 'lab-06',
+        title: '🔷 Lab 6: VLANs en Switch 802.1Q',
+        level: 'Intermedio',
+        color: '#22d3ee',
+        desc : 'Segmenta la red en dos VLANs y verifica que no se comunican sin router.',
+        steps: [
+            {
+                id      : 'add-switch',
+                title   : 'Agregar un Switch',
+                desc    : 'Coloca un Switch (24 puertos) en el canvas.',
+                hint1   : 'Busca "Switch" en el sidebar, categoría Switching.',
+                hint2   : 'Un switch 802.1Q puede segmentar el tráfico por VLAN.',
+                hint3   : 'El Switch de 24 puertos es el que soporta VLANs completas.',
+                validate: (sim) => sim.devices.some(d => d.type === 'Switch'),
+            },
+            {
+                id      : 'create-vlans',
+                title   : 'Crear VLAN 10 y VLAN 20',
+                desc    : 'En la CLI del switch: crea VLAN 10 (Ventas) y VLAN 20 (IT).',
+                hint1   : 'CLI: enable → configure terminal → vlan 10 → name Ventas → exit',
+                hint2   : 'Luego: vlan 20 → name IT → exit',
+                hint3   : 'Verifica con: show vlan',
+                validate: (sim) => {
+                    const sw = sim.devices.find(d => d.type === 'Switch');
+                    if (!sw?.vlans) return false;
+                    const ids = Object.keys(sw.vlans).map(Number);
+                    return ids.includes(10) && ids.includes(20);
+                },
+            },
+            {
+                id      : 'add-pcs',
+                title   : 'Agregar 4 PCs y conectarlas',
+                desc    : 'Agrega PC-V1, PC-V2 (Ventas) y PC-IT1, PC-IT2 (IT) al switch.',
+                hint1   : 'Arrastra 4 PCs y conéctalas a puertos distintos del switch.',
+                hint2   : 'Nómbralas para identificar a qué VLAN pertenecerán.',
+                hint3   : 'Conecta cada PC a un puerto diferente del switch.',
+                validate: (sim) => {
+                    const sw = sim.devices.find(d => d.type === 'Switch');
+                    if (!sw) return false;
+                    const pcs = sim.devices.filter(d => d.type === 'PC');
+                    const conn = sim.connections.filter(c => c.from === sw || c.to === sw);
+                    return pcs.length >= 4 && conn.length >= 4;
+                },
+            },
+            {
+                id      : 'assign-access-ports',
+                title   : 'Asignar puertos access a cada VLAN',
+                desc    : 'Configura 2 puertos en VLAN 10 y 2 puertos en VLAN 20 usando CLI.',
+                hint1   : 'CLI: interface port2 → switchport mode access → switchport access vlan 10',
+                hint2   : 'Repite para port3 → VLAN 10, port4 → VLAN 20, port5 → VLAN 20.',
+                hint3   : 'Verifica con: show interfaces (mira el campo VLAN de cada puerto)',
+                validate: (sim) => {
+                    const sw = sim.devices.find(d => d.type === 'Switch');
+                    if (!sw?._vlanEngine) return false;
+                    const ve = sw._vlanEngine;
+                    const ports = Object.values(ve.portConfig || {});
+                    const vlan10ports = ports.filter(p => p.vlan === 10).length;
+                    const vlan20ports = ports.filter(p => p.vlan === 20).length;
+                    return vlan10ports >= 1 && vlan20ports >= 1;
+                },
+            },
+            {
+                id      : 'set-ips',
+                title   : 'Asignar IPs por VLAN',
+                desc    : 'VLAN 10 → 192.168.10.x / VLAN 20 → 192.168.20.x (máscara /24).',
+                hint1   : 'Las PCs en VLAN 10 deben tener IPs 192.168.10.1, 192.168.10.2…',
+                hint2   : 'Las de VLAN 20: 192.168.20.1, 192.168.20.2…',
+                hint3   : 'Edita las IPs desde el panel derecho de cada PC.',
+                validate: (sim) => {
+                    const pcs = sim.devices.filter(d => d.type === 'PC');
+                    return pcs.some(p => p.ipConfig?.ipAddress?.startsWith('192.168.10.')) &&
+                           pcs.some(p => p.ipConfig?.ipAddress?.startsWith('192.168.20.'));
+                },
+            },
+            {
+                id      : 'verify-isolation',
+                title   : 'Verificar aislamiento L2',
+                desc    : 'Inicia la simulación. Las PCs en VLAN 10 NO deben llegar a VLAN 20 sin router.',
+                hint1   : 'Presiona ▶ para iniciar.',
+                hint2   : 'Intenta ping desde una PC de VLAN 10 a una de VLAN 20 — debería fallar.',
+                hint3   : 'El motor L2 bloquea el tráfico entre VLANs distintas en el switch.',
+                validate: (sim) => sim.simulationRunning,
+            },
+        ],
+    },
+
+    {
+        id   : 'lab-07',
+        title: '🔀 Lab 7: Inter-VLAN Routing (Router-on-a-Stick)',
+        level: 'Intermedio',
+        color: '#fb923c',
+        desc : 'Conecta un router al switch para enrutar entre VLAN 10 y VLAN 20.',
+        steps: [
+            {
+                id      : 'prerequisite',
+                title   : 'Base: Switch con VLAN 10 y VLAN 20',
+                desc    : 'Necesitas un Switch con al menos VLAN 10 y VLAN 20 creadas.',
+                hint1   : 'Si completaste el Lab 6, ya tienes la base.',
+                hint2   : 'De lo contrario: agrega un Switch y crea ambas VLANs en la CLI.',
+                hint3   : 'CLI: vlan 10 → name Ventas / vlan 20 → name IT',
+                validate: (sim) => {
+                    const sw = sim.devices.find(d => d.type === 'Switch');
+                    if (!sw?.vlans) return false;
+                    const ids = Object.keys(sw.vlans).map(Number);
+                    return ids.includes(10) && ids.includes(20);
+                },
+            },
+            {
+                id      : 'add-router',
+                title   : 'Agregar un Router y conectarlo al switch',
+                desc    : 'Agrega un Router y conéctalo al switch con un cable.',
+                hint1   : 'El router será el gateway para ambas VLANs.',
+                hint2   : 'Conéctalo al switch en cualquier puerto libre.',
+                hint3   : 'Necesitarás configurar ese puerto como trunk.',
+                validate: (sim) => {
+                    const router = sim.devices.find(d => d.type === 'Router');
+                    const sw = sim.devices.find(d => d.type === 'Switch');
+                    if (!router || !sw) return false;
+                    return sim.connections.some(c =>
+                        (c.from === router && c.to === sw) ||
+                        (c.from === sw && c.to === router)
+                    );
+                },
+            },
+            {
+                id      : 'trunk-port',
+                title   : 'Configurar puerto trunk hacia el router',
+                desc    : 'El puerto del switch conectado al router debe ser trunk (permite ambas VLANs).',
+                hint1   : 'CLI del switch: interface <puerto-uplink> → switchport mode trunk',
+                hint2   : 'Luego: switchport trunk allowed vlan 10,20',
+                hint3   : 'Un trunk lleva tráfico 802.1Q etiquetado de múltiples VLANs.',
+                validate: (sim) => {
+                    const sw = sim.devices.find(d => d.type === 'Switch');
+                    if (!sw?._vlanEngine) return false;
+                    const ve = sw._vlanEngine;
+                    return Object.values(ve.portConfig || {}).some(p => p.mode === 'trunk');
+                },
+            },
+            {
+                id      : 'router-subinterfaces',
+                title   : 'Asignar IPs del gateway en el router',
+                desc    : 'Router: IP 192.168.10.254 (gateway VLAN 10) y 192.168.20.254 (VLAN 20).',
+                hint1   : 'CLI router: interface LAN0 → ip address 192.168.10.254 255.255.255.0',
+                hint2   : 'interface LAN1 → ip address 192.168.20.254 255.255.255.0',
+                hint3   : 'Cada interfaz del router actúa como gateway de una VLAN.',
+                validate: (sim) => {
+                    const r = sim.devices.find(d => d.type === 'Router');
+                    if (!r) return false;
+                    const ips = (r.interfaces || []).map(i => i.ipConfig?.ipAddress || '');
+                    return ips.some(ip => ip.startsWith('192.168.10.')) &&
+                           ips.some(ip => ip.startsWith('192.168.20.'));
+                },
+            },
+            {
+                id      : 'set-gateways',
+                title   : 'Configurar gateways en las PCs',
+                desc    : 'PCs en VLAN 10 → gateway 192.168.10.254 / VLAN 20 → gateway 192.168.20.254.',
+                hint1   : 'Edita la IP de cada PC y agrega el campo gateway.',
+                hint2   : 'Sin gateway, las PCs no pueden salir de su VLAN.',
+                hint3   : 'Cada PC apunta al router como su puerta de salida.',
+                validate: (sim) => {
+                    const pcs = sim.devices.filter(d => d.type === 'PC');
+                    return pcs.some(p => p.ipConfig?.gateway === '192.168.10.254') &&
+                           pcs.some(p => p.ipConfig?.gateway === '192.168.20.254');
+                },
+            },
+            {
+                id      : 'verify-routing',
+                title   : 'Verificar routing inter-VLAN',
+                desc    : 'Inicia simulación. Ping de VLAN 10 a VLAN 20 debe pasar por el router.',
+                hint1   : 'Presiona ▶ para iniciar.',
+                hint2   : 'Selecciona una PC de VLAN 10 → ping a una IP de VLAN 20.',
+                hint3   : 'Verás el paquete animado: PC → Switch → Router → Switch → PC destino.',
+                validate: (sim) => {
+                    if (!sim.simulationRunning) return false;
+                    const r = sim.devices.find(d => d.type === 'Router');
+                    if (!r?.routingTable) return false;
+                    const routes = r.routingTable.entries ? r.routingTable.entries() : (r.routingTable.routes || []);
+                    return routes.length >= 2;
+                },
+            },
+        ],
+    },
+
+    {
+        id   : 'lab-08',
+        title: '🌍 Lab 8: NAT/PAT hacia Internet',
+        level: 'Avanzado',
+        color: '#4ade80',
+        desc : 'Configura NAT overload para que una red privada acceda a Internet.',
+        steps: [
+            {
+                id      : 'topology',
+                title   : 'Topología base: PC → Router → ISP → Internet',
+                desc    : 'Agrega una PC, un Router, un ISP y un nodo Internet. Conéctalos en cadena.',
+                hint1   : 'PC → Router (LAN) → ISP (WAN) → Internet',
+                hint2   : 'El router tiene una interfaz LAN (privada) y una WAN (pública).',
+                hint3   : 'ISP e Internet están en el sidebar, categoría WAN.',
+                validate: (sim) => {
+                    const hasPC  = sim.devices.some(d => d.type === 'PC');
+                    const hasR   = sim.devices.some(d => ['Router','RouterWifi'].includes(d.type));
+                    const hasISP = sim.devices.some(d => d.type === 'ISP');
+                    return hasPC && hasR && hasISP;
+                },
+            },
+            {
+                id      : 'private-ip',
+                title   : 'Asignar IP privada a la PC',
+                desc    : 'PC → IP 192.168.1.10/24, gateway 192.168.1.1.',
+                hint1   : 'Edita la IP de la PC en el panel derecho.',
+                hint2   : 'La red 192.168.1.0/24 es la LAN privada.',
+                hint3   : 'El gateway debe ser la IP LAN del router.',
+                validate: (sim) => {
+                    const pc = sim.devices.find(d => d.type === 'PC');
+                    return pc?.ipConfig?.ipAddress?.startsWith('192.168.1.') &&
+                           pc?.ipConfig?.gateway?.startsWith('192.168.');
+                },
+            },
+            {
+                id      : 'router-interfaces',
+                title   : 'Configurar interfaces del router',
+                desc    : 'Router: LAN0 → 192.168.1.1/24 (inside) | WAN0 → IP pública (outside).',
+                hint1   : 'CLI router: interface LAN0 → ip address 192.168.1.1 255.255.255.0',
+                hint2   : 'El ISP asignará una IP WAN automáticamente al conectarse.',
+                hint3   : 'Confirma con: show ip interface',
+                validate: (sim) => {
+                    const r = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+                    if (!r) return false;
+                    const lanIP = r.ipConfig?.ipAddress || '';
+                    return lanIP.startsWith('192.168.1.');
+                },
+            },
+            {
+                id      : 'nat-inside-outside',
+                title   : 'Marcar interfaces NAT inside/outside',
+                desc    : 'CLI: interface LAN0 → ip nat inside / interface WAN0 → ip nat outside.',
+                hint1   : '"inside" = red privada (LAN). "outside" = red pública (WAN/Internet).',
+                hint2   : 'CLI: configure terminal → interface LAN0 → ip nat inside → exit',
+                hint3   : 'Luego: interface WAN0 → ip nat outside → exit',
+                validate: (sim) => {
+                    const r = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+                    if (!r) return false;
+                    const hasInside  = r.interfaces?.some(i => i.natDirection === 'inside');
+                    const hasOutside = r.interfaces?.some(i => i.natDirection === 'outside');
+                    return hasInside && hasOutside;
+                },
+            },
+            {
+                id      : 'nat-rule',
+                title   : 'Configurar regla PAT overload',
+                desc    : 'CLI: ip nat inside source list 1 interface WAN0 overload.',
+                hint1   : 'Esto activa NAT PAT: muchas IPs privadas → una IP pública con diferentes puertos.',
+                hint2   : 'CLI: configure terminal → ip nat inside source list 1 interface WAN0 overload',
+                hint3   : 'Verifica con: show ip nat translations (después de hacer un ping)',
+                validate: (sim) => {
+                    const r = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+                    return r?.natRules?.some(rule => rule.type === 'PAT');
+                },
+            },
+            {
+                id      : 'test-nat',
+                title   : 'Verificar NAT en funcionamiento',
+                desc    : 'Inicia simulación y haz ping desde la PC hacia Internet. El router debe traducir la IP.',
+                hint1   : 'Presiona ▶ y espera que la simulación arranque.',
+                hint2   : 'Selecciona la PC → clic derecho → Ping → elige el nodo Internet.',
+                hint3   : 'En el log del simulador verás "🔁 NAT PAT: PC → IP_publica:puerto → Internet".',
+                validate: (sim) => {
+                    if (!sim.simulationRunning) return false;
+                    const r = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+                    return !!(r?.natTable && Object.keys(r.natTable).length > 0);
+                },
+            },
+        ],
+    },
+
+    {
+        id   : 'lab-09',
+        title: '📡 Lab 9: OSPF entre routers',
+        level: 'Avanzado',
+        color: '#e879f9',
+        desc : 'Configura OSPF en dos routers para que intercambien rutas dinámicamente.',
+        steps: [
+            {
+                id      : 'two-routers',
+                title   : 'Agregar 2 Routers y conectarlos',
+                desc    : 'Coloca Router-A y Router-B en el canvas y conéctalos con un cable.',
+                hint1   : 'El enlace entre routers representa la red WAN o el backbone.',
+                hint2   : 'Nómbralos "Router-A" y "Router-B" para identificarlos.',
+                hint3   : 'Conéctalos por sus interfaces WAN.',
+                validate: (sim) => {
+                    const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+                    if (routers.length < 2) return false;
+                    return sim.connections.some(c =>
+                        routers.includes(c.from) && routers.includes(c.to)
+                    );
+                },
+            },
+            {
+                id      : 'lan-segments',
+                title   : 'Crear una LAN detrás de cada router',
+                desc    : 'Conecta al menos una PC a cada router, en subredes distintas.',
+                hint1   : 'Router-A → LAN 10.1.1.x | Router-B → LAN 10.2.2.x',
+                hint2   : 'Agrega una PC a cada lado y asígnales IPs con gateway apuntando a su router.',
+                hint3   : 'Sin rutas dinámicas, los dos lados no se pueden ver aún.',
+                validate: (sim) => {
+                    const pcs = sim.devices.filter(d => d.type === 'PC');
+                    const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+                    if (routers.length < 2 || pcs.length < 2) return false;
+                    const subnets = new Set(pcs.map(p => p.ipConfig?.ipAddress?.split('.').slice(0,3).join('.')));
+                    return subnets.size >= 2;
+                },
+            },
+            {
+                id      : 'router-link-ips',
+                title   : 'Asignar IPs al enlace entre routers',
+                desc    : 'Router-A interfaz WAN → 10.0.0.1/30 / Router-B interfaz WAN → 10.0.0.2/30.',
+                hint1   : 'Una /30 tiene 2 hosts utilizables: perfecta para enlaces punto a punto.',
+                hint2   : 'CLI Router-A: interface WAN0 → ip address 10.0.0.1 255.255.255.252',
+                hint3   : 'CLI Router-B: interface WAN0 → ip address 10.0.0.2 255.255.255.252',
+                validate: (sim) => {
+                    const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+                    const wanIPs = routers.flatMap(r =>
+                        (r.interfaces || []).map(i => i.ipConfig?.ipAddress || '')
+                    ).filter(ip => ip.startsWith('10.0.0.'));
+                    return wanIPs.length >= 2;
+                },
+            },
+            {
+                id      : 'ospf-router-a',
+                title   : 'Activar OSPF en Router-A',
+                desc    : 'CLI Router-A: router ospf 1 → network 10.0.0.0 0.0.0.3 area 0 → network 10.1.1.0 0.0.0.255 area 0.',
+                hint1   : 'configure terminal → router ospf 1',
+                hint2   : 'network <red> <wildcard> area <id>',
+                hint3   : 'El wildcard es la inversa de la máscara: /24 → 0.0.0.255 | /30 → 0.0.0.3',
+                validate: (sim) => {
+                    const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+                    return routers.some(r => r.routingProtocol === 'ospf' && r.ospfNetworks?.length);
+                },
+            },
+            {
+                id      : 'ospf-router-b',
+                title   : 'Activar OSPF en Router-B',
+                desc    : 'Mismo procedimiento en Router-B con sus propias redes.',
+                hint1   : 'CLI Router-B: router ospf 1 → network 10.0.0.0 0.0.0.3 area 0',
+                hint2   : 'network 10.2.2.0 0.0.0.255 area 0',
+                hint3   : 'Ambos routers deben tener OSPF activo para intercambiar rutas.',
+                validate: (sim) => {
+                    const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+                    return routers.filter(r => r.routingProtocol === 'ospf' && r.ospfNetworks?.length).length >= 2;
+                },
+            },
+            {
+                id      : 'verify-ospf',
+                title   : 'Verificar convergencia OSPF',
+                desc    : 'Inicia la simulación. Los routers deben tener rutas tipo "O" (OSPF) en su tabla.',
+                hint1   : 'Presiona ▶ para iniciar la simulación.',
+                hint2   : 'CLI de cualquier router: show ip route — busca rutas con "O".',
+                hint3   : 'Una PC en 10.1.1.x debería poder llegar a una en 10.2.2.x vía OSPF.',
+                validate: (sim) => {
+                    if (!sim.simulationRunning) return false;
+                    const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+                    return routers.some(r => {
+                        const routes = r.routingTable?.entries ? r.routingTable.entries() : (r.routingTable?.routes || []);
+                        return routes.some(rt => rt.type === 'O' || rt.proto === 'ospf');
+                    });
+                },
+            },
+        ],
+    },
+
+    {
+        id   : 'lab-10',
+        title: '🏗 Lab 10: Red FTTH con OLT y ONTs',
+        level: 'Avanzado',
+        color: '#f59e0b',
+        desc : 'Diseña una red de fibra óptica pasiva (PON) con OLT y clientes ONT.',
+        steps: [
+            {
+                id      : 'add-olt',
+                title   : 'Agregar un OLT (Optical Line Terminal)',
+                desc    : 'Coloca un OLT en el canvas. Es el equipo central de la red FTTH.',
+                hint1   : 'Busca OLT en el sidebar, categoría Switching.',
+                hint2   : 'El OLT concentra la señal óptica hacia todos los clientes.',
+                hint3   : 'Tiene puertos PON (para fibra hacia los ONTs) y uplink hacia el router.',
+                validate: (sim) => sim.devices.some(d => d.type === 'OLT'),
+            },
+            {
+                id      : 'add-onts',
+                title   : 'Agregar 3 ONTs (clientes)',
+                desc    : 'Agrega 3 ONTs y conéctalos a puertos PON del OLT.',
+                hint1   : 'Busca ONT en el sidebar.',
+                hint2   : 'Los ONTs son los módems de fibra en casa del cliente.',
+                hint3   : 'Conéctalos con cable de fibra (elige tipo Fibra al conectar).',
+                validate: (sim) => {
+                    const olt  = sim.devices.find(d => d.type === 'OLT');
+                    const onts = sim.devices.filter(d => d.type === 'ONT');
+                    if (!olt || onts.length < 3) return false;
+                    const oltConns = sim.connections.filter(c => c.from === olt || c.to === olt);
+                    return oltConns.length >= 3;
+                },
+            },
+            {
+                id      : 'add-router-uplink',
+                title   : 'Conectar OLT al Router de distribución',
+                desc    : 'Agrega un Router y conéctalo al uplink del OLT.',
+                hint1   : 'El OLT tiene puertos UPLINK-FIB para conectarse al router/aggregation.',
+                hint2   : 'El router proveerá DHCP e IPs a los clientes ONT.',
+                hint3   : 'Esta es la arquitectura típica de un ISP FTTH residencial.',
+                validate: (sim) => {
+                    const olt = sim.devices.find(d => d.type === 'OLT');
+                    const r   = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+                    if (!olt || !r) return false;
+                    return sim.connections.some(c =>
+                        (c.from === olt && c.to === r) || (c.from === r && c.to === olt)
+                    );
+                },
+            },
+            {
+                id      : 'cpe-devices',
+                title   : 'Agregar equipos CPE detrás de cada ONT',
+                desc    : 'Conecta al menos una PC o RouterWifi detrás de cada ONT.',
+                hint1   : 'Un ONT actúa como el módem; los clientes se conectan por ETH.',
+                hint2   : 'Puedes conectar un RouterWifi para simular la red del hogar del cliente.',
+                hint3   : 'La topología queda: Router → OLT → ONT → RouterWifi → PCs',
+                validate: (sim) => {
+                    const onts = sim.devices.filter(d => d.type === 'ONT');
+                    if (onts.length < 3) return false;
+                    return onts.every(ont => {
+                        return sim.connections.some(c =>
+                            (c.from === ont || c.to === ont) &&
+                            ['PC','Laptop','RouterWifi'].includes(
+                                (c.from === ont ? c.to : c.from).type
+                            )
+                        );
+                    });
+                },
+            },
+            {
+                id      : 'ip-plan',
+                title   : 'Plan de direccionamiento por cliente',
+                desc    : 'Asigna subredes distintas a cada cliente: 172.16.1.x, 172.16.2.x, 172.16.3.x.',
+                hint1   : 'Cada ONT (cliente) debe tener su propia subred LAN.',
+                hint2   : 'El router les asigna IPs vía DHCP o configuración estática.',
+                hint3   : 'La red 172.16.0.0/16 es perfecta para clientes residenciales.',
+                validate: (sim) => {
+                    const pcs = sim.devices.filter(d => ['PC','Laptop'].includes(d.type));
+                    const subnets = new Set(
+                        pcs.map(p => p.ipConfig?.ipAddress?.split('.').slice(0,3).join('.')).filter(Boolean)
+                    );
+                    return subnets.size >= 2;
+                },
+            },
+            {
+                id      : 'simulate-ftth',
+                title   : 'Simular red FTTH completa',
+                desc    : 'Inicia simulación. La red PON debe estar completamente conectada.',
+                hint1   : 'Presiona ▶.',
+                hint2   : 'Verifica que el OLT y los ONTs aparecen con estado "up".',
+                hint3   : 'Esta topología replica una red FTTH real de un proveedor de internet.',
+                validate: (sim) => {
+                    if (!sim.simulationRunning) return false;
+                    const olt  = sim.devices.find(d => d.type === 'OLT');
+                    const onts = sim.devices.filter(d => d.type === 'ONT');
+                    return olt?.status === 'up' && onts.length >= 3;
+                },
+            },
+        ],
+    },
+
+    {
+        id   : 'lab-11',
+        title: '🔐 Lab 11: Seguridad con Firewall + ACLs',
+        level: 'Experto',
+        color: '#ef4444',
+        desc : 'Configura un firewall con ACLs para proteger la DMZ y bloquear tráfico no autorizado.',
+        steps: [
+            {
+                id      : 'full-topo',
+                title   : 'Topología: Internet → Firewall → [LAN + DMZ]',
+                desc    : 'Agrega: Internet, ISP, Firewall, un Server (DMZ) y 2 PCs (LAN).',
+                hint1   : 'El Firewall tiene zonas WAN, LAN y DMZ separadas.',
+                hint2   : 'La DMZ aloja servidores accesibles desde Internet (pero controlados).',
+                hint3   : 'La LAN es la red interna de máxima confianza.',
+                validate: (sim) => {
+                    const hasFW     = sim.devices.some(d => d.type === 'Firewall');
+                    const hasServer = sim.devices.some(d => d.type === 'Server');
+                    const hasPCs    = sim.devices.filter(d => d.type === 'PC').length >= 2;
+                    return hasFW && hasServer && hasPCs;
+                },
+            },
+            {
+                id      : 'zone-ips',
+                title   : 'Asignar IPs por zona',
+                desc    : 'LAN: 10.10.1.x/24 | DMZ: 172.16.0.x/24 | WAN: IP pública del ISP.',
+                hint1   : 'PCs de la LAN → 10.10.1.1, 10.10.1.2 / gateway 10.10.1.254',
+                hint2   : 'Server en DMZ → 172.16.0.10 / gateway 172.16.0.254',
+                hint3   : 'El Firewall tiene una IP en cada zona (actúa como gateway de cada una).',
+                validate: (sim) => {
+                    const pcs = sim.devices.filter(d => d.type === 'PC');
+                    const svr = sim.devices.find(d => d.type === 'Server');
+                    return pcs.some(p => p.ipConfig?.ipAddress?.startsWith('10.10.1.')) &&
+                           svr?.ipConfig?.ipAddress?.startsWith('172.16.0.');
+                },
+            },
+            {
+                id      : 'acl-deny-wan-to-lan',
+                title   : 'ACL: Bloquear acceso directo WAN → LAN',
+                desc    : 'Configura una ACL en el firewall para denegar tráfico de Internet a la LAN.',
+                hint1   : 'CLI Firewall: configure terminal → access-list 100 deny ip any 10.10.1.0',
+                hint2   : 'Luego: access-list 100 permit ip any any (permitir el resto)',
+                hint3   : 'Las ACLs se leen de arriba abajo: la primera regla que coincide se aplica.',
+                validate: (sim) => {
+                    const fw = sim.devices.find(d => d.type === 'Firewall');
+                    return !!(fw?.accessLists && Object.keys(fw.accessLists).length > 0);
+                },
+            },
+            {
+                id      : 'acl-allow-dmz',
+                title   : 'ACL: Permitir HTTP hacia el servidor DMZ',
+                desc    : 'Crea una regla que permita tráfico hacia 172.16.0.10 desde cualquier origen.',
+                hint1   : 'CLI: access-list 101 permit tcp any 172.16.0.10',
+                hint2   : 'Esto permite que Internet acceda al servidor web en la DMZ.',
+                hint3   : 'La DMZ está "publicada" pero protegida del acceso directo a la LAN.',
+                validate: (sim) => {
+                    const fw = sim.devices.find(d => d.type === 'Firewall');
+                    if (!fw?.accessLists) return false;
+                    const allRules = Object.values(fw.accessLists).flat();
+                    return allRules.some(r => r.action === 'permit' && r.dst?.includes('172.16.0'));
+                },
+            },
+            {
+                id      : 'nat-firewall',
+                title   : 'Configurar NAT en el Firewall',
+                desc    : 'Activa NAT/PAT para que la LAN interna salga a Internet.',
+                hint1   : 'CLI: interface LAN0 → ip nat inside / interface WAN0 → ip nat outside',
+                hint2   : 'Luego: ip nat inside source list 1 interface WAN0 overload',
+                hint3   : 'El firewall hace NAT y seguridad al mismo tiempo.',
+                validate: (sim) => {
+                    const fw = sim.devices.find(d => d.type === 'Firewall');
+                    return fw?.natRules?.some(r => r.type === 'PAT');
+                },
+            },
+            {
+                id      : 'full-security-sim',
+                title   : 'Red segura en producción',
+                desc    : 'Inicia simulación. Verifica: LAN sale a Internet (NAT), DMZ accesible, LAN ↔ DMZ funcional.',
+                hint1   : 'Presiona ▶.',
+                hint2   : 'Ping desde LAN a Internet → debe pasar (NAT). Ping desde WAN a LAN → debe fallar (ACL).',
+                hint3   : 'Esta es la arquitectura de seguridad estándar de una empresa real.',
+                validate: (sim) => {
+                    if (!sim.simulationRunning) return false;
+                    const fw = sim.devices.find(d => d.type === 'Firewall');
+                    return !!(fw?.natRules?.length && fw?.accessLists && Object.keys(fw.accessLists).length > 0);
+                },
+            },
+        ],
+    },
 ];
 
 /* ══════════════════════════════════════════════════════════════════

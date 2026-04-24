@@ -55,6 +55,85 @@ document.addEventListener('DOMContentLoaded', () => {
     const _history = [];
     let _histIdx = -1;
 
+    // ── TOPOLOGÍA: alertas y validaciones de conexión ─────────────────────────
+    function _showTopoAlert(title, body, level) {
+        const colors = { error: { border:'#ef4444', bg:'rgba(239,68,68,.12)', icon:'⛔' }, warn: { border:'#f59e0b', bg:'rgba(245,158,11,.10)', icon:'⚠️' } };
+        const c = colors[level] || colors.warn;
+        const modal = document.createElement('div');
+        modal.style.cssText = `position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);backdrop-filter:blur(2px)`;
+        modal.innerHTML = `<div style="background:#0d1117;border:1.5px solid ${c.border};border-radius:12px;padding:24px 28px;max-width:420px;width:90%;box-shadow:0 8px 40px rgba(0,0,0,.6);font-family:'JetBrains Mono',monospace">
+            <div style="font-size:15px;font-weight:700;color:${c.border};margin-bottom:12px">${title}</div>
+            <div style="font-size:12px;color:#cbd5e1;line-height:1.7;background:${c.bg};border-radius:7px;padding:10px 12px">${body}</div>
+            <div style="text-align:right;margin-top:16px"><button onclick="this.closest('[style*=inset]').remove()" style="background:${c.border};color:#fff;border:none;border-radius:6px;padding:7px 18px;cursor:pointer;font-family:inherit;font-size:11px;font-weight:600">Entendido</button></div>
+        </div>`;
+        document.body.appendChild(modal);
+    }
+
+    function _showTopoConfirm(title, body) {
+        // Síncrono: crear modal, bloquear con prompt nativo (más simple y confiable en este contexto)
+        return confirm(`${title}\n\n${body.replace(/<[^>]+>/g, '')}`);
+    }
+
+    function _checkTopologyWarning(d1, d2, i1, i2) {
+        const t1 = d1.type, t2 = d2.type;
+        const role1 = i1.type, role2 = i2.type;
+
+        // WAN ↔ WAN entre routers/firewalls del mismo nivel
+        if (role1 === 'WAN' && role2 === 'WAN') {
+            if (['Router','RouterWifi','Firewall'].includes(t1) && ['Router','RouterWifi','Firewall'].includes(t2)) {
+                return `Estás conectando el puerto <b>WAN de ${d1.name}</b> al puerto <b>WAN de ${d2.name}</b>.<br>
+                Dos puertos WAN entre sí indican que ninguno actúa como gateway del otro — normalmente un WAN debe conectarse a un <b>LAN, UPLINK o puerto de distribución</b>.<br>
+                <span style="color:#f59e0b">⚠️ Esto puede causar problemas de ruteo o doble NAT.</span>`;
+            }
+        }
+
+        // Bridge WAN hacia WAN de router (puente inalámbrico entrando en WAN)
+        if ((t1 === 'Bridge' && role2 === 'WAN') || (t2 === 'Bridge' && role1 === 'WAN')) {
+            const bridge = t1 === 'Bridge' ? d1 : d2;
+            const router = t1 === 'Bridge' ? d2 : d1;
+            return `El <b>Puente Inalámbrico ${bridge.name}</b> está conectando su ETH0 al puerto <b>WAN de ${router.name}</b>.<br>
+            Esto es válido si el bridge actúa como extensión de un ISP o enlace punto a punto, pero si proviene de tu LAN, deberías conectarlo a un puerto <b>LAN o switch</b>.<br>
+            <span style="color:#f59e0b">⚠️ Si hay otro router en el otro extremo del bridge, pueden generarse conflictos de rutas o bucles.</span>`;
+        }
+
+        // Router ↔ Router directo sin pasar por SDWAN/ISP/Internet
+        if (['Router','RouterWifi'].includes(t1) && ['Router','RouterWifi'].includes(t2)) {
+            const hasWANInvolved = role1 === 'WAN' || role2 === 'WAN';
+            if (!hasWANInvolved) {
+                return `Conectas <b>${d1.name}</b> ↔ <b>${d2.name}</b> (ambos routers) usando puertos LAN.<br>
+                Un router-a-router LAN funciona si formas una red en cadena o backbone, pero puede generar <b>doble NAT</b> si ambos tienen DHCP activo.<br>
+                <span style="color:#64748b">ℹ️ Si uno de ellos sube a SDWAN/ISP, asegúrate de usar el puerto WAN correspondiente.</span>`;
+            }
+        }
+
+        // Dispositivo final (PC/Laptop/Phone/Printer) conectado a WAN directamente
+        const endDevices = ['PC','Laptop','Phone','Printer','Camera','DVR','IPPhone','PayTerminal','Alarm'];
+        if (endDevices.includes(t1) && role2 === 'WAN') {
+            return `Estás conectando <b>${d1.name}</b> directamente al puerto <b>WAN de ${d2.name}</b>.<br>
+            Los dispositivos finales deben conectarse a puertos <b>LAN o a un switch</b>, no al WAN del router.<br>
+            <span style="color:#ef4444">⛔ En un WAN el tráfico de subida va hacia el ISP, no hacia dispositivos locales.</span>`;
+        }
+        if (endDevices.includes(t2) && role1 === 'WAN') {
+            return `Estás conectando <b>${d2.name}</b> directamente al puerto <b>WAN de ${d1.name}</b>.<br>
+            Los dispositivos finales deben conectarse a puertos <b>LAN o a un switch</b>, no al WAN del router.<br>
+            <span style="color:#ef4444">⛔ En un WAN el tráfico de subida va hacia el ISP, no hacia dispositivos locales.</span>`;
+        }
+
+        // Switch ↔ Switch: posible bucle L2
+        if (['Switch','SwitchPoE'].includes(t1) && ['Switch','SwitchPoE'].includes(t2)) {
+            const alreadyLinked = simulator.connections.some(c =>
+                (c.from === d1 && c.to === d2) || (c.from === d2 && c.to === d1)
+            );
+            if (alreadyLinked) {
+                return `Ya existe una conexión entre <b>${d1.name}</b> y <b>${d2.name}</b>.<br>
+                Múltiples enlaces entre switches crean un <b>bucle de capa 2</b> a menos que <b>STP/RSTP</b> esté activo.<br>
+                <span style="color:#f59e0b">⚠️ Sin STP, una tormenta de broadcast puede colapsar la red.</span>`;
+            }
+        }
+
+        return null; // Sin advertencias
+    }
+
     function _snapshot() {
         // Serializa el estado actual como JSON
         const state = JSON.stringify(NetworkPersistence._serialize(simulator));
@@ -763,9 +842,35 @@ document.addEventListener('DOMContentLoaded', () => {
                     netConsole.writeToConsole(`🔗 Origen: ${d.name} [${intf.name}]`);
                 });
             } else {
+                // ── BLOQUEO: autoconexión al mismo dispositivo ──────────────────
+                if (dev === cableStart) {
+                    _showTopoAlert('⛔ Loopback no permitido', `No puedes conectar <b>${dev.name}</b> consigo mismo.<br>Un puerto físico no puede ser origen y destino a la vez.`, 'error');
+                    netConsole.writeToConsole(`⛔ Error: intento de loopback en ${dev.name} — cancelado`);
+                    cableStart = null; cableStartIntf = null;
+                    return;
+                }
                 simulator.showConnPopup(dev, e.clientX, e.clientY, (d2, intf2) => {
+                    // ── REDUNDANCIA: ya existe al menos una conexión entre estos dos dispositivos ──
+                    const existingConns = simulator.connections.filter(c =>
+                        (c.from === cableStart && c.to === d2) || (c.from === d2 && c.to === cableStart)
+                    );
+                    if (existingConns.length > 0) {
+                        const proceed = _showTopoConfirm(
+                            '🔁 Enlace redundante detectado',
+                            `Ya existe ${existingConns.length} conexión(es) entre <b>${cableStart.name}</b> y <b>${d2.name}</b>.<br>` +
+                            `Agregar más enlaces crea redundancia de red (útil para alta disponibilidad, pero puede generar <b>bucles L2</b> en switches sin STP activo).<br>` +
+                            `<small style="color:#f59e0b">¿Deseas continuar de todas formas?</small>`
+                        );
+                        if (!proceed) { cableStart = null; cableStartIntf = null; return; }
+                    }
+                    // ── VALIDACIÓN DE TOPOLOGÍA (alertas informativas) ──────────
+                    const topoWarn = _checkTopologyWarning(cableStart, d2, cableStartIntf, intf2);
+                    if (topoWarn) {
+                        const proceed = _showTopoConfirm('⚠️ Advertencia de topología', topoWarn + '<br><small style="color:#94a3b8">¿Continuar de todas formas?</small>');
+                        if (!proceed) { cableStart = null; cableStartIntf = null; return; }
+                    }
                     const r = simulator.connectDevices(cableStart, d2, cableStartIntf, intf2, null);
-                    if (r.success) { netConsole.writeToConsole(`✅ ${cableStart.name}↔${d2.name} (${intf2.name})`); updateCounts(); _snapshot(); }
+                    if (r.success) { netConsole.writeToConsole(`✅ ${cableStart.name}↔${d2.name} (${cableStartIntf.name}↔${intf2.name})`); updateCounts(); _snapshot(); }
                     else netConsole.writeToConsole(`❌ ${r.message}`);
                     cableStart = null; cableStartIntf = null;
                 });

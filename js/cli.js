@@ -68,6 +68,13 @@ class DeviceCLI {
     //  USER MODE  (Router>)
     // ══════════════════════════════════════════════════════
     _userMode(cmd, parts) {
+        // Comandos que solo funcionan en modo privilegiado/config — dar hint claro
+        const configOnlyCmds = ['interface','int','ip','vlan','hostname','router','no','access-list','spanning-tree','switchport'];
+        if (configOnlyCmds.includes(cmd)) {
+            this.write(`% Command "${cmd}" requires privileged mode.`, 'cli-err');
+            this.write(`  Hint: escriba  enable  →  configure terminal  primero`, 'cli-dim');
+            return;
+        }
         const cmds = {
             enable  : () => { this.mode = 'enable'; },
             ping    : () => this._doPing(parts),
@@ -344,8 +351,18 @@ class DeviceCLI {
         } else if (cmd === 'state') {
             this.vlanContext.cfg.state = parts[1] || 'active';
             this.write(`VLAN state: ${parts[1]}`,'cli-ok');
+        } else if (cmd === 'interface' || cmd === 'int') {
+            // IOS real: al escribir "interface X" desde config-vlan sale automáticamente a config
+            this.mode = 'config';
+            this.vlanContext = null;
+            this._enterInterface(parts.slice(1).join(' '));
+        } else if (cmd === 'ip' || cmd === 'hostname' || cmd === 'router' || cmd === 'no' || cmd === 'spanning-tree') {
+            // Comandos de config global escritos desde config-vlan → salir y ejecutar
+            this.mode = 'config';
+            this.vlanContext = null;
+            this._configMode(cmd, parts);
         } else {
-            this._unknown(cmd, ['name','state']);
+            this._unknown(cmd, ['name', 'state', 'exit']);
         }
     }
 
@@ -484,20 +501,38 @@ class DeviceCLI {
     _configNAT(parts) {
         const d = this.device;
         if (!d.natRules) d.natRules = [];
-        // ip nat inside source list <acl> interface <intf> overload
-        if (parts[2]==='inside' && parts[3]==='source') {
-            const rule = { type:'PAT', acl:parts[5], interface:parts[7], overload: parts[8]==='overload' };
-            d.natRules.push(rule);
-            this.write(`NAT PAT rule: list ${rule.acl} → ${rule.interface} overload`,'cli-ok');
-            // Signal NAT engine
-            if (window.NATEngine) window.NATEngine.applyRules(d);
-        } else if (parts[2]==='inside' && parts[3]==='source' && parts[4]==='static') {
-            const rule = { type:'static', inside:parts[5], outside:parts[6] };
-            d.natRules.push(rule);
-            this.write(`Static NAT: ${parts[5]} → ${parts[6]}`,'cli-ok');
+
+        // Normalizar: acepta tanto "ip nat ..." como "nat ..."
+        // parts[0]=ip, parts[1]=nat  →  sub=parts[2]
+        // parts[0]=nat               →  sub=parts[1]
+        const offset = parts[0].toLowerCase() === 'ip' ? 2 : 1;
+        const sub    = parts[offset]?.toLowerCase();
+
+        if (sub === 'inside' && parts[offset+1]?.toLowerCase() === 'source') {
+            if (parts[offset+2]?.toLowerCase() === 'static') {
+                // ip nat inside source static <inside_ip> <outside_ip>
+                const rule = { type:'static', inside: parts[offset+3], outside: parts[offset+4] };
+                d.natRules.push(rule);
+                this.write(`Static NAT: ${rule.inside} → ${rule.outside}`, 'cli-ok');
+            } else if (parts[offset+2]?.toLowerCase() === 'list') {
+                // ip nat inside source list <acl> interface <intf> overload
+                const rule = {
+                    type     : 'PAT',
+                    acl      : parts[offset+3],
+                    interface: parts[offset+5],
+                    overload : parts[offset+6] === 'overload',
+                };
+                d.natRules.push(rule);
+                this.write(`NAT PAT: list ${rule.acl} → interface ${rule.interface} overload`, 'cli-ok');
+            } else {
+                this.write('NAT inside source configured', 'cli-ok');
+            }
         } else {
-            this.write(`NAT configured`,'cli-ok');
+            this.write('% Usage: ip nat inside source list <n> interface <intf> overload\n%        ip nat inside source static <inside> <outside>', 'cli-warn');
         }
+
+        // Notificar al NATEngine si está disponible
+        if (window.NATEngine) window.NATEngine.applyRules(d);
     }
 
     _configACL(parts) {
