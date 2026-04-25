@@ -423,9 +423,26 @@ document.addEventListener('DOMContentLoaded', () => {
         const origConnect = simulator.connectDevices.bind(simulator);
         simulator.connectDevices = function(d1, d2, i1, i2, ls) {
             const r = origConnect(d1, d2, i1, i2, ls);
-            if (r.success) window.eventLog?.add(`Enlace: ${d1?.name} ↔ ${d2?.name}`);
+            if (r.success) window.eventLog?.add(`🔗 Enlace creado: ${d1?.name} ↔ ${d2?.name}`, '•', 'ok');
             return r;
         };
+
+        // Hook device add
+        const origAdd = simulator.addDevice.bind(simulator);
+        simulator.addDevice = function(type, x, y) {
+            const d = origAdd(type, x, y);
+            if (d) window.eventLog?.add(`➕ Dispositivo agregado: ${d.name} (${d.type})`, '•', 'info');
+            return d;
+        };
+
+        // Hook ping/packets
+        const origSendPing = simulator.sendPing?.bind(simulator);
+        if (origSendPing) {
+            simulator.sendPing = function(src, dst) {
+                window.eventLog?.add(`📡 Ping: ${src?.name} → ${dst?.name}`, '•', 'info');
+                return origSendPing(src, dst);
+            };
+        }
     }, 600);
 
     // ── Herramientas Avanzadas ───────────────────────
@@ -436,17 +453,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     $('openTrafficBtn')?.addEventListener('click', () => window.trafficMonitor?.toggle());
     $('openFaultBtn')?.addEventListener('click',   () => window.faultSimulator?.toggle());
-    $('openDiagBtn')?.addEventListener('click',    () => {
-        if (!window.networkDiag) return;
-        const write = (text, cls) => {
-            const colors = {'diag-header':'#06b6d4','diag-error':'#f87171','diag-warn':'#fbbf24','diag-ok':'#4ade80','diag-dim':'#475569'};
-            const line = document.createElement('div'); line.textContent = text; if (cls) line.style.color = colors[cls]||'#e2e8f0';
-            const out = document.getElementById('consoleOutput'); if (out) { out.appendChild(line); out.scrollTop = out.scrollHeight; }
-        };
-        window.networkDiag.showReport(write);
-        // Expand console to show results
-        document.querySelector('.console-section')?.classList.add('expanded');
-    });
+    $('openDiagBtn')?.addEventListener('click',    () => window.networkDiag?.toggle());
     $('openEventLogBtn')?.addEventListener('click', () => window.eventLog?.toggle());
 
     // Inicializar dhcpEngine cuando el simulator esté listo

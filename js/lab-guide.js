@@ -919,11 +919,656 @@ const LABS = [
             },
         ],
     },
-];
 
-/* ══════════════════════════════════════════════════════════════════
-   LAB GUIDE — Motor principal
-══════════════════════════════════════════════════════════════════ */
+    // ─────────────────────────────────────────────────────────────────
+    //  LABS 12–17: IPv6, HSRP, SD-WAN, WiFi empresarial, ISP multi-cliente, campus
+    // ─────────────────────────────────────────────────────────────────
+
+    {
+        id   : 'lab-12',
+        title: '🔵 Lab 12: IPv6 — Direccionamiento y conectividad básica',
+        level: 'Intermedio',
+        color: '#6366f1',
+        desc : 'Configura direcciones IPv6 estáticas en dos routers y verifica conectividad extremo a extremo.',
+        steps: [
+            {
+                id      : 'add-routers',
+                title   : 'Agregar 2 Routers y conectarlos',
+                desc    : 'Coloca Router-A y Router-B en el canvas y únelos con un cable.',
+                hint1   : 'Los routers deben estar directamente conectados para el enlace punto a punto IPv6.',
+                hint2   : 'Nómbralos exactamente "Router-A" y "Router-B".',
+                hint3   : 'El enlace entre ellos representará el segmento /64 de tránsito.',
+                validate: (sim) => {
+                    const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+                    if (routers.length < 2) return false;
+                    return sim.connections.some(c =>
+                        routers.includes(c.from) && routers.includes(c.to)
+                    );
+                },
+            },
+            {
+                id      : 'add-hosts',
+                title   : 'Agregar una PC detrás de cada router',
+                desc    : 'Conecta PC-A al Router-A y PC-B al Router-B.',
+                hint1   : 'Cada PC representa la LAN de un sitio diferente.',
+                hint2   : 'La topología queda: PC-A ↔ Router-A ↔ Router-B ↔ PC-B',
+                hint3   : 'Sin rutas IPv6, los dos lados no se verán todavía.',
+                validate: (sim) => {
+                    const pcs = sim.devices.filter(d => d.type === 'PC');
+                    return pcs.length >= 2;
+                },
+            },
+            {
+                id      : 'ipv6-link',
+                title   : 'Asignar prefijo /64 al enlace entre routers',
+                desc    : 'Configura IPs IPv6 en las interfaces WAN: Router-A → 2001:db8:1::1/64 y Router-B → 2001:db8:1::2/64.',
+                hint1   : 'CLI Router-A: configure terminal → interface WAN0 → ip address 2001:db8:1::1/64',
+                hint2   : 'CLI Router-B: configure terminal → interface WAN0 → ip address 2001:db8:1::2/64',
+                hint3   : 'El prefijo 2001:db8::/32 es reservado para documentación y laboratorios (RFC 3849).',
+                validate: (sim) => {
+                    const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+                    return routers.some(r => {
+                        const ip = r.ipConfig?.ipAddress || '';
+                        return ip.includes('2001:db8:1::') || ip.includes('2001:DB8:1::');
+                    }) || routers.some(r =>
+                        (r.interfaces || []).some(i => (i.ipConfig?.ipAddress || '').startsWith('2001:'))
+                    );
+                },
+            },
+            {
+                id      : 'ipv6-lan',
+                title   : 'Asignar prefijos LAN a cada router',
+                desc    : 'Router-A LAN: 2001:db8:a::1/64 | Router-B LAN: 2001:db8:b::1/64.',
+                hint1   : 'CLI Router-A: interface LAN0 → ip address 2001:db8:a::1/64',
+                hint2   : 'CLI Router-B: interface LAN0 → ip address 2001:db8:b::1/64',
+                hint3   : 'Cada LAN tendrá su propio /64 — en IPv6 esto es lo estándar.',
+                validate: (sim) => {
+                    const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+                    const allIPs = routers.flatMap(r => [
+                        r.ipConfig?.ipAddress || '',
+                        ...(r.interfaces || []).map(i => i.ipConfig?.ipAddress || '')
+                    ]);
+                    const hasA = allIPs.some(ip => ip.toLowerCase().includes('2001:db8:a::'));
+                    const hasB = allIPs.some(ip => ip.toLowerCase().includes('2001:db8:b::'));
+                    return hasA && hasB;
+                },
+            },
+            {
+                id      : 'ipv6-hosts',
+                title   : 'Configurar IPs IPv6 en las PCs',
+                desc    : 'PC-A → 2001:db8:a::10/64, gateway 2001:db8:a::1 | PC-B → 2001:db8:b::10/64, gateway 2001:db8:b::1.',
+                hint1   : 'Edita la IP de cada PC en el panel derecho.',
+                hint2   : 'El gateway de PC-A es la interfaz LAN de Router-A.',
+                hint3   : 'En IPv6 no existe NAT en redes bien diseñadas: las IPs son globalmente enrutables.',
+                validate: (sim) => {
+                    const pcs = sim.devices.filter(d => d.type === 'PC');
+                    return pcs.some(p => (p.ipConfig?.ipAddress || '').toLowerCase().startsWith('2001:db8:a::')) &&
+                           pcs.some(p => (p.ipConfig?.ipAddress || '').toLowerCase().startsWith('2001:db8:b::'));
+                },
+            },
+            {
+                id      : 'ipv6-route',
+                title   : 'Agregar rutas estáticas IPv6',
+                desc    : 'Cada router necesita una ruta estática hacia la red del otro lado.',
+                hint1   : 'CLI Router-A: ip route 2001:db8:b::/64 2001:db8:1::2',
+                hint2   : 'CLI Router-B: ip route 2001:db8:a::/64 2001:db8:1::1',
+                hint3   : 'Las rutas estáticas IPv6 funcionan igual que las IPv4, pero con prefijos /64.',
+                validate: (sim) => {
+                    const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+                    return routers.some(r => {
+                        const routes = r.routingTable?.entries ? r.routingTable.entries() : (r.routingTable?.routes || []);
+                        return routes.some(rt => (rt.network || '').startsWith('2001:') || (rt.network || '').includes('db8'));
+                    }) || routers.some(r => r.staticRoutes?.some(sr => (sr.network || '').includes('2001:')));
+                },
+            },
+            {
+                id      : 'simulate-ipv6',
+                title   : 'Verificar conectividad IPv6 extremo a extremo',
+                desc    : 'Inicia la simulación. PC-A debe poder alcanzar PC-B a través de los dos routers.',
+                hint1   : 'Presiona ▶ para iniciar.',
+                hint2   : 'CLI de PC-A: ping 2001:db8:b::10 — debe responder.',
+                hint3   : 'Con IPv6 ya no necesitas NAT: cada dispositivo tiene una IP global única.',
+                validate: (sim) => {
+                    if (!sim.simulationRunning) return false;
+                    const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+                    return routers.length >= 2;
+                },
+            },
+        ],
+    },
+
+    {
+        id   : 'lab-13',
+        title: '🔁 Lab 13: Redundancia con HSRP (Gateway de Respaldo)',
+        level: 'Avanzado',
+        color: '#f97316',
+        desc : 'Configura dos routers con HSRP para que la LAN siempre tenga un gateway disponible aunque uno falle.',
+        steps: [
+            {
+                id      : 'topology',
+                title   : 'Topología: 2 Routers + Switch + PCs',
+                desc    : 'Agrega Router-A, Router-B, un Switch y 2 PCs. Conecta ambos routers al switch.',
+                hint1   : 'Ambos routers estarán en la misma subred LAN — eso es lo que permite HSRP.',
+                hint2   : 'Conecta: Router-A → Switch, Router-B → Switch, PC1 → Switch, PC2 → Switch.',
+                hint3   : 'HSRP (Hot Standby Router Protocol) da una IP virtual compartida entre dos routers.',
+                validate: (sim) => {
+                    const routers  = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+                    const switches = sim.devices.filter(d => ['Switch','SwitchPoE'].includes(d.type));
+                    const pcs      = sim.devices.filter(d => d.type === 'PC');
+                    return routers.length >= 2 && switches.length >= 1 && pcs.length >= 2;
+                },
+            },
+            {
+                id      : 'lan-ips',
+                title   : 'Asignar IPs LAN a ambos routers',
+                desc    : 'Router-A → 192.168.1.1/24 | Router-B → 192.168.1.2/24 (misma subred, IPs distintas).',
+                hint1   : 'Ambos routers deben estar en 192.168.1.0/24.',
+                hint2   : 'Edita las IPs de cada router en el panel derecho.',
+                hint3   : 'Estas serán las IPs físicas reales — la IP virtual HSRP será .254.',
+                validate: (sim) => {
+                    const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+                    return routers.filter(r => r.ipConfig?.ipAddress?.startsWith('192.168.1.')).length >= 2;
+                },
+            },
+            {
+                id      : 'wan-uplinks',
+                title   : 'Conectar cada router a Internet/ISP',
+                desc    : 'Agrega un ISP y conecta ambos routers al ISP (simulando doble uplink).',
+                hint1   : 'Cada router tiene su propio enlace WAN al proveedor.',
+                hint2   : 'Esto representa la redundancia de enlace WAN junto con la redundancia de gateway.',
+                hint3   : 'Si Router-A cae, Router-B ya tiene su enlace propio a Internet.',
+                validate: (sim) => {
+                    const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+                    const isp     = sim.devices.find(d => d.type === 'ISP');
+                    if (!isp || routers.length < 2) return false;
+                    const ispConns = sim.connections.filter(c => c.from === isp || c.to === isp);
+                    return ispConns.length >= 2;
+                },
+            },
+            {
+                id      : 'hsrp-active',
+                title   : 'Configurar HSRP en Router-A (Activo)',
+                desc    : 'CLI Router-A: configure terminal → interface LAN0 → standby 1 ip 192.168.1.254 → standby 1 priority 110.',
+                hint1   : '"standby 1 ip" define la IP virtual compartida que usarán las PCs como gateway.',
+                hint2   : '"priority 110" (por encima del default 100) hace que Router-A sea el Activo.',
+                hint3   : 'El router con mayor priority gana la elección HSRP.',
+                validate: (sim) => {
+                    const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+                    return routers.some(r => r.hsrp?.enabled && (r.hsrp?.priority >= 110 || r.hsrp?.role === 'active'));
+                },
+            },
+            {
+                id      : 'hsrp-standby',
+                title   : 'Configurar HSRP en Router-B (Standby)',
+                desc    : 'CLI Router-B: configure terminal → interface LAN0 → standby 1 ip 192.168.1.254 → standby 1 priority 90.',
+                hint1   : 'La IP virtual es la misma: 192.168.1.254.',
+                hint2   : '"priority 90" (debajo de 100) hace que Router-B sea el Standby.',
+                hint3   : 'Si Router-A cae, Router-B toma automáticamente el rol Activo.',
+                validate: (sim) => {
+                    const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+                    return routers.filter(r => r.hsrp?.enabled).length >= 2 ||
+                           routers.some(r => r.hsrp?.role === 'standby' || (r.hsrp?.priority <= 100 && r.hsrp?.priority > 0));
+                },
+            },
+            {
+                id      : 'pcs-virtual-gw',
+                title   : 'Configurar gateway virtual en las PCs',
+                desc    : 'PC1 y PC2 → IP 192.168.1.10 y .11, gateway 192.168.1.254 (la IP virtual HSRP).',
+                hint1   : 'Las PCs no apuntan a ningún router físico: apuntan a la IP virtual.',
+                hint2   : 'Edita cada PC: IP 192.168.1.x, gateway 192.168.1.254.',
+                hint3   : 'La IP virtual .254 es respondida por quien sea el router Activo en ese momento.',
+                validate: (sim) => {
+                    const pcs = sim.devices.filter(d => d.type === 'PC');
+                    return pcs.filter(p => p.ipConfig?.gateway === '192.168.1.254').length >= 1;
+                },
+            },
+            {
+                id      : 'simulate-failover',
+                title   : 'Simular y probar failover',
+                desc    : 'Inicia la simulación. Luego usa Fallo de dispositivo en Router-A y verifica que Router-B toma el control.',
+                hint1   : 'Presiona ▶ para iniciar la simulación.',
+                hint2   : 'Usa la herramienta "Fallo de dispositivo" (modo Fallo) sobre Router-A.',
+                hint3   : 'Router-B debe asumir el rol Activo y la LAN seguirá funcionando sin interrupción.',
+                validate: (sim) => {
+                    if (!sim.simulationRunning) return false;
+                    const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+                    return routers.some(r => r.hsrp?.enabled);
+                },
+            },
+        ],
+    },
+
+    {
+        id   : 'lab-14',
+        title: '🌐 Lab 14: SD-WAN — Enlace principal + Respaldo',
+        level: 'Avanzado',
+        color: '#06b6d4',
+        desc : 'Configura un dispositivo SD-WAN con dos uplinks (MPLS y broadband) y política de failover automático.',
+        steps: [
+            {
+                id      : 'add-sdwan',
+                title   : 'Agregar el dispositivo SD-WAN',
+                desc    : 'Coloca un SD-WAN en el canvas. Es el concentrador de enlaces WAN inteligente.',
+                hint1   : 'Busca SD-WAN en el sidebar, categoría WAN.',
+                hint2   : 'El SD-WAN reemplaza al router tradicional en arquitecturas modernas.',
+                hint3   : 'Administra múltiples enlaces WAN y elige el mejor camino en tiempo real.',
+                validate: (sim) => sim.devices.some(d => d.type === 'SDWAN'),
+            },
+            {
+                id      : 'dual-wan',
+                title   : 'Conectar dos ISPs al SD-WAN',
+                desc    : 'Agrega ISP-1 (enlace principal MPLS) e ISP-2 (respaldo broadband) y conéctalos al SD-WAN.',
+                hint1   : 'Agrega dos dispositivos ISP y nómbralos "ISP-MPLS" e "ISP-Broadband".',
+                hint2   : 'Conécta cada ISP a una interfaz WAN distinta del SD-WAN.',
+                hint3   : 'En producción, MPLS suele ser el enlace dedicado y el broadband el respaldo económico.',
+                validate: (sim) => {
+                    const sdwan = sim.devices.find(d => d.type === 'SDWAN');
+                    if (!sdwan) return false;
+                    const ispConns = sim.connections.filter(c =>
+                        (c.from === sdwan || c.to === sdwan) &&
+                        ['ISP','Internet'].includes((c.from === sdwan ? c.to : c.from).type)
+                    );
+                    return ispConns.length >= 2;
+                },
+            },
+            {
+                id      : 'lan-side',
+                title   : 'Conectar la LAN al SD-WAN',
+                desc    : 'Agrega un Switch y 2 PCs, conecta el switch al SD-WAN como LAN.',
+                hint1   : 'El SD-WAN tiene una interfaz LAN hacia la red interna de la empresa.',
+                hint2   : 'Asigna IPs 10.10.0.x/24 a las PCs, gateway apuntando al SD-WAN.',
+                hint3   : 'El SD-WAN es transparente para los clientes internos.',
+                validate: (sim) => {
+                    const sdwan = sim.devices.find(d => d.type === 'SDWAN');
+                    const pcs   = sim.devices.filter(d => d.type === 'PC');
+                    return sdwan && pcs.length >= 2;
+                },
+            },
+            {
+                id      : 'primary-policy',
+                title   : 'Definir enlace principal (MPLS)',
+                desc    : 'En el panel del SD-WAN, configura ISP-MPLS como enlace activo con prioridad 1.',
+                hint1   : 'Selecciona el SD-WAN y abre su panel de configuración.',
+                hint2   : 'CLI SD-WAN: configure terminal → sdwan policy → link mpls priority 1',
+                hint3   : 'El tráfico saldrá por MPLS mientras esté disponible.',
+                validate: (sim) => {
+                    const sdwan = sim.devices.find(d => d.type === 'SDWAN');
+                    return !!(sdwan?.sdwanPolicy?.primaryLink || sdwan?.sdwanConfig?.primaryISP || sdwan?.wanLinks?.some(l => l.priority === 1));
+                },
+            },
+            {
+                id      : 'failover-policy',
+                title   : 'Configurar política de failover automático',
+                desc    : 'Si ISP-MPLS cae, el tráfico debe desviar automáticamente a ISP-Broadband.',
+                hint1   : 'CLI SD-WAN: sdwan policy → link broadband priority 2 → failover auto',
+                hint2   : 'El SD-WAN detecta la caída mediante BFD (Bidirectional Forwarding Detection).',
+                hint3   : 'El tiempo de convergencia en SD-WAN suele ser menos de 1 segundo.',
+                validate: (sim) => {
+                    const sdwan = sim.devices.find(d => d.type === 'SDWAN');
+                    return !!(sdwan?.sdwanPolicy?.failover || sdwan?.sdwanConfig?.failoverEnabled ||
+                               sdwan?.wanLinks?.some(l => l.failover === true || l.priority === 2));
+                },
+            },
+            {
+                id      : 'simulate-sdwan',
+                title   : 'Simular y probar conmutación de enlace',
+                desc    : 'Inicia la simulación. Luego falla el ISP-MPLS y verifica que el tráfico cambia a broadband.',
+                hint1   : 'Presiona ▶ para iniciar.',
+                hint2   : 'Usa la herramienta de fallo sobre ISP-MPLS.',
+                hint3   : 'El SD-WAN debe reconectar automáticamente por ISP-Broadband sin intervención manual.',
+                validate: (sim) => {
+                    if (!sim.simulationRunning) return false;
+                    const sdwan = sim.devices.find(d => d.type === 'SDWAN');
+                    const isps  = sim.devices.filter(d => d.type === 'ISP');
+                    return sdwan && isps.length >= 2;
+                },
+            },
+        ],
+    },
+
+    {
+        id   : 'lab-15',
+        title: '📶 Lab 15: Red WiFi Empresarial con Controlador AC',
+        level: 'Avanzado',
+        color: '#84cc16',
+        desc : 'Diseña una red inalámbrica corporativa con controlador WiFi (AC), múltiples APs y VLANs por SSID.',
+        steps: [
+            {
+                id      : 'core-switch',
+                title   : 'Backbone: Switch PoE como núcleo',
+                desc    : 'Agrega un Switch PoE. Alimentará los APs por PoE y concentrará toda la red.',
+                hint1   : 'El Switch PoE (Power over Ethernet) entrega energía y datos por el mismo cable.',
+                hint2   : 'Busca "Switch PoE" en el sidebar, categoría Switching.',
+                hint3   : 'En redes WiFi empresariales, el switch PoE es el punto de distribución central.',
+                validate: (sim) => sim.devices.some(d => d.type === 'SwitchPoE'),
+            },
+            {
+                id      : 'add-controller',
+                title   : 'Agregar Controlador WiFi (AC)',
+                desc    : 'Coloca un Controlador Inalámbrico (AC) y conéctalo al Switch PoE.',
+                hint1   : 'El AC (Wireless Controller) centraliza la configuración de todos los APs.',
+                hint2   : 'Busca "AC" o "Controlador" en el sidebar.',
+                hint3   : 'Sin controlador, cada AP sería autónomo — el AC los gestiona en conjunto.',
+                validate: (sim) => {
+                    const ac = sim.devices.find(d => d.type === 'AC');
+                    const sw = sim.devices.find(d => d.type === 'SwitchPoE');
+                    if (!ac || !sw) return false;
+                    return sim.connections.some(c =>
+                        (c.from === ac && c.to === sw) || (c.from === sw && c.to === ac)
+                    );
+                },
+            },
+            {
+                id      : 'add-aps',
+                title   : 'Agregar 3 Access Points y conectarlos al switch',
+                desc    : 'Coloca 3 APs en el canvas y conéctalos al Switch PoE.',
+                hint1   : 'Busca "AP" en el sidebar, categoría Wireless.',
+                hint2   : 'El switch PoE les dará alimentación y los APs recibirán configuración del AC.',
+                hint3   : 'En la realidad, los APs envían tráfico encapsulado (CAPWAP) hacia el controlador.',
+                validate: (sim) => {
+                    const sw  = sim.devices.find(d => d.type === 'SwitchPoE');
+                    const aps = sim.devices.filter(d => d.type === 'AP');
+                    if (!sw || aps.length < 3) return false;
+                    const apConns = aps.filter(ap =>
+                        sim.connections.some(c =>
+                            (c.from === ap && c.to === sw) || (c.from === sw && c.to === ap)
+                        )
+                    );
+                    return apConns.length >= 3;
+                },
+            },
+            {
+                id      : 'vlan-ssids',
+                title   : 'Crear VLANs para cada SSID',
+                desc    : 'Configura VLAN 10 (Corp), VLAN 20 (Invitados), VLAN 30 (IoT) en el Switch PoE.',
+                hint1   : 'CLI del Switch PoE: vlan 10 → name Corp / vlan 20 → name Guest / vlan 30 → name IoT',
+                hint2   : 'Cada SSID WiFi se mapeará a una VLAN diferente para segmentar el tráfico.',
+                hint3   : 'Los invitados (VLAN 20) no deben acceder a recursos de la VLAN Corp.',
+                validate: (sim) => {
+                    const sw = sim.devices.find(d => d.type === 'SwitchPoE');
+                    if (!sw?.vlans) return false;
+                    const ids = Object.keys(sw.vlans).map(Number);
+                    return ids.includes(10) && ids.includes(20);
+                },
+            },
+            {
+                id      : 'router-gateway',
+                title   : 'Agregar Router principal y conexión a Internet',
+                desc    : 'Conecta un Router al Switch PoE y agrega ISP + Internet para salida a la nube.',
+                hint1   : 'El router será el gateway de todas las VLANs WiFi.',
+                hint2   : 'Configura inter-VLAN routing en el router (una IP por VLAN).',
+                hint3   : 'VLAN 10 → 10.10.10.254 | VLAN 20 → 10.20.20.254 | VLAN 30 → 10.30.30.254',
+                validate: (sim) => {
+                    const r   = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+                    const sw  = sim.devices.find(d => d.type === 'SwitchPoE');
+                    const isp = sim.devices.find(d => d.type === 'ISP');
+                    return r && sw && isp;
+                },
+            },
+            {
+                id      : 'clients',
+                title   : 'Agregar clientes inalámbricos',
+                desc    : 'Conecta laptops a los APs para simular clientes WiFi.',
+                hint1   : 'Arrastra Laptops y conéctalas a distintos APs con cable wireless.',
+                hint2   : 'Asigna IPs en las VLANs correctas según el SSID al que se conectan.',
+                hint3   : 'VLAN 10: 10.10.10.x | VLAN 20: 10.20.20.x | VLAN 30: 10.30.30.x',
+                validate: (sim) => {
+                    const laptops = sim.devices.filter(d => d.type === 'Laptop');
+                    const aps     = sim.devices.filter(d => d.type === 'AP');
+                    if (laptops.length < 2 || aps.length < 3) return false;
+                    return laptops.some(l =>
+                        sim.connections.some(c =>
+                            (c.from === l || c.to === l) &&
+                            aps.includes(c.from === l ? c.to : c.from)
+                        )
+                    );
+                },
+            },
+            {
+                id      : 'simulate-wifi',
+                title   : 'Red WiFi empresarial completa en simulación',
+                desc    : 'Inicia la simulación. El AC, 3 APs, VLANs y clientes deben estar operativos.',
+                hint1   : 'Presiona ▶ para iniciar.',
+                hint2   : 'Verifica en el panel del AC que los 3 APs aparecen como "Associated".',
+                hint3   : 'Esta arquitectura es la base de redes WiFi en oficinas, hospitales y campus.',
+                validate: (sim) => {
+                    if (!sim.simulationRunning) return false;
+                    const ac  = sim.devices.find(d => d.type === 'AC');
+                    const aps = sim.devices.filter(d => d.type === 'AP');
+                    return ac && aps.length >= 3;
+                },
+            },
+        ],
+    },
+
+    {
+        id   : 'lab-16',
+        title: '🏙 Lab 16: ISP Multi-Cliente con DHCP y NAT',
+        level: 'Experto',
+        color: '#e11d48',
+        desc : 'Simula la red de un proveedor de Internet con 3 clientes, DHCP centralizado y NAT por cliente.',
+        steps: [
+            {
+                id      : 'isp-core',
+                title   : 'Núcleo del ISP: Router principal + Internet',
+                desc    : 'Agrega el Router-ISP (router de distribución del proveedor) y conéctalo al nodo Internet.',
+                hint1   : 'El Router-ISP tiene IPs públicas en todas sus interfaces.',
+                hint2   : 'Nómbralo "Router-ISP" para identificarlo.',
+                hint3   : 'Asigna IP pública 200.1.1.1/24 al Router-ISP.',
+                validate: (sim) => {
+                    const hasInternet = sim.devices.some(d => d.type === 'Internet');
+                    const hasRouter   = sim.devices.some(d => ['Router','RouterWifi'].includes(d.type));
+                    return hasInternet && hasRouter;
+                },
+            },
+            {
+                id      : 'three-clients',
+                title   : 'Crear 3 redes de clientes',
+                desc    : 'Agrega 3 pares Router-Cliente + Switch. Cada cliente representa una empresa o hogar.',
+                hint1   : 'Topología: Router-ISP → Router-Cliente-1, Router-Cliente-2, Router-Cliente-3.',
+                hint2   : 'Cada Router-Cliente tiene su propio bloque privado (192.168.1.0, .2.0, .3.0).',
+                hint3   : 'Agrega un switch y al menos una PC detrás de cada Router-Cliente.',
+                validate: (sim) => {
+                    const routers  = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+                    const switches = sim.devices.filter(d => ['Switch','SwitchPoE'].includes(d.type));
+                    return routers.length >= 4 && switches.length >= 3;
+                },
+            },
+            {
+                id      : 'public-ips',
+                title   : 'Asignar IPs públicas a los clientes (WAN)',
+                desc    : 'Cada Router-Cliente recibe una IP pública del ISP: 200.1.1.2/24, .3/24, .4/24.',
+                hint1   : 'Estas IPs van en la interfaz WAN de cada Router-Cliente.',
+                hint2   : 'El gateway WAN de cada cliente es 200.1.1.1 (Router-ISP).',
+                hint3   : 'En la realidad, estas IPs se asignarían automáticamente vía DHCPv4 o PPPoE.',
+                validate: (sim) => {
+                    const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+                    const publicRouters = routers.filter(r => {
+                        const allIPs = [r.ipConfig?.ipAddress || '',
+                            ...(r.interfaces || []).map(i => i.ipConfig?.ipAddress || '')];
+                        return allIPs.some(ip => ip.startsWith('200.1.1.'));
+                    });
+                    return publicRouters.length >= 3;
+                },
+            },
+            {
+                id      : 'dhcp-per-client',
+                title   : 'Configurar DHCP en cada Router-Cliente',
+                desc    : 'Cada router cliente distribuye IPs privadas a sus propios equipos.',
+                hint1   : 'CLI Router-Cliente-1: ip dhcp pool CASA1 → network 192.168.1.0 255.255.255.0',
+                hint2   : 'CLI Router-Cliente-2: ip dhcp pool CASA2 → network 192.168.2.0 255.255.255.0',
+                hint3   : 'Los pools DHCP deben ser independientes entre clientes.',
+                validate: (sim) => {
+                    const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+                    return routers.filter(r => r.dhcpServer || r.dhcpPools?.length).length >= 2;
+                },
+            },
+            {
+                id      : 'nat-per-client',
+                title   : 'NAT en cada Router-Cliente',
+                desc    : 'Cada router cliente debe traducir su red privada a su IP pública (PAT).',
+                hint1   : 'CLI por cada Router-Cliente: ip nat inside source list 1 interface WAN0 overload',
+                hint2   : 'Marca LAN0 como "ip nat inside" y WAN0 como "ip nat outside".',
+                hint3   : 'Con NAT, 3 redes privadas diferentes comparten el espacio 200.1.1.x sin conflicto.',
+                validate: (sim) => {
+                    const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+                    return routers.filter(r => r.natRules?.some(rule => rule.type === 'PAT')).length >= 2;
+                },
+            },
+            {
+                id      : 'static-routes-isp',
+                title   : 'Rutas estáticas en el Router-ISP',
+                desc    : 'El Router-ISP necesita conocer las IPs de cada cliente para enrutar el tráfico de retorno.',
+                hint1   : 'CLI Router-ISP: ip route 200.1.1.2 255.255.255.255 <interfaz-cliente-1>',
+                hint2   : 'En la práctica, el ISP usa BGP o rutas conectadas automáticamente.',
+                hint3   : 'Sin estas rutas, el Router-ISP no sabría cómo devolver respuestas a cada cliente.',
+                validate: (sim) => {
+                    const ispRouter = sim.devices.find(d =>
+                        ['Router','RouterWifi'].includes(d.type) &&
+                        sim.connections.filter(c => c.from === d || c.to === d).length >= 3
+                    );
+                    if (!ispRouter) return true; // flexible: si hay 4+ routers, asumir que está configurado
+                    const routes = ispRouter.routingTable?.entries ? ispRouter.routingTable.entries() : (ispRouter.routingTable?.routes || []);
+                    return routes.length >= 2 || (ispRouter.staticRoutes?.length >= 1);
+                },
+            },
+            {
+                id      : 'simulate-isp',
+                title   : 'ISP multi-cliente operativo',
+                desc    : 'Inicia la simulación. Cada cliente debe poder llegar a Internet con su propia IP pública.',
+                hint1   : 'Presiona ▶ para iniciar.',
+                hint2   : 'Ping desde una PC de cada cliente hacia Internet — cada uno saldrá con su IP pública distinta.',
+                hint3   : 'Esta es exactamente la arquitectura de una empresa de telecomunicaciones.',
+                validate: (sim) => {
+                    if (!sim.simulationRunning) return false;
+                    const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+                    return routers.length >= 4;
+                },
+            },
+        ],
+    },
+
+    {
+        id   : 'lab-17',
+        title: '🏛 Lab 17: Campus Universitario — Red Completa',
+        level: 'Experto',
+        color: '#7c3aed',
+        desc : 'Diseña la red de un campus con edificios, VLANs por departamento, WiFi, servidores y salida a Internet.',
+        steps: [
+            {
+                id      : 'core-layer',
+                title   : 'Capa núcleo: Router principal + 2 Switches de distribución',
+                desc    : 'Agrega el Router-Core y dos Switches de distribución. Uno por zona del campus.',
+                hint1   : 'Arquitectura 3 capas: Núcleo (Core) → Distribución → Acceso.',
+                hint2   : 'Conecta: Router-Core ↔ Switch-Dist-A y Router-Core ↔ Switch-Dist-B.',
+                hint3   : 'Switch-Dist-A = Edificio A (aulas) | Switch-Dist-B = Edificio B (laboratorios).',
+                validate: (sim) => {
+                    const routers  = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+                    const switches = sim.devices.filter(d => ['Switch','SwitchPoE'].includes(d.type));
+                    return routers.length >= 1 && switches.length >= 2;
+                },
+            },
+            {
+                id      : 'access-layer',
+                title   : 'Capa acceso: 2 Switches PoE por edificio',
+                desc    : 'Agrega switches PoE debajo de cada switch de distribución para conectar APs y PCs.',
+                hint1   : 'Cada Switch PoE de acceso alimenta los APs del piso y conecta las PCs.',
+                hint2   : 'Conecta: Switch-Dist-A → Switch-PoE-A1, Switch-PoE-A2.',
+                hint3   : 'Conecta: Switch-Dist-B → Switch-PoE-B1, Switch-PoE-B2.',
+                validate: (sim) => {
+                    const poeSwitches = sim.devices.filter(d => d.type === 'SwitchPoE');
+                    return poeSwitches.length >= 2;
+                },
+            },
+            {
+                id      : 'vlan-plan',
+                title   : 'Plan de VLANs del campus',
+                desc    : 'Crea las VLANs: 10=Profesores, 20=Alumnos, 30=Admin, 40=WiFi, 50=Servidores.',
+                hint1   : 'CLI en cualquier switch de distribución: vlan 10 → name Profesores, etc.',
+                hint2   : 'Cada departamento en su VLAN: seguridad y control de tráfico por área.',
+                hint3   : 'La VLAN 50 (Servidores) es crítica: solo Admin y Profesores deben acceder.',
+                validate: (sim) => {
+                    const switches = sim.devices.filter(d => ['Switch','SwitchPoE'].includes(d.type));
+                    return switches.some(sw => {
+                        const ids = Object.keys(sw.vlans || {}).map(Number);
+                        return ids.includes(10) && ids.includes(20);
+                    });
+                },
+            },
+            {
+                id      : 'server-farm',
+                title   : 'Zona de servidores (DMZ interna)',
+                desc    : 'Agrega 2 Servidores (Web y DNS/DHCP) en la VLAN 50 conectados al Router-Core.',
+                hint1   : 'Servidor Web: 10.50.0.10/24 | Servidor DNS/DHCP: 10.50.0.11/24',
+                hint2   : 'El Router-Core actúa como firewall de la VLAN 50: solo permite tráfico específico.',
+                hint3   : 'El servidor DHCP distribuirá IPs a todas las VLANs del campus.',
+                validate: (sim) => {
+                    const servers = sim.devices.filter(d => d.type === 'Server');
+                    return servers.length >= 2 &&
+                           servers.some(s => s.ipConfig?.ipAddress?.startsWith('10.50.'));
+                },
+            },
+            {
+                id      : 'wifi-campus',
+                title   : 'Red WiFi: Controlador AC + 4 APs',
+                desc    : 'Agrega un Controlador AC y 4 APs distribuidos por los edificios.',
+                hint1   : 'El AC debe estar en la VLAN de gestión (o conectado al switch de distribución).',
+                hint2   : 'Los APs estarán en la VLAN 40 (WiFi) y emitirán SSIDs para Profesores y Alumnos.',
+                hint3   : 'SSID "Campus-Prof" → VLAN 10 | SSID "Campus-Alum" → VLAN 20',
+                validate: (sim) => {
+                    const ac  = sim.devices.find(d => d.type === 'AC');
+                    const aps = sim.devices.filter(d => d.type === 'AP');
+                    return ac && aps.length >= 2;
+                },
+            },
+            {
+                id      : 'internet-exit',
+                title   : 'Salida a Internet con NAT + Firewall',
+                desc    : 'Conecta el Router-Core a un Firewall → ISP → Internet para salida pública.',
+                hint1   : 'El Firewall separa la red del campus de Internet.',
+                hint2   : 'Configura NAT en el Firewall para que todas las VLANs internas compartan una IP pública.',
+                hint3   : 'ACL en el Firewall: permitir salida de todas las VLANs, bloquear entrada no solicitada.',
+                validate: (sim) => {
+                    const hasFW       = sim.devices.some(d => d.type === 'Firewall');
+                    const hasISP      = sim.devices.some(d => d.type === 'ISP');
+                    const hasInternet = sim.devices.some(d => d.type === 'Internet');
+                    return hasFW && hasISP && hasInternet;
+                },
+            },
+            {
+                id      : 'end-devices',
+                title   : 'Poblar el campus con equipos de usuario',
+                desc    : 'Agrega al menos 6 PCs/Laptops distribuidos entre las VLANs de Profesores y Alumnos.',
+                hint1   : 'Profesores (VLAN 10): 10.10.0.x/24 | Alumnos (VLAN 20): 10.20.0.x/24',
+                hint2   : 'Usa el servidor DHCP para asignar IPs automáticamente.',
+                hint3   : 'Mezcla PCs cableadas y Laptops inalámbricas para un campus realista.',
+                validate: (sim) => {
+                    const endDevices = sim.devices.filter(d => ['PC','Laptop'].includes(d.type));
+                    return endDevices.length >= 6;
+                },
+            },
+            {
+                id      : 'simulate-campus',
+                title   : '¡Campus universitario operativo!',
+                desc    : 'Inicia la simulación. Toda la topología debe estar activa y funcional.',
+                hint1   : 'Presiona ▶ para iniciar.',
+                hint2   : 'Verifica con "show ip route" en el Router-Core — debe mostrar todas las VLANs.',
+                hint3   : '¡Felicitaciones! Esta topología representa una red universitaria de producción real.',
+                validate: (sim) => {
+                    if (!sim.simulationRunning) return false;
+                    const routers    = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+                    const switches   = sim.devices.filter(d => ['Switch','SwitchPoE'].includes(d.type));
+                    const endDevices = sim.devices.filter(d => ['PC','Laptop'].includes(d.type));
+                    const hasWifi    = sim.devices.some(d => d.type === 'AP');
+                    const hasServer  = sim.devices.some(d => d.type === 'Server');
+                    return routers.length >= 1 && switches.length >= 4 &&
+                           endDevices.length >= 6 && hasWifi && hasServer;
+                },
+            },
+        ],
+    },
+
+];
 
 class LabGuide {
     constructor(sim) {

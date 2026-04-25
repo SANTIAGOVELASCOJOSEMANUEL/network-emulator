@@ -119,7 +119,8 @@ class Router extends NetworkDevice {
         super(id,name,'Router',x,y);
         this.lanPorts=lanPorts;this.wanPorts=wanPorts;this.loadBalancing=false;this.backupMode=false;this.isps=[];
         this.bandwidth={total:0,used:0,isps:[]};this.dhcpServer=null;this.routingTable=[];this.vlanConfig={};
-        for(let i=0;i<wanPorts;i++)this.addInterface(`WAN${i}`,'WAN','10Gbps','fibra');
+        this.addInterface('WAN0','WAN','10Gbps','fibra');
+        for(let i=1;i<wanPorts;i++)this.addInterface(`WAN${i}`,'WAN','1Gbps','cobre');
         for(let i=0;i<2;i++)this.addInterface(`LAN${i}`,'LAN','10Gbps','fibra');
         for(let i=2;i<lanPorts;i++)this.addInterface(`LAN${i}`,'LAN','1Gbps','cobre');
         this.addInterface('WLAN0','LAN','300Mbps','wireless');
@@ -324,8 +325,7 @@ class SDWAN extends NetworkDevice {
         this.nodes=[];this.policies=[];this.loadBalancing=true;this.encryption='AES-256';
         this.underlay=['MPLS','Internet','LTE'];
         for(let i=0;i<4;i++)this.addInterface(`WAN${i}`,'WAN','∞','wireless');
-        for(let i=0;i<4;i++)this.addInterface(`LAN${i}`,'LAN','10Gbps','fibra');
-        this.addInterface('MGMT','MGMT','1Gbps','cobre');
+        for(let i=0;i<4;i++)this.addInterface(`LAN${i}`,'LAN','∞','wireless');
         this.ipConfig={ipAddress:'10.0.0.1',subnetMask:'255.255.255.0',gateway:'',public:true};
     }
     addNode(net){this.nodes.push({network:net,status:'up'});}

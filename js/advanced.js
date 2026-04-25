@@ -264,42 +264,58 @@ class TrafficMonitor {
         let totalPkts=0, totalDrops=0, totalBW=0;
         const linkLines = [];
 
+        // If no connections, nothing to show
+        if (!sim.connections.length) {
+            this._updateGlobalStats(0, 0, 0);
+            this._chartData.push(0);
+            if (this._chartData.length > 60) this._chartData.shift();
+            this._drawChart();
+            const linksEl = this._panel.querySelector('#trafficLinks');
+            if (linksEl) linksEl.innerHTML = '<div style="color:#475569;font-size:10px;padding:4px 0">Sin conexiones en la topología</div>';
+            return;
+        }
+
         sim.connections.forEach(c => {
             const ls = c._linkState;
             if (!ls) return;
+            if (!ls.isUp()) return;
             const key = `${c.from.name}↔${c.to.name}`;
 
-            // Simulate traffic based on packets in flight + link state
-            const pkt = sim.packets.filter(p => {
+            // Paquetes en vuelo sobre este enlace (animados)
+            const pktsInFlight = (sim.packets || []).filter(p => {
                 if (!p.ruta?.length) return false;
                 const idx = p.ruta.indexOf(c.from.id);
-                return idx>=0 && p.ruta[idx+1]===c.to.id;
+                return idx >= 0 && p.ruta[idx+1] === c.to.id;
             }).length;
 
-            const bw = Math.min(ls.bandwidth, pkt * (ls.bandwidth/10) + Math.random()*ls.bandwidth*0.05);
-            const drops = ls.droppedPkts;
+            // Simular tráfico de fondo: cada enlace tiene una carga base aleatoria
+            // que evoluciona suavemente (random walk entre 2% y 60% del ancho de banda)
+            if (!this._baseLoad) this._baseLoad = {};
+            if (this._baseLoad[key] === undefined) this._baseLoad[key] = Math.random() * 0.3 + 0.02;
+            // Random walk ±5% por tick
+            this._baseLoad[key] = Math.min(0.75, Math.max(0.01, this._baseLoad[key] + (Math.random()-0.5)*0.05));
+
+            const bgBW   = ls.bandwidth * this._baseLoad[key];
+            const pktBW  = pktsInFlight * Math.min(ls.bandwidth * 0.3, 50);
+            const bw     = Math.min(ls.bandwidth, bgBW + pktBW);
+            const pkt    = pktsInFlight + Math.round(this._baseLoad[key] * ls.bandwidth * 0.1);
+            const drops  = ls.droppedPkts;
+
             totalPkts  += pkt;
             totalDrops += drops;
             totalBW    += bw;
 
-            // Store history
             if (!this._history[key]) this._history[key] = [];
             this._history[key].push({ t: Date.now(), pkt, bw, drops });
             if (this._history[key].length > 60) this._history[key].shift();
 
             const stCol = ls.status==='up'?'#4ade80':'#f87171';
             const bwPct = Math.min(100, (bw/ls.bandwidth)*100);
-            const barW  = Math.round(bwPct);
-            linkLines.push({key, ls, pkt, bw: bw.toFixed(1), bwPct: barW, stCol, drops});
+            linkLines.push({key, ls, pkt, bw: bw.toFixed(1), bwPct: Math.round(bwPct), stCol, drops});
         });
 
         // Update global stats
-        const pktsEl = document.getElementById('tmPkts');
-        const bwEl   = document.getElementById('tmBW');
-        const dropEl = document.getElementById('tmDrops');
-        if (pktsEl) pktsEl.textContent = totalPkts;
-        if (bwEl)   bwEl.textContent   = totalBW.toFixed(1);
-        if (dropEl) dropEl.textContent = totalDrops;
+        this._updateGlobalStats(totalPkts, totalBW, totalDrops);
 
         // Chart data
         this._chartData.push(totalBW);
@@ -357,6 +373,15 @@ class TrafficMonitor {
         ctx.textAlign='left';
         ctx.fillStyle='#475569';
         ctx.fillText('Ancho de banda', 4, 12);
+    }
+
+    _updateGlobalStats(pkts, bw, drops) {
+        const pktsEl = document.getElementById('tmPkts');
+        const bwEl   = document.getElementById('tmBW');
+        const dropEl = document.getElementById('tmDrops');
+        if (pktsEl) pktsEl.textContent = pkts;
+        if (bwEl)   bwEl.textContent   = bw.toFixed(1);
+        if (dropEl) dropEl.textContent = drops;
     }
 
     show() { this._panel.style.display='flex'; if(!this.running) this.start(); }
@@ -598,10 +623,18 @@ class FaultSimulator {
         log.appendChild(line);
         log.scrollTop=log.scrollHeight;
         // Also write to network event log
-        if (window.eventLog) window.eventLog.add(text);
+        if (window.eventLog) window.eventLog.add(text, '•', text.startsWith('✅') ? 'ok' : 'error');
     }
 
-    show() { this._panel.style.display='flex'; this._updateFaultList(); this._updateTargetList('cable'); }
+    show() {
+        this._panel.style.display='flex';
+        this._updateFaultList();
+        this._updateTargetList('cable');
+        // Auto-select cable if there are connections, else device
+        if (!this.sim.connections.length && this.sim.devices.length) {
+            this._panel.querySelector('[data-type="device"]')?.click();
+        }
+    }
     hide() { this._panel.style.display='none'; }
     toggle() { this._panel.style.display==='none'?this.show():this.hide(); }
 }
@@ -613,6 +646,122 @@ class FaultSimulator {
 class NetworkDiagnostics {
     constructor(simulator) {
         this.sim = simulator;
+        this._panel = null;
+        this._build();
+    }
+
+    _build() {
+        const panel = document.createElement('div');
+        panel.id = 'diagPanel';
+        panel.style.cssText = `
+            position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+            width:min(640px,92vw); max-height:80vh;
+            background:#0d1117; border:1.5px solid #06b6d4;
+            border-radius:14px; box-shadow:0 16px 50px rgba(6,182,212,.2);
+            z-index:1100; display:none; flex-direction:column;
+            font-family:'JetBrains Mono',monospace; overflow:hidden;
+        `;
+        panel.innerHTML = `
+            <div style="display:flex;align-items:center;padding:10px 14px;background:#030e14;border-bottom:1px solid #0e3a4a">
+                <span style="color:#06b6d4;font-size:12px;font-weight:700">🔍 DIAGNÓSTICO DE RED</span>
+                <button id="diagRun" style="margin-left:auto;margin-right:8px;background:#06b6d4;border:none;color:#0d1117;padding:4px 12px;border-radius:5px;cursor:pointer;font-size:10px;font-weight:700;font-family:inherit">▶ Analizar</button>
+                <button id="diagClose" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:14px">✕</button>
+            </div>
+            <div id="diagOverlay" style="position:absolute;inset:0;background:rgba(13,17,23,.85);display:none;align-items:center;justify-content:center;z-index:10;flex-direction:column;gap:8px">
+                <div style="color:#06b6d4;font-size:12px">Analizando red…</div>
+                <div style="width:160px;height:3px;background:#1e293b;border-radius:2px;overflow:hidden">
+                    <div id="diagProgress" style="height:100%;background:#06b6d4;width:0%;transition:width .3s;border-radius:2px"></div>
+                </div>
+            </div>
+            <div id="diagBody" style="flex:1;overflow-y:auto;padding:14px 16px">
+                <div style="color:#475569;font-size:10px;text-align:center;padding:20px 0">
+                    Haz clic en <strong style="color:#06b6d4">▶ Analizar</strong> para ejecutar el diagnóstico
+                </div>
+            </div>
+        `;
+
+        // Overlay for backdrop
+        const overlay = document.createElement('div');
+        overlay.id = 'diagBackdrop';
+        overlay.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1099;backdrop-filter:blur(2px);';
+        overlay.addEventListener('click', () => this.hide());
+        document.body.appendChild(overlay);
+        document.body.appendChild(panel);
+        this._panel = panel;
+
+        panel.querySelector('#diagClose').onclick = () => this.hide();
+        panel.querySelector('#diagRun').onclick   = () => this._runAnimated();
+    }
+
+    _runAnimated() {
+        const overlay  = this._panel.querySelector('#diagOverlay');
+        const progress = this._panel.querySelector('#diagProgress');
+        const body     = document.getElementById('diagBody');
+        overlay.style.display = 'flex';
+
+        let pct = 0;
+        const interval = setInterval(() => {
+            pct += Math.random() * 25;
+            if (pct >= 100) { pct = 100; clearInterval(interval); }
+            progress.style.width = pct + '%';
+        }, 120);
+
+        setTimeout(() => {
+            overlay.style.display = 'none';
+            const { issues, ok } = this.analyze();
+            body.innerHTML = this._buildHTML(issues, ok);
+        }, 700);
+    }
+
+    _buildHTML(issues, ok) {
+        const ts = new Date().toLocaleString('es-MX');
+        const errors = issues.filter(i=>i.level==='error');
+        const warns  = issues.filter(i=>i.level==='warn');
+        const score  = issues.length === 0 ? 100 : Math.max(0, 100 - errors.length*20 - warns.length*8);
+        const scoreColor = score >= 80 ? '#4ade80' : score >= 50 ? '#facc15' : '#f87171';
+
+        let html = `
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid #1e293b">
+            <div style="width:56px;height:56px;border-radius:50%;background:conic-gradient(${scoreColor} ${score*3.6}deg, #1e293b 0deg);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+                <div style="width:42px;height:42px;border-radius:50%;background:#0d1117;display:flex;align-items:center;justify-content:center;color:${scoreColor};font-size:13px;font-weight:700">${score}</div>
+            </div>
+            <div>
+                <div style="color:#f8fafc;font-size:12px;font-weight:700">${score===100?'Red saludable':'Problemas detectados'}</div>
+                <div style="color:#64748b;font-size:9px;margin-top:2px">${ts}</div>
+                <div style="color:#64748b;font-size:9px">${this.sim.devices.length} dispositivos · ${this.sim.connections.length} enlaces</div>
+            </div>
+        </div>`;
+
+        if (errors.length) {
+            html += `<div style="margin-bottom:10px">
+                <div style="color:#f87171;font-size:9px;text-transform:uppercase;letter-spacing:1px;margin-bottom:5px">❌ Errores (${errors.length})</div>
+                ${errors.map(i=>`<div style="display:flex;gap:8px;align-items:flex-start;padding:6px 8px;background:rgba(248,113,113,.07);border:1px solid rgba(248,113,113,.2);border-radius:6px;margin-bottom:4px;font-size:10px">
+                    <span>${i.icon}</span><span style="color:#fca5a5;flex:1">${i.msg}</span>
+                </div>`).join('')}
+            </div>`;
+        }
+
+        if (warns.length) {
+            html += `<div style="margin-bottom:10px">
+                <div style="color:#fbbf24;font-size:9px;text-transform:uppercase;letter-spacing:1px;margin-bottom:5px">⚠️ Advertencias (${warns.length})</div>
+                ${warns.map(i=>`<div style="display:flex;gap:8px;align-items:flex-start;padding:6px 8px;background:rgba(251,191,36,.06);border:1px solid rgba(251,191,36,.2);border-radius:6px;margin-bottom:4px;font-size:10px">
+                    <span>${i.icon}</span><span style="color:#fde68a;flex:1">${i.msg}</span>
+                </div>`).join('')}
+            </div>`;
+        }
+
+        if (ok.length) {
+            html += `<div>
+                <div style="color:#4ade80;font-size:9px;text-transform:uppercase;letter-spacing:1px;margin-bottom:5px">✅ Estado OK</div>
+                ${ok.map(m=>`<div style="padding:4px 8px;font-size:10px;color:#86efac">${m}</div>`).join('')}
+            </div>`;
+        }
+
+        if (issues.length === 0 && ok.length === 0) {
+            html += `<div style="color:#64748b;font-size:10px;text-align:center;padding:20px 0">Sin dispositivos en la topología para analizar</div>`;
+        }
+
+        return html;
     }
 
     analyze() {
@@ -620,7 +769,6 @@ class NetworkDiagnostics {
         const issues = [];
         const ok     = [];
 
-        // 1. Dispositivos sin IP configurada (excluir Internet/Switch/AP/DVR/Camera que no necesitan)
         const noIPTypes = ['Switch','SwitchPoE','AP','DVR','Camera','Alarm'];
         sim.devices.forEach(d => {
             const ip = d.ipConfig?.ipAddress;
@@ -629,18 +777,15 @@ class NetworkDiagnostics {
             }
         });
 
-        // 2. IPs duplicadas
         const ipMap = {};
         sim.devices.forEach(d => {
             const ip = d.ipConfig?.ipAddress;
             if (ip && ip!=='0.0.0.0') {
-                if (ipMap[ip]) {
-                    issues.push({ level:'error', icon:'❌', msg:`IP duplicada ${ip}: ${ipMap[ip]} y ${d.name}` });
-                } else ipMap[ip]=d.name;
+                if (ipMap[ip]) issues.push({ level:'error', icon:'❌', msg:`IP duplicada ${ip}: ${ipMap[ip]} y ${d.name}` });
+                else ipMap[ip]=d.name;
             }
         });
 
-        // 3. Dispositivos sin gateway cuando lo necesitan
         const needsGW = ['PC','Laptop','Phone','Printer','IPPhone','Camera','DVR'];
         sim.devices.forEach(d => {
             if (needsGW.includes(d.type) && d.ipConfig?.ipAddress && d.ipConfig.ipAddress!=='0.0.0.0') {
@@ -650,31 +795,21 @@ class NetworkDiagnostics {
             }
         });
 
-        // 4. Routers sin ISP conectado
         sim.devices.filter(d=>d.type==='Router'||d.type==='RouterWifi').forEach(d => {
             const hasWAN = d.interfaces.some(i=>i.type==='WAN'&&i.connectedTo);
-            if (!hasWAN) {
-                issues.push({ level:'warn', icon:'📡', msg:`${d.name}: sin conexión WAN/ISP` });
-            }
+            if (!hasWAN) issues.push({ level:'warn', icon:'📡', msg:`${d.name}: sin conexión WAN/ISP` });
         });
 
-        // 5. Cables/links caídos
-        let downLinks = 0;
         sim.connections.forEach(c => {
             if (c._linkState && !c._linkState.isUp()) {
-                downLinks++;
                 issues.push({ level:'error', icon:'🔴', msg:`Enlace caído: ${c.from.name}↔${c.to.name}` });
             }
         });
 
-        // 6. Dispositivos down
         sim.devices.forEach(d => {
-            if (d.status === 'down') {
-                issues.push({ level:'error', icon:'💀', msg:`Dispositivo caído: ${d.name} (${d.type})` });
-            }
+            if (d.status === 'down') issues.push({ level:'error', icon:'💀', msg:`Dispositivo caído: ${d.name} (${d.type})` });
         });
 
-        // 7. Switches sin VLAN o con VLAN mismatch
         sim.devices.filter(d=>d.type==='Switch'||d.type==='SwitchPoE').forEach(d => {
             const connected = sim.connections.filter(c=>c.from===d||c.to===d);
             connected.forEach(c => {
@@ -682,24 +817,19 @@ class NetworkDiagnostics {
                 if (other.type==='PC'||other.type==='Laptop') {
                     const intfVlan = c.from===d?c.fromInterface.vlan:c.toInterface.vlan;
                     if (intfVlan && d.vlans && !d.vlans[intfVlan]) {
-                        issues.push({ level:'warn', icon:'🔷', msg:`VLAN mismatch: ${d.name} puerto→VLAN${intfVlan} no existe` });
+                        issues.push({ level:'warn', icon:'🔷', msg:`VLAN mismatch: ${d.name} → VLAN${intfVlan} no existe` });
                     }
                 }
             });
         });
 
-        // 8. Verificar conectividad básica (ruta entre primeras PCs)
         const pcs = sim.devices.filter(d=>d.type==='PC'||d.type==='Laptop').filter(d=>d.ipConfig?.ipAddress&&d.ipConfig.ipAddress!=='0.0.0.0');
         if (pcs.length >= 2) {
             const ruta = sim.engine.findRoute(pcs[0].id, pcs[1].id);
-            if (ruta.length > 0) {
-                ok.push(`✅ Ruta ${pcs[0].name} → ${pcs[1].name}: ${ruta.length-1} saltos`);
-            } else {
-                issues.push({ level:'error', icon:'🛑', msg:`Sin ruta entre ${pcs[0].name} y ${pcs[1].name}` });
-            }
+            if (ruta.length > 0) ok.push(`✅ Ruta ${pcs[0].name} → ${pcs[1].name}: ${ruta.length-1} salto(s)`);
+            else issues.push({ level:'error', icon:'🛑', msg:`Sin ruta entre ${pcs[0].name} y ${pcs[1].name}` });
         }
 
-        // 9. Pérdida de paquetes alta
         sim.connections.forEach(c => {
             const ls = c._linkState;
             if (ls && ls.lossRate > 0.1) {
@@ -707,47 +837,43 @@ class NetworkDiagnostics {
             }
         });
 
-        // 10. Check sin Internet
         const hasInternet = sim.devices.some(d=>d.type==='Internet'||d.type==='ISP');
-        if (!hasInternet) ok.push('ℹ️  Sin nodo Internet/ISP en la topología');
+        if (!hasInternet) ok.push('ℹ️ Sin nodo Internet/ISP en la topología');
         else ok.push('✅ Nodo Internet/ISP presente');
+
+        if (sim.devices.length > 0 && issues.length === 0) ok.push('✅ Sin problemas de configuración detectados');
 
         return { issues, ok };
     }
 
     showReport(writeCallback) {
-        const write   = writeCallback;
+        // Legacy: también funciona con el callback de consola si se llama así
         const { issues, ok } = this.analyze();
-
+        const write = writeCallback;
         write(`\n╔══════════════════════════════════════════════════╗`,'diag-header');
         write(`║          DIAGNÓSTICO AUTOMÁTICO DE RED           ║`,'diag-header');
         write(`╚══════════════════════════════════════════════════╝`,'diag-header');
-        write(`  ${new Date().toLocaleString('es-MX')}`,'diag-dim');
-
-        if (issues.length === 0) {
-            write(`\n✅ Red saludable — sin problemas detectados`,'diag-ok');
-        } else {
-            write(`\n🚨 Problemas detectados: ${issues.length}`,'diag-error');
-            const errors = issues.filter(i=>i.level==='error');
-            const warns  = issues.filter(i=>i.level==='warn');
-            if (errors.length) {
-                write(`\n  ERRORES (${errors.length}):`,'diag-error');
-                errors.forEach(i=>write(`    ${i.icon}  ${i.msg}`,'diag-error'));
-            }
-            if (warns.length) {
-                write(`\n  ADVERTENCIAS (${warns.length}):`,'diag-warn');
-                warns.forEach(i=>write(`    ${i.icon}  ${i.msg}`,'diag-warn'));
-            }
+        if (issues.length === 0) write(`\n✅ Red saludable — sin problemas detectados`,'diag-ok');
+        else {
+            write(`\n🚨 Problemas: ${issues.length}`,'diag-error');
+            issues.filter(i=>i.level==='error').forEach(i=>write(`  ${i.icon}  ${i.msg}`,'diag-error'));
+            issues.filter(i=>i.level==='warn').forEach(i=>write(`  ${i.icon}  ${i.msg}`,'diag-warn'));
         }
-
-        if (ok.length) {
-            write(`\n  ESTADO OK:`,'diag-ok');
-            ok.forEach(m=>write(`    ${m}`,'diag-ok'));
-        }
-
-        write(`\n  Dispositivos: ${this.sim.devices.length}   Conexiones: ${this.sim.connections.length}   Paquetes activos: ${this.sim.packets.length}`,'diag-dim');
-        write(`  ─────────────────────────────────────────────────`,'diag-dim');
+        ok.forEach(m=>write(`  ${m}`,'diag-ok'));
     }
+
+    show() {
+        this._panel.style.display = 'flex';
+        const backdrop = document.getElementById('diagBackdrop');
+        if (backdrop) backdrop.style.display = 'block';
+        this._runAnimated();
+    }
+    hide() {
+        this._panel.style.display = 'none';
+        const backdrop = document.getElementById('diagBackdrop');
+        if (backdrop) backdrop.style.display = 'none';
+    }
+    toggle() { this._panel.style.display==='none' ? this.show() : this.hide(); }
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -789,20 +915,25 @@ class EventLog {
         hdr.addEventListener('mousedown',e=>{e.preventDefault();ox=e.clientX-panel.offsetLeft;oy=e.clientY-panel.offsetTop;const mv=e=>{panel.style.left=(e.clientX-ox)+'px';panel.style.top=(e.clientY-oy)+'px';};const up=()=>{document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up);};document.addEventListener('mousemove',mv);document.addEventListener('mouseup',up);});
     }
 
-    add(text, icon='•') {
+    add(text, icon='•', level='info') {
         const time = new Date().toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
-        this.events.unshift({ time, text });
-        if (this.events.length > 200) this.events.pop();
+        const colors = { info:'#94a3b8', ok:'#4ade80', warn:'#fbbf24', error:'#f87171' };
+        this.events.unshift({ time, text, level, color: colors[level]||colors.info });
+        if (this.events.length > 300) this.events.pop();
         this._render();
     }
 
     _render() {
         const list = this._panel.querySelector('#eventLogList');
         if (!list) return;
+        if (!this.events.length) {
+            list.innerHTML = '<div style="color:#475569;font-size:10px;text-align:center;padding:16px 0">Sin eventos registrados.<br>Conecta dispositivos, haz ping o genera fallas.</div>';
+            return;
+        }
         list.innerHTML = this.events.map(e=>`
-            <div style="display:flex;gap:8px;padding:2px 0;border-bottom:1px solid #1e293b">
-                <span style="color:#475569;white-space:nowrap">${e.time}</span>
-                <span>${e.text}</span>
+            <div style="display:flex;gap:8px;padding:3px 0;border-bottom:1px solid #1e293b;align-items:baseline">
+                <span style="color:#334155;white-space:nowrap;flex-shrink:0">${e.time}</span>
+                <span style="color:${e.color||'#94a3b8'};flex:1">${e.text}</span>
             </div>`).join('');
     }
 
