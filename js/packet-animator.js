@@ -35,6 +35,10 @@ const TYPE_META = {
     broadcast   : { icon: '📢', label: 'BROADCAST',   color: '#fbbf24', shape: 'triangle' },
     'icmp-ttl'  : { icon: '⛔', label: 'ICMP TTL EXP',color: '#f43f5e', shape: 'triangle' },
     nat         : { icon: '🔄', label: 'NAT',          color: '#fb923c', shape: 'circle'   },
+    'sip-invite': { icon: '📞', label: 'SIP INVITE',   color: '#a78bfa', shape: 'diamond'  },
+    'sip-ok'    : { icon: '✅', label: 'SIP 200 OK',   color: '#4ade80', shape: 'diamond'  },
+    'sip-bye'   : { icon: '📵', label: 'SIP BYE',      color: '#f43f5e', shape: 'diamond'  },
+    rtp         : { icon: '🎵', label: 'RTP',          color: '#34d399', shape: 'circle'   },
 };
 
 function getMeta(type) {

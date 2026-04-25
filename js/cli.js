@@ -20,16 +20,21 @@ class DeviceCLI {
     get prompt() {
         const h = this.device.config?.hostname || this.device.name;
         switch (this.mode) {
-            case 'user':    return `${h}>`;
-            case 'enable':  return `${h}#`;
-            case 'config':  return `${h}(config)#`;
-            case 'if':      return `${h}(config-if)#`;
-            case 'vlan':    return `${h}(config-vlan)#`;
-            case 'router':  return `${h}(config-router)#`;
-            case 'dhcp':    return `${h}(config-dhcp)#`;
-            case 'bgp':     return `${h}(config-router)#`;
-            case 'ssh':     return this._sshSession ? `${this._sshSession.target}#` : `${h}>`;
-            default:        return `${h}>`;
+            case 'user':        return `${h}>`;
+            case 'enable':      return `${h}#`;
+            case 'config':      return `${h}(config)#`;
+            case 'if':          return `${h}(config-if)#`;
+            case 'vlan':        return `${h}(config-vlan)#`;
+            case 'router':      return `${h}(config-router)#`;
+            case 'dhcp':        return `${h}(config-dhcp)#`;
+            case 'bgp':         return `${h}(config-router)#`;
+            case 'ssh':         return this._sshSession ? `${this._sshSession.target}#` : `${h}>`;
+            case 'telephony':   return `${h}(config-telephony)#`;
+            case 'ephone-dn':   return `${h}(config-ephone-dn)#`;
+            case 'ephone':      return `${h}(config-ephone)#`;
+            case 'policy-map':  return `${h}(config-pmap${this._policyClassCtx ? '-c' : ''})#`;
+            case 'class-map':   return `${h}(config-cmap)#`;
+            default:            return `${h}>`;
         }
     }
 
@@ -58,15 +63,20 @@ class DeviceCLI {
 
         // ── Despachar según modo ───────────────────────────────────────
         switch (this.mode) {
-            case 'user':   return this._userMode(cmd, parts);
-            case 'enable': return this._enableMode(cmd, parts);
-            case 'config': return this._configMode(cmd, parts);
-            case 'if':     return this._ifMode(cmd, parts);
-            case 'vlan':   return this._vlanMode(cmd, parts);
-            case 'router': return this._routerMode(cmd, parts);
-            case 'dhcp':   return this._dhcpMode(cmd, parts);
-            case 'bgp':    return this._bgpMode(cmd, parts);
-            case 'ssh':    return this._sshMode(cmd, parts);
+            case 'user':        return this._userMode(cmd, parts);
+            case 'enable':      return this._enableMode(cmd, parts);
+            case 'config':      return this._configMode(cmd, parts);
+            case 'if':          return this._ifMode(cmd, parts);
+            case 'vlan':        return this._vlanMode(cmd, parts);
+            case 'router':      return this._routerMode(cmd, parts);
+            case 'dhcp':        return this._dhcpMode(cmd, parts);
+            case 'bgp':         return this._bgpMode(cmd, parts);
+            case 'ssh':         return this._sshMode(cmd, parts);
+            case 'telephony':   return this._telephonyMode(cmd, parts);
+            case 'ephone-dn':   return this._ephoneDnMode(cmd, parts);
+            case 'ephone':      return this._ephoneMode(cmd, parts);
+            case 'policy-map':  return this._policyMapMode(cmd, parts);
+            case 'class-map':   return this._classMapMode(cmd, parts);
         }
     }
 
@@ -82,16 +92,18 @@ class DeviceCLI {
             return;
         }
         const cmds = {
-            enable  : () => { this.mode = 'enable'; },
-            ping    : () => this._doPing(parts),
+            enable    : () => { this.mode = 'enable'; },
+            ping      : () => this._doPing(parts),
             traceroute: () => this._doTraceroute(parts),
-            show    : () => this._doShow(parts),
-            telnet  : () => this._doTelnet(parts),
-            ssh     : () => this._doSSHConnect(parts),
-            help    : () => this._help(),
+            show      : () => this._doShow(parts),
+            telnet    : () => this._doTelnet(parts),
+            ssh       : () => this._doSSHConnect(parts),
+            dial      : () => this._doDial(parts),
+            hangup    : () => this._doHangup(),
+            help      : () => this._help(),
         };
         if (cmds[cmd]) cmds[cmd]();
-        else this._unknown(cmd, ['enable','ping','traceroute','show']);
+        else this._unknown(cmd, ['enable','ping','traceroute','show','dial','hangup']);
     }
 
     // ══════════════════════════════════════════════════════
@@ -99,20 +111,22 @@ class DeviceCLI {
     // ══════════════════════════════════════════════════════
     _enableMode(cmd, parts) {
         const cmds = {
-            configure: () => { if (parts[1]==='terminal'||parts[1]==='t'||!parts[1]) this.mode='config'; else this._bad(); },
-            conf     : () => { this.mode='config'; },
-            show     : () => this._doShow(parts),
-            ping     : () => this._doPing(parts),
+            configure : () => { if (parts[1]==='terminal'||parts[1]==='t'||!parts[1]) this.mode='config'; else this._bad(); },
+            conf      : () => { this.mode='config'; },
+            show      : () => this._doShow(parts),
+            ping      : () => this._doPing(parts),
             traceroute: () => this._doTraceroute(parts),
-            reload   : () => { this.write('Recargando dispositivo...','cli-warn'); setTimeout(()=>this.write('Done.'), 1200); },
-            telnet   : () => this._doTelnet(parts),
-            ssh      : () => this._doSSHConnect(parts),
-            write    : () => this.write('Building configuration... [OK]','cli-ok'),
-            copy     : () => this.write('Destination filename [startup-config]? [OK]','cli-ok'),
-            clear    : () => this._doClear(parts),
-            debug    : () => this._doDebug(parts),
-            no       : () => this._noCmd(parts),
-            disable  : () => { this.mode='user'; },
+            reload    : () => { this.write('Recargando dispositivo...','cli-warn'); setTimeout(()=>this.write('Done.'), 1200); },
+            telnet    : () => this._doTelnet(parts),
+            ssh       : () => this._doSSHConnect(parts),
+            write     : () => this.write('Building configuration... [OK]','cli-ok'),
+            copy      : () => this.write('Destination filename [startup-config]? [OK]','cli-ok'),
+            clear     : () => this._doClear(parts),
+            debug     : () => this._doDebug(parts),
+            no        : () => this._noCmd(parts),
+            disable   : () => { this.mode='user'; },
+            dial      : () => this._doDial(parts),
+            hangup    : () => this._doHangup(),
         };
         if (cmds[cmd]) cmds[cmd]();
         else { this._privExec(parts); }
@@ -207,8 +221,26 @@ class DeviceCLI {
                 break;
             }
 
+            case 'telephony-service':
+                return this._enterTelephonyService();
+
+            case 'ephone-dn':
+                return this._enterEphoneDn(parts[1]);
+
+            case 'ephone':
+                return this._enterEphone(parts[1]);
+
+            case 'policy-map':
+                return this._enterPolicyMap(parts[1]);
+
+            case 'class-map':
+                return this._enterClassMap(parts[1]);
+
+            case 'qos':
+                return this._configQoS(parts);
+
             default:
-                this._unknown(cmd, ['hostname','interface','vlan','ip','router','no','access-list','spanning-tree','crypto','username']);
+                this._unknown(cmd, ['hostname','interface','vlan','ip','router','no','access-list','spanning-tree','crypto','username','telephony-service','ephone-dn','ephone','policy-map','class-map','qos']);
         }
     }
 
@@ -729,8 +761,20 @@ class DeviceCLI {
                 this._showARP();
                 break;
 
+            case 'sip':
+                return this._showSIP(parts);
+
+            case 'qos':
+                return this._showQoS();
+
+            case 'policy-map':
+                return this._showPolicyMap(parts[2]);
+
+            case 'class-map':
+                return this._showClassMap();
+
             default:
-                this.write(`  show interfaces | ip route | ip interface | vlan | version | running-config | spanning-tree | arp | dhcp | cdp neighbors | bgp | bgp summary | ssh | users | crypto key`,'cli-dim');
+                this.write(`  show interfaces | ip route | ip interface | vlan | version | running-config | spanning-tree | arp | dhcp | cdp neighbors | bgp | bgp summary | ssh | users | crypto key | sip | qos | policy-map`,'cli-dim');
         }
     }
 
@@ -1000,17 +1044,30 @@ class DeviceCLI {
             this.mode = 'enable';
             this.ifContext = null;
             this.vlanContext = null;
+            this._policyMapCtx = null;
+            this._policyClassCtx = null;
+            this._classMapCtx = null;
+            this._ephoneDnCtx = null;
+            this._ephoneCtx = null;
         } else {
             switch(this.mode) {
                 case 'user': break;
-                case 'enable': this.mode='user'; break;
-                case 'config': this.mode='enable'; break;
-                case 'if':     this.mode='config'; this.ifContext=null; break;
-                case 'vlan':   this.mode='config'; this.vlanContext=null; break;
-                case 'router': this.mode='config'; break;
-                case 'bgp':    this.mode='config'; this.bgpContext=null; break;
-                case 'dhcp':   this.mode='config'; break;
-                case 'ssh':    this._exitSSH(); break;
+                case 'enable':      this.mode='user'; break;
+                case 'config':      this.mode='enable'; break;
+                case 'if':          this.mode='config'; this.ifContext=null; break;
+                case 'vlan':        this.mode='config'; this.vlanContext=null; break;
+                case 'router':      this.mode='config'; break;
+                case 'bgp':         this.mode='config'; this.bgpContext=null; break;
+                case 'dhcp':        this.mode='config'; break;
+                case 'ssh':         this._exitSSH(); break;
+                case 'telephony':   this.mode='config'; break;
+                case 'ephone-dn':   this.mode='config'; this._ephoneDnCtx=null; break;
+                case 'ephone':      this.mode='config'; this._ephoneCtx=null; break;
+                case 'policy-map':
+                    if (this._policyClassCtx) { this._policyClassCtx=null; }
+                    else { this.mode='config'; this._policyMapCtx=null; }
+                    break;
+                case 'class-map':   this.mode='config'; this._classMapCtx=null; break;
             }
         }
     }
@@ -1023,14 +1080,19 @@ class DeviceCLI {
 
     _help() {
         const helps = {
-            user:   ['enable','ping <ip>','traceroute <ip>','show interfaces','show version'],
-            enable: ['configure terminal','show running-config','show ip route','show ip interface','show vlan','copy run start','write','ping <ip>','traceroute <ip>','clear ip arp','reload'],
-            config: ['hostname <name>','interface <intf>','ip route <net> <mask> <gw>','ip dhcp pool <name>','ip nat inside source list <n> interface <intf> overload','vlan <id>','router ospf <pid>','no <cmd>'],
-            if:     ['ip address <ip> <mask>','ip address dhcp','no shutdown','shutdown','switchport mode [access|trunk]','switchport access vlan <id>','encapsulation dot1q <vlan>','description <text>','ip nat [inside|outside]','no ip address'],
-            vlan:   ['name <name>','state [active|suspend]'],
-            router: ['network <ip> <wildcard> area <id>','router-id <id>','passive-interface <intf>','redistribute connected'],
-            bgp:    ['neighbor <ip> remote-as <asn>','neighbor <ip> description <text>','neighbor <ip> shutdown','network <ip> mask <mask>','redistribute connected','redistribute static','bgp router-id <id>','aggregate-address <ip> <mask>'],
-            dhcp:   ['network <ip> [mask]','default-router <ip>','dns-server <ip>','lease <days>','domain-name <name>'],
+            user:         ['enable','ping <ip>','traceroute <ip>','show interfaces','show version','dial <ext>','hangup'],
+            enable:       ['configure terminal','show running-config','show ip route','show ip interface','show vlan','copy run start','write','ping <ip>','traceroute <ip>','clear ip arp','reload','dial <ext>','hangup'],
+            config:       ['hostname <n>','interface <intf>','ip route <net> <mask> <gw>','ip dhcp pool <n>','ip nat inside source list <n> interface <intf> overload','vlan <id>','router ospf <pid>','no <cmd>','telephony-service','ephone-dn <n>','ephone <n>','class-map <n>','policy-map <n>','qos apply policy-map <n> interface <intf> [in|out]'],
+            if:           ['ip address <ip> <mask>','ip address dhcp','no shutdown','shutdown','switchport mode [access|trunk]','switchport access vlan <id>','encapsulation dot1q <vlan>','description <text>','ip nat [inside|outside]','no ip address'],
+            vlan:         ['name <n>','state [active|suspend]'],
+            router:       ['network <ip> <wildcard> area <id>','router-id <id>','passive-interface <intf>','redistribute connected'],
+            bgp:          ['neighbor <ip> remote-as <asn>','neighbor <ip> description <text>','neighbor <ip> shutdown','network <ip> mask <mask>','redistribute connected','redistribute static','bgp router-id <id>','aggregate-address <ip> <mask>'],
+            dhcp:         ['network <ip> [mask]','default-router <ip>','dns-server <ip>','lease <days>','domain-name <n>'],
+            telephony:    ['max-ephones <n>','max-dn <n>','ip source-address <ip> [port]','create cnf-files','no shutdown'],
+            'ephone-dn':  ['number <extension>','name <display-name>'],
+            ephone:       ['mac <MAC>','button <1:dn-number>','type <7960|7970>'],
+            'policy-map': ['class <class-map-name>','police <bps> [bc] [be]','shape average <bps>','bandwidth <kbps|percent>','priority [<kbps>]','set dscp <value>','queue-limit <n>','drop'],
+            'class-map':  ['match dscp <ef|af41|cs3|cs0>','match protocol <sip|rtp|http>','match ip dscp <value>'],
         };
         const list = helps[this.mode] || helps.user;
         this.write(`\n${this.prompt} — Available commands:`,'cli-section');
@@ -1419,10 +1481,550 @@ class DeviceCLI {
         this.mode = 'enable';
     }
 
+    // ══════════════════════════════════════════════════════
+    //  VOIP / SIP ENGINE
+    // ══════════════════════════════════════════════════════
+
+    _enterTelephonyService() {
+        if (!['Router','RouterWifi','Firewall','Server'].includes(this.device.type)) {
+            this.write('% telephony-service only available on Router/Server devices','cli-err');
+            return;
+        }
+        if (!this.device.telephony) {
+            this.device.telephony = {
+                maxEphones: 0, maxDn: 0,
+                ipSourceAddr: '', port: 2000,
+                ephones: {}, dn: {},
+                enabled: false
+            };
+        }
+        this.mode = 'telephony';
+        this.write('Entering telephony-service config','cli-ok');
+        this.write('  Commands: max-ephones, max-dn, ip source-address, create cnf-files, no shutdown','cli-dim');
+    }
+
+    _enterEphoneDn(num) {
+        if (!num) { this.write('Usage: ephone-dn <number>','cli-err'); return; }
+        if (!this.device.telephony) { this.write('% Configure telephony-service first','cli-err'); return; }
+        if (!this.device.telephony.dn) this.device.telephony.dn = {};
+        if (!this.device.telephony.dn[num]) this.device.telephony.dn[num] = { extension: '', name: '' };
+        this.mode = 'ephone-dn';
+        this._ephoneDnCtx = num;
+        this.write(`Configuring ephone-dn ${num}`, 'cli-ok');
+    }
+
+    _enterEphone(num) {
+        if (!num) { this.write('Usage: ephone <number>','cli-err'); return; }
+        if (!this.device.telephony) { this.write('% Configure telephony-service first','cli-err'); return; }
+        if (!this.device.telephony.ephones) this.device.telephony.ephones = {};
+        if (!this.device.telephony.ephones[num]) this.device.telephony.ephones[num] = { mac: '', buttons: [], name: '' };
+        this.mode = 'ephone';
+        this._ephoneCtx = num;
+        this.write(`Configuring ephone ${num}`, 'cli-ok');
+    }
+
+    _telephonyMode(cmd, parts) {
+        const t = this.device.telephony;
+        if (!t) { this.mode = 'config'; return; }
+        switch(cmd) {
+            case 'max-ephones':
+                t.maxEphones = parseInt(parts[1]) || 10;
+                this.write(`Max ephones: ${t.maxEphones}`, 'cli-ok'); break;
+            case 'max-dn':
+                t.maxDn = parseInt(parts[1]) || 20;
+                this.write(`Max directory numbers: ${t.maxDn}`, 'cli-ok'); break;
+            case 'ip':
+                if (parts[1]==='source-address') {
+                    t.ipSourceAddr = parts[2] || '';
+                    t.port = parseInt(parts[3]) || 2000;
+                    this.write(`SCCP/SIP source: ${t.ipSourceAddr}:${t.port}`, 'cli-ok');
+                } break;
+            case 'create':
+                t.enabled = true;
+                this.write('CNF files created — telephony service ACTIVE ✅', 'cli-ok');
+                this.write(`  SIP registrar: ${t.ipSourceAddr || this.device.ipConfig?.ipAddress || '—'}:${t.port}`, 'cli-data');
+                break;
+            case 'no':
+                if (parts[1]==='shutdown') { t.enabled = true; this.write('Telephony service enabled','cli-ok'); }
+                break;
+            case 'exit': case 'end':
+                this.mode = 'config'; break;
+            default:
+                this.write('  max-ephones <n> | max-dn <n> | ip source-address <ip> [port] | create cnf-files','cli-dim');
+        }
+    }
+
+    _ephoneDnMode(cmd, parts) {
+        const t = this.device.telephony;
+        const dn = t?.dn?.[this._ephoneDnCtx];
+        if (!dn) { this.mode = 'config'; return; }
+        switch(cmd) {
+            case 'number':
+                dn.extension = parts[1] || '';
+                this.write(`Extension: ${dn.extension}`, 'cli-ok'); break;
+            case 'name':
+                dn.name = parts.slice(1).join(' ');
+                this.write(`Name: ${dn.name}`, 'cli-ok'); break;
+            case 'exit': case 'end':
+                this.mode = 'config'; this._ephoneDnCtx = null; break;
+            default:
+                this.write('  number <extension> | name <display-name>','cli-dim');
+        }
+    }
+
+    _ephoneMode(cmd, parts) {
+        const t = this.device.telephony;
+        const ep = t?.ephones?.[this._ephoneCtx];
+        if (!ep) { this.mode = 'config'; return; }
+        switch(cmd) {
+            case 'mac':
+                ep.mac = parts[1] || '';
+                this.write(`MAC: ${ep.mac}`, 'cli-ok'); break;
+            case 'button':
+                ep.buttons = parts.slice(1).map(b => b.replace(/^\d:/,'')).filter(Boolean);
+                this.write(`Buttons: ${parts.slice(1).join(', ')}`, 'cli-ok'); break;
+            case 'type':
+                ep.type = parts[1] || '7960';
+                this.write(`Phone type: ${ep.type}`, 'cli-ok'); break;
+            case 'exit': case 'end':
+                this.mode = 'config'; this._ephoneCtx = null; break;
+            default:
+                this.write('  mac <MAC> | button <1:dn> | type <7960|7970|...>','cli-dim');
+        }
+    }
+
+    // ── dial — place a simulated VoIP call ──────────────────────────
+    _doDial(parts) {
+        const ext = parts[1];
+        if (!ext) { this.write('Usage: dial <extension>','cli-dim'); return; }
+
+        const src = this.device;
+        if (src.type !== 'IPPhone') {
+            this.write('% dial only available on IP Phones','cli-err'); return;
+        }
+
+        const net = window.simulator;
+        if (!net) return;
+
+        // Find destination phone by extension
+        const dest = net.devices.find(d =>
+            d.type === 'IPPhone' && d.extension === ext && d.id !== src.id
+        );
+
+        const srcExt = src.extension || '???';
+
+        if (!dest) {
+            this.write(`\n[SIP] INVITE sip:${ext}@<sipserver>`, 'cli-warn');
+            setTimeout(()=>this.write('[SIP] 404 Not Found — No phone with that extension','cli-err'), 700);
+            return;
+        }
+
+        // Find SIP server (Router/Server with telephony enabled)
+        const sipServer = net.devices.find(d =>
+            d.telephony?.enabled &&
+            (d.type === 'Router' || d.type === 'RouterWifi' || d.type === 'Server')
+        );
+
+        this.write(`\n[SIP] Calling extension ${ext} (${dest.name}) from ${srcExt}...`, 'cli-section');
+        this.write(`[SIP] INVITE sip:${ext}@${sipServer?.ipConfig?.ipAddress || 'local'}`, 'cli-warn');
+
+        // Animate SIP INVITE packet
+        if (sipServer) {
+            net.sendPacket(src, sipServer, 'sip-invite', 500, { ttl: 64 });
+            setTimeout(()=> net.sendPacket(sipServer, dest, 'sip-invite', 500, { ttl: 64 }), 400);
+        } else {
+            net.sendPacket(src, dest, 'sip-invite', 500, { ttl: 64 });
+        }
+
+        setTimeout(()=> this.write('[SIP] 100 Trying...','cli-data'), 400);
+        setTimeout(()=> this.write('[SIP] 180 Ringing','cli-ok'), 900);
+
+        // Check reachability via engine
+        const ruta = net.engine.findRoute(src.id, dest.id);
+        const reachable = ruta && ruta.length > 0;
+
+        if (!reachable) {
+            setTimeout(()=>{
+                this.write('[SIP] 503 Service Unavailable — No route to destination','cli-err');
+                this.write('[SIP] Call failed ❌','cli-err');
+            }, 1400);
+            return;
+        }
+
+        setTimeout(()=>{
+            this.write(`[SIP] 200 OK — ${dest.name} answered 📞`, 'cli-ok');
+            this.write(`[SDP] Codec: ${src.codec||'G.711'} | RTP stream established`, 'cli-data');
+            this.write(`[RTP] Media path: ${src.name} ↔ ${dest.name}`, 'cli-data');
+
+            // Mark both phones as in-call
+            src._inCall  = { with: dest, ext };
+            dest._inCall = { with: src,  ext: srcExt };
+
+            // Animate RTP media packets back and forth
+            const rtp = ()=>{
+                if (!src._inCall) return;
+                net.sendPacket(src, dest, 'rtp', 160, { ttl: 64 });
+                setTimeout(()=>{ if(src._inCall) net.sendPacket(dest, src, 'rtp', 160, { ttl:64 }); }, 200);
+            };
+            rtp();
+            src._rtpInterval = setInterval(rtp, 1200);
+
+            this.write(`\n  Type  hangup  to end the call`, 'cli-dim');
+        }, 1600);
+
+        // Store context so hangup works
+        this._callCtx = { src, dest, sipServer };
+    }
+
+    _doHangup() {
+        const src = this.device;
+        if (!src._inCall && !this._callCtx) {
+            this.write('% No active call','cli-dim'); return;
+        }
+        const dest = src._inCall?.with || this._callCtx?.dest;
+        if (src._rtpInterval) { clearInterval(src._rtpInterval); src._rtpInterval = null; }
+        src._inCall  = null;
+        if (dest) dest._inCall = null;
+        this._callCtx = null;
+        this.write('[SIP] BYE sent','cli-warn');
+        this.write('[SIP] 200 OK — Call ended 📵','cli-ok');
+    }
+
+    _showSIP(parts) {
+        const sub = parts[2]?.toLowerCase();
+        const d = this.device;
+        this.write('\nSIP / VoIP Status','cli-section');
+
+        if (d.type === 'IPPhone') {
+            this.write(`  Extension    : ${d.extension || '—'}`, 'cli-data');
+            this.write(`  Codec        : ${d.codec || 'G.711'}`, 'cli-data');
+            this.write(`  VLAN voice   : ${d.vlan || 10}`, 'cli-data');
+            const net = window.simulator;
+            const sipSrv = net?.devices?.find(dv => dv.telephony?.enabled);
+            this.write(`  SIP registrar: ${sipSrv ? sipSrv.name + ' (' + (sipSrv.ipConfig?.ipAddress||'—') + ')' : '— (no server found)'}`, 'cli-data');
+            if (d._inCall) {
+                this.write(`  Call status  : ACTIVE 📞 with ${d._inCall.with?.name} (ext ${d._inCall.ext})`, 'cli-ok');
+            } else {
+                this.write(`  Call status  : idle`, 'cli-dim');
+            }
+            this.write('\n  Commands: dial <ext> | hangup | show sip calls', 'cli-dim');
+
+        } else if (d.telephony) {
+            const t = d.telephony;
+            this.write(`  Service      : ${t.enabled ? '🟢 ACTIVE' : '🔴 disabled'}`, t.enabled ? 'cli-ok' : 'cli-err');
+            this.write(`  Registrar    : ${t.ipSourceAddr||'—'}:${t.port||2000}`, 'cli-data');
+            this.write(`  Max ephones  : ${t.maxEphones}  |  Max DN: ${t.maxDn}`, 'cli-data');
+
+            if (sub === 'calls') {
+                this.write('\n  Active calls:', 'cli-section');
+                const net = window.simulator;
+                const activeCalls = net?.devices?.filter(dv => dv._inCall) || [];
+                if (!activeCalls.length) {
+                    this.write('  (no active calls)','cli-dim');
+                } else {
+                    const seen = new Set();
+                    activeCalls.forEach(ph => {
+                        const key = [ph.id, ph._inCall.with.id].sort().join('-');
+                        if (seen.has(key)) return; seen.add(key);
+                        this.write(`  📞 ${ph.name} (${ph.extension}) ↔ ${ph._inCall.with.name} (${ph._inCall.ext})`, 'cli-ok');
+                    });
+                }
+            } else {
+                this.write('\n  Registered phones:', 'cli-section');
+                const net = window.simulator;
+                const phones = net?.devices?.filter(d => d.type==='IPPhone') || [];
+                if (!phones.length) this.write('  (none)','cli-dim');
+                else phones.forEach(p => {
+                    this.write(`  ${p.name.padEnd(18)} ext ${(p.extension||'—').padEnd(6)} ${p._inCall ? '📞 in call' : 'idle'}`, 'cli-data');
+                });
+            }
+        } else {
+            this.write('  (no SIP/telephony config on this device)','cli-dim');
+        }
+    }
+
+    // ══════════════════════════════════════════════════════
+    //  QoS ENGINE
+    // ══════════════════════════════════════════════════════
+
+    _enterPolicyMap(name) {
+        if (!name) { this.write('Usage: policy-map <name>','cli-err'); return; }
+        if (!this.device.qos) this.device.qos = { classMaps: {}, policyMaps: {}, applied: {} };
+        if (!this.device.qos.policyMaps[name]) {
+            this.device.qos.policyMaps[name] = { classes: {} };
+        }
+        this.mode = 'policy-map';
+        this._policyMapCtx = name;
+        this._policyClassCtx = null;
+        this.write(`Configuring policy-map ${name}`, 'cli-ok');
+        this.write('  Commands: class <name> | description <text>','cli-dim');
+    }
+
+    _enterClassMap(name) {
+        if (!name) { this.write('Usage: class-map [match-any|match-all] <name>','cli-err'); return; }
+        if (!this.device.qos) this.device.qos = { classMaps: {}, policyMaps: {}, applied: {} };
+        if (!this.device.qos.classMaps[name]) {
+            this.device.qos.classMaps[name] = { matchType: 'match-all', matches: [] };
+        }
+        this.mode = 'class-map';
+        this._classMapCtx = name;
+        this.write(`Configuring class-map ${name}`, 'cli-ok');
+        this.write('  Commands: match dscp <value> | match protocol <proto> | match ip dscp <val>','cli-dim');
+    }
+
+    _configQoS(parts) {
+        // qos apply policy-map <name> interface <intf> [in|out]
+        const sub = parts[1]?.toLowerCase();
+        if (sub === 'apply') {
+            const pmName = parts[3];
+            const intfName = parts[5];
+            const dir = parts[6] || 'out';
+            if (!pmName || !intfName) {
+                this.write('Usage: qos apply policy-map <name> interface <intf> [in|out]','cli-err'); return;
+            }
+            if (!this.device.qos?.policyMaps?.[pmName]) {
+                this.write(`% policy-map ${pmName} not found. Create it first.`,'cli-err'); return;
+            }
+            if (!this.device.qos.applied) this.device.qos.applied = {};
+            this.device.qos.applied[intfName] = { policyMap: pmName, direction: dir };
+            // Apply real effect to link state if found
+            this._applyQoSToLink(intfName, pmName);
+            this.write(`QoS policy-map ${pmName} applied on ${intfName} (${dir}) ✅`, 'cli-ok');
+        } else if (sub === 'remove') {
+            const intfName = parts[2];
+            if (this.device.qos?.applied?.[intfName]) {
+                delete this.device.qos.applied[intfName];
+                this.write(`QoS removed from ${intfName}`, 'cli-ok');
+            } else {
+                this.write(`% No QoS applied on ${intfName}`,'cli-warn');
+            }
+        } else {
+            this.write('  qos apply policy-map <n> interface <intf> [in|out]','cli-dim');
+            this.write('  qos remove interface <intf>','cli-dim');
+        }
+    }
+
+    _applyQoSToLink(intfName, pmName) {
+        const net = window.simulator;
+        if (!net) return;
+        const pm = this.device.qos?.policyMaps?.[pmName];
+        if (!pm) return;
+
+        // Find a class with a "police" or "shape" action and apply it to link
+        Object.values(pm.classes).forEach(cls => {
+            if (!cls.police && !cls.shape && !cls.bandwidth) return;
+            const intf = this.device.interfaces?.find(i => i.name === intfName);
+            if (!intf?.connectedTo) return;
+            const conn = net.connections.find(c =>
+                (c.fromId === this.device.id || c.toId === this.device.id) &&
+                (c.fromIntf === intfName || c.toIntf === intfName)
+            );
+            if (!conn?._linkState) return;
+            const ls = conn._linkState;
+            if (cls.police)    { ls.setBandwidth(Math.min(ls.bandwidth, cls.police)); }
+            if (cls.shape)     { ls.setBandwidth(Math.min(ls.bandwidth, cls.shape));  }
+            if (cls.priority === 'high' || cls.priority === 'voice') {
+                ls.latency = Math.max(1, ls.latency * 0.5); // halve latency for voice priority
+            }
+        });
+    }
+
+    _policyMapMode(cmd, parts) {
+        const pm = this.device.qos?.policyMaps?.[this._policyMapCtx];
+        if (!pm) { this.mode = 'config'; return; }
+        switch(cmd) {
+            case 'class': {
+                const cname = parts[1];
+                if (!cname) { this.write('Usage: class <class-map-name>','cli-err'); return; }
+                if (!pm.classes[cname]) pm.classes[cname] = {};
+                this._policyClassCtx = cname;
+                this.write(`  class ${cname} — set: police | shape | bandwidth | priority | set dscp | queue-limit`, 'cli-dim');
+                break;
+            }
+            case 'description':
+                pm.description = parts.slice(1).join(' ');
+                break;
+            case 'police': {
+                if (!this._policyClassCtx) { this.write('% Enter a class first','cli-err'); return; }
+                const bw = parseInt(parts[1]);
+                if (!bw) { this.write('Usage: police <bps>','cli-err'); return; }
+                pm.classes[this._policyClassCtx].police = bw;
+                pm.classes[this._policyClassCtx].policeBurst = parseInt(parts[3]) || bw * 0.1;
+                this.write(`  Policing: ${bw} bps, burst: ${pm.classes[this._policyClassCtx].policeBurst}`, 'cli-ok');
+                break;
+            }
+            case 'shape': {
+                if (!this._policyClassCtx) { this.write('% Enter a class first','cli-err'); return; }
+                const bw = parseInt(parts[1]);
+                pm.classes[this._policyClassCtx].shape = bw;
+                this.write(`  Traffic shaping: ${bw} bps average`, 'cli-ok');
+                break;
+            }
+            case 'bandwidth': {
+                if (!this._policyClassCtx) { this.write('% Enter a class first','cli-err'); return; }
+                const bw = parseInt(parts[1]);
+                const unit = parts[2]?.toLowerCase() === 'percent' ? '%' : 'kbps';
+                pm.classes[this._policyClassCtx].bandwidth = bw;
+                pm.classes[this._policyClassCtx].bandwidthUnit = unit;
+                this.write(`  Bandwidth guarantee: ${bw} ${unit}`, 'cli-ok');
+                break;
+            }
+            case 'priority': {
+                if (!this._policyClassCtx) { this.write('% Enter a class first','cli-err'); return; }
+                pm.classes[this._policyClassCtx].priority = parts[1] || 'high';
+                this.write(`  Priority queuing: ${parts[1]||'high'} (LLQ)`, 'cli-ok');
+                break;
+            }
+            case 'set': {
+                if (!this._policyClassCtx) { this.write('% Enter a class first','cli-err'); return; }
+                if (parts[1]==='dscp') {
+                    pm.classes[this._policyClassCtx].setDscp = parts[2];
+                    this.write(`  DSCP marking: ${parts[2]}`, 'cli-ok');
+                } else if (parts[1]==='precedence') {
+                    pm.classes[this._policyClassCtx].setPrecedence = parts[2];
+                    this.write(`  IP Precedence: ${parts[2]}`, 'cli-ok');
+                }
+                break;
+            }
+            case 'queue-limit':
+                if (this._policyClassCtx) {
+                    pm.classes[this._policyClassCtx].queueLimit = parseInt(parts[1]) || 64;
+                    this.write(`  Queue limit: ${pm.classes[this._policyClassCtx].queueLimit} packets`, 'cli-ok');
+                }
+                break;
+            case 'drop':
+                if (this._policyClassCtx) {
+                    pm.classes[this._policyClassCtx].action = 'drop';
+                    this.write('  Action: DROP (all matching traffic discarded)', 'cli-warn');
+                }
+                break;
+            case 'exit': case 'end':
+                if (this._policyClassCtx) { this._policyClassCtx = null; }
+                else { this.mode = 'config'; this._policyMapCtx = null; }
+                break;
+            default:
+                this.write('  class <n> | police <bps> | shape <bps> | bandwidth <n> [percent] | priority | set dscp <v> | queue-limit <n> | drop','cli-dim');
+        }
+    }
+
+    _classMapMode(cmd, parts) {
+        const cm = this.device.qos?.classMaps?.[this._classMapCtx];
+        if (!cm) { this.mode = 'config'; return; }
+        switch(cmd) {
+            case 'match': {
+                const type = parts[1]?.toLowerCase();
+                const val  = parts.slice(2).join(' ');
+                if (!type) { this.write('Usage: match dscp <v> | match protocol <proto> | match ip dscp <v>','cli-dim'); return; }
+                const entry = { type, value: val };
+                cm.matches.push(entry);
+                // Apply DSCP knowledge to simulator
+                if ((type === 'dscp' || (type === 'ip' && parts[2] === 'dscp')) && parts.slice(-1)[0]) {
+                    const dscpVal = parts.slice(-1)[0];
+                    const DSCP_PRIO = { ef: 'voice', af41: 'video', cs3: 'signaling', cs0: 'best-effort', be: 'best-effort' };
+                    cm.trafficClass = DSCP_PRIO[dscpVal.toLowerCase()] || dscpVal;
+                }
+                this.write(`  match ${type} ${val}`, 'cli-ok');
+                break;
+            }
+            case 'no':
+                if (parts[1]==='match') {
+                    const val = parts.slice(2).join(' ');
+                    cm.matches = cm.matches.filter(m => !(m.type===parts[2] && m.value===parts.slice(3).join(' ')));
+                    this.write(`  removed match ${val}`, 'cli-ok');
+                }
+                break;
+            case 'description':
+                cm.description = parts.slice(1).join(' '); break;
+            case 'exit': case 'end':
+                this.mode = 'config'; this._classMapCtx = null; break;
+            default:
+                this.write('  match dscp <value> | match protocol <proto> | match ip dscp <val>','cli-dim');
+        }
+    }
+
+    _showQoS() {
+        const d = this.device;
+        this.write('\nQoS Configuration','cli-section');
+        if (!d.qos || (!Object.keys(d.qos.classMaps||{}).length && !Object.keys(d.qos.policyMaps||{}).length)) {
+            this.write('  (no QoS configured)','cli-dim');
+            this.write('\n  Quick start:', 'cli-section');
+            this.write('    class-map match-all VOICE','cli-dim');
+            this.write('      match dscp ef','cli-dim');
+            this.write('    policy-map QOS-POLICY','cli-dim');
+            this.write('      class VOICE','cli-dim');
+            this.write('        priority 1000','cli-dim');
+            this.write('        set dscp ef','cli-dim');
+            this.write('    qos apply policy-map QOS-POLICY interface <intf> out','cli-dim');
+            return;
+        }
+
+        // Class-maps
+        if (Object.keys(d.qos.classMaps||{}).length) {
+            this.write('\n  Class-maps:', 'cli-section');
+            Object.entries(d.qos.classMaps).forEach(([name, cm]) => {
+                this.write(`  ${name} (${cm.matchType||'match-all'})`, 'cli-ok');
+                cm.matches.forEach(m => this.write(`    match ${m.type} ${m.value}`, 'cli-data'));
+            });
+        }
+
+        // Policy-maps
+        if (Object.keys(d.qos.policyMaps||{}).length) {
+            this.write('\n  Policy-maps:', 'cli-section');
+            Object.entries(d.qos.policyMaps).forEach(([name, pm]) => {
+                this.write(`  ${name}${pm.description ? ' — '+pm.description : ''}`, 'cli-ok');
+                Object.entries(pm.classes||{}).forEach(([cls, cfg]) => {
+                    this.write(`    class ${cls}`, 'cli-data');
+                    if (cfg.priority)   this.write(`      priority ${cfg.priority} (LLQ)`, 'cli-data');
+                    if (cfg.bandwidth)  this.write(`      bandwidth ${cfg.bandwidth} ${cfg.bandwidthUnit||'kbps'}`, 'cli-data');
+                    if (cfg.police)     this.write(`      police ${cfg.police} bps (burst ${cfg.policeBurst})`, 'cli-data');
+                    if (cfg.shape)      this.write(`      shape average ${cfg.shape} bps`, 'cli-data');
+                    if (cfg.setDscp)    this.write(`      set dscp ${cfg.setDscp}`, 'cli-data');
+                    if (cfg.queueLimit) this.write(`      queue-limit ${cfg.queueLimit} pkts`, 'cli-data');
+                    if (cfg.action === 'drop') this.write(`      drop`, 'cli-warn');
+                });
+            });
+        }
+
+        // Applied policies
+        if (Object.keys(d.qos.applied||{}).length) {
+            this.write('\n  Applied policies:', 'cli-section');
+            Object.entries(d.qos.applied).forEach(([intf, cfg]) => {
+                this.write(`  ${intf.padEnd(14)} → ${cfg.policyMap} (${cfg.direction})`, 'cli-ok');
+            });
+        }
+    }
+
+    _showPolicyMap(name) {
+        const d = this.device;
+        if (!d.qos?.policyMaps) { this.write('  (no policy-maps configured)','cli-dim'); return; }
+        const maps = name ? { [name]: d.qos.policyMaps[name] } : d.qos.policyMaps;
+        this.write('\nPolicy-map detail','cli-section');
+        Object.entries(maps).forEach(([n, pm]) => {
+            if (!pm) { this.write(`  % policy-map ${n} not found`,'cli-err'); return; }
+            this.write(`\n  Policy Map ${n}`, 'cli-ok');
+            Object.entries(pm.classes||{}).forEach(([cls, cfg]) => {
+                this.write(`    Class ${cls}`, 'cli-data');
+                const stats = ['priority','bandwidth','police','shape','setDscp','queueLimit','action'];
+                stats.forEach(k => { if (cfg[k] != null) this.write(`      ${k}: ${cfg[k]}`, 'cli-data'); });
+            });
+        });
+    }
+
+    _showClassMap() {
+        const d = this.device;
+        if (!d.qos?.classMaps || !Object.keys(d.qos.classMaps).length) {
+            this.write('  (no class-maps configured)','cli-dim'); return;
+        }
+        this.write('\nClass-map detail','cli-section');
+        Object.entries(d.qos.classMaps).forEach(([name, cm]) => {
+            this.write(`\n  Class Map ${name} (${cm.matchType||'match-all'})`, 'cli-ok');
+            if (!cm.matches.length) { this.write('    (no match criteria)','cli-dim'); return; }
+            cm.matches.forEach(m => this.write(`    match ${m.type} ${m.value}`, 'cli-data'));
+        });
+    }
+
 }
 
-// ══════════════════════════════════════════════════════════
-//  CLI PANEL — UI para la ventana de CLI por dispositivo
 // ══════════════════════════════════════════════════════════
 
 class CLIPanel {
@@ -1610,3 +2212,4 @@ window.cliPanel = null;
 document.addEventListener('DOMContentLoaded', () => {
     window.cliPanel = new CLIPanel();
 });
+

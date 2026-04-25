@@ -29,6 +29,11 @@ document.addEventListener('DOMContentLoaded', () => {
         window._labInit(simulator);
     }
 
+    // ── LabChecker — validación automática ───────────────────────────
+    if (typeof window._checkerInit === 'function' && window.labGuide) {
+        window._checkerInit(window.labGuide, simulator);
+    }
+
     // ── Autocargar topología guardada ────────────────────────────────
     try {
         const loaded = loadNetwork(simulator);
@@ -1144,103 +1149,148 @@ document.addEventListener('DOMContentLoaded', () => {
         const conns = simulator.connections;
         if (!devs.length) return;
 
-        // Construir grafo de adyacencia
-        const adjMap = new Map();
-        devs.forEach(d => adjMap.set(d.id, []));
+        // ── Nivel lógico fijo por tipo ─────────────────────────────────────────
+        const TYPE_LEVEL = {
+            'Internet':0,'SDWAN':0,
+            'ISP':1,
+            'Firewall':2,
+            'Router':3,'OLT':3,
+            'Switch':4,'SwitchPoE':4,'AC':4,'RouterWifi':4,
+            'ONT':5,'Bridge':5,'AP':5,
+            'Server':6,'DVR':6,'ControlTerminal':6,
+            'PC':7,'Laptop':7,'IPPhone':7,'Phone':7,
+            'Printer':7,'Camera':7,'PayTerminal':7,'Alarm':7
+        };
+        const typeRank = t => TYPE_LEVEL[t] ?? 8;
+
+        // ── Grafo de adyacencia ────────────────────────────────────────────────
+        const adj = new Map();
+        devs.forEach(d => adj.set(d.id, new Set()));
         conns.forEach(cn => {
-            const fId = cn.from?.id;
-            const tId = cn.to?.id;
-            if (fId && tId && fId !== tId) {
-                if (!adjMap.get(fId).includes(tId)) adjMap.get(fId).push(tId);
-                if (!adjMap.get(tId).includes(fId)) adjMap.get(tId).push(fId);
-            }
+            const a = cn.from?.id, b = cn.to?.id;
+            if (a && b && a !== b) { adj.get(a).add(b); adj.get(b).add(a); }
         });
 
-        // Encontrar raíz (nodo con más conexiones = backbone)
-        let root = devs[0];
-        devs.forEach(d => { if ((adjMap.get(d.id)?.length||0) > (adjMap.get(root.id)?.length||0)) root = d; });
+        // ── Nivel de cada nodo (compactado) ───────────────────────────────────
+        const lvl = new Map();
+        devs.forEach(d => lvl.set(d.id, typeRank(d.type)));
+        const usedLvls = [...new Set(lvl.values())].sort((a,b)=>a-b);
+        const remap = new Map(usedLvls.map((v,i) => [v,i]));
+        devs.forEach(d => lvl.set(d.id, remap.get(lvl.get(d.id))));
 
-        // BFS para asignar niveles
-        const levels = new Map();
-        const visited = new Set();
-        const queue = [{ id: root.id, level: 0 }];
-        visited.add(root.id);
-        while (queue.length) {
-            const { id, level } = queue.shift();
-            levels.set(id, level);
-            (adjMap.get(id) || []).forEach(nId => {
-                if (!visited.has(nId)) { visited.add(nId); queue.push({ id: nId, level: level + 1 }); }
+        // ── Árbol de padres (un padre por nodo = el upstream más cercano) ──────
+        const ch  = new Map();  // padre → [hijos en árbol]
+        const par = new Map();  // hijo  → padre en árbol
+        devs.forEach(d => ch.set(d.id, []));
+
+        devs.forEach(d => {
+            const myLv = lvl.get(d.id);
+            if (myLv === 0) return;
+            const up = [...(adj.get(d.id)||[])].filter(n => lvl.get(n) < myLv);
+            if (!up.length) return;
+            up.sort((a,b) => (lvl.get(b)-lvl.get(a)) || (adj.get(b)?.size||0)-(adj.get(a)?.size||0));
+            ch.get(up[0]).push(d.id);
+            par.set(d.id, up[0]);
+        });
+
+        // Ordenar hijos: por tipo luego nombre
+        ch.forEach(kids => kids.sort((a,b) => {
+            const da = devs.find(d=>d.id===a), db = devs.find(d=>d.id===b);
+            return (typeRank(da?.type)-typeRank(db?.type)) || (da?.name||'').localeCompare(db?.name||'');
+        }));
+
+        // Raíz virtual
+        const VROOT = '__vr__';
+        const roots = devs.filter(d => !par.has(d.id))
+            .sort((a,b) => lvl.get(a.id)-lvl.get(b.id) || (adj.get(b.id)?.size||0)-(adj.get(a.id)?.size||0));
+        ch.set(VROOT, roots.map(d=>d.id));
+
+        // ── Layout: calcular ancho de subárbol ────────────────────────────────
+        // El ancho de un subárbol es la suma del ancho de sus hijos,
+        // con un mínimo de SEP por nodo hoja.
+        const SEP  = 185;   // separación mínima entre hojas
+        const LSEP = 175;   // separación entre niveles
+
+        const subtreeW = new Map();
+        function calcWidth(id) {
+            const kids = ch.get(id) || [];
+            if (!kids.length) {
+                const w = (id === VROOT) ? 0 : SEP;
+                subtreeW.set(id, w);
+                return w;
+            }
+            const w = kids.reduce((s,k) => s + calcWidth(k), 0);
+            subtreeW.set(id, w);
+            return w;
+        }
+        calcWidth(VROOT);
+
+        // ── Asignar posición en eje cruzado ───────────────────────────────────
+        // Cada nodo se centra sobre el span de sus hijos.
+        // Cada hijo se coloca en el centro de su porción del span.
+        const cross = new Map();
+
+        function place(id, left) {
+            const kids = ch.get(id) || [];
+            const myW  = subtreeW.get(id) || SEP;
+
+            if (id !== VROOT) {
+                // Este nodo se centra sobre su propio subárbol
+                cross.set(id, left + myW / 2);
+            }
+
+            // Colocar hijos de izquierda a derecha
+            let cursor = left;
+            kids.forEach(k => {
+                place(k, cursor);
+                cursor += subtreeW.get(k) || SEP;
             });
         }
-        // Nodos no conectados al árbol: asignar nivel propio al final
-        let orphanLevel = Math.max(...[...levels.values()], 0) + 1;
-        devs.forEach(d => { if (!levels.has(d.id)) { levels.set(d.id, orphanLevel++); } });
+        place(VROOT, 0);
 
-        // Agrupar por nivel
-        const byLevel = {};
+        // ── Segunda pasada: centrar nodos con múltiples padres reales ─────────
+        // Si un nodo (ej: Firewall) está conectado a 2 ISPs,
+        // su posición ideal es el promedio de las posiciones de esos ISPs.
+        const sortedLvls2 = [...new Set(devs.map(d=>lvl.get(d.id)))].sort((a,b)=>a-b);
+        sortedLvls2.forEach(l => {
+            devs.filter(d=>lvl.get(d.id)===l).forEach(d => {
+                const myLv = lvl.get(d.id);
+                const upReal = [...(adj.get(d.id)||[])].filter(n => lvl.get(n) < myLv);
+                if (upReal.length < 2) return;
+                const positions = upReal.map(n=>cross.get(n)).filter(p=>p!=null);
+                if (!positions.length) return;
+                cross.set(d.id, positions.reduce((s,v)=>s+v,0)/positions.length);
+            });
+        });
+
+        // Nodos sin posición (islas desconectadas)
+        let iso = (cross.size ? Math.max(...cross.values()) : 0) + SEP * 2;
+        devs.forEach(d => { if (!cross.has(d.id)) { cross.set(d.id, iso); iso += SEP; } });
+
+        // ── Centrar todo en el canvas ──────────────────────────────────────────
+        const WCX = (simulator.canvas.width  / 2 - simulator.panX) / simulator.zoom;
+        const WCY = (simulator.canvas.height / 2 - simulator.panY) / simulator.zoom;
+        const allC = [...cross.values()];
+        const allL = devs.map(d => lvl.get(d.id) ?? 0);
+        const midC = (Math.min(...allC) + Math.max(...allC)) / 2;
+        const midL = (Math.min(...allL) + Math.max(...allL)) / 2;
+
         devs.forEach(d => {
-            const lv = levels.get(d.id) ?? 0;
-            (byLevel[lv] = byLevel[lv] || []).push(d);
-        });
-        const levelCount = Object.keys(byLevel).length;
-
-        // Orden de tipos de dispositivo para agrupar visualmente dentro del nivel
-        const TYPE_ORDER = [
-            'Internet','ISP','SDWAN','ONT','OLT',
-            'Firewall','Router','RouterWifi','Bridge','AC',
-            'Switch','SwitchPoE','AP',
-            'Server','DVR','ControlTerminal',
-            'PC','Laptop','IPPhone','Phone','Printer','Camera','PayTerminal','Alarm'
-        ];
-        const typeRank = t => { const i = TYPE_ORDER.indexOf(t); return i < 0 ? 999 : i; };
-
-        // Ordenar nodos dentro de cada nivel:
-        // primero por tipo (jerarquía), luego por número de conexiones (desc), luego por nombre
-        Object.values(byLevel).forEach(nodes => {
-            nodes.sort((a, b) => {
-                const tr = typeRank(a.type) - typeRank(b.type);
-                if (tr !== 0) return tr;
-                const ca = adjMap.get(a.id)?.length || 0;
-                const cb = adjMap.get(b.id)?.length || 0;
-                if (cb !== ca) return cb - ca;
-                return a.name.localeCompare(b.name);
-            });
-        });
-
-        // Espaciado fijo en espacio-mundo (sin depender de zoom/pan)
-        const W = 200, H = 160;
-        const maxInLevel = Math.max(...Object.values(byLevel).map(n => n.length));
-
-        // Centro del canvas en espacio-mundo
-        const worldCX = (simulator.canvas.width  / 2 - simulator.panX) / simulator.zoom;
-        const worldCY = (simulator.canvas.height / 2 - simulator.panY) / simulator.zoom;
-
-        // Punto de origen para que el layout quede centrado
-        const originX = direction === 'LR'
-            ? worldCX - ((levelCount - 1) * W) / 2
-            : worldCX - ((maxInLevel - 1) * W) / 2;
-        const originY = direction === 'TB'
-            ? worldCY - ((levelCount - 1) * H) / 2
-            : worldCY - ((maxInLevel - 1) * H) / 2;
-
-        Object.entries(byLevel).forEach(([lvStr, nodes]) => {
-            const lv = Number(lvStr);
-            nodes.forEach((d, i) => {
-                const count = nodes.length;
-                if (direction === 'TB') {
-                    d.x = originX + (i - (count - 1) / 2) * W;
-                    d.y = originY + lv * H;
-                } else {
-                    d.x = originX + lv * W;
-                    d.y = originY + (i - (count - 1) / 2) * H;
-                }
-            });
+            const l = lvl.get(d.id) ?? 0;
+            const c = cross.get(d.id) ?? 0;
+            if (direction === 'TB') {
+                d.x = WCX + (c - midC);
+                d.y = WCY + (l - midL) * LSEP;
+            } else {
+                d.x = WCX + (l - midL) * LSEP;
+                d.y = WCY + (c - midC);
+            }
         });
 
         simulator.draw();
         simulator.fitAll();
         _snapshot();
-        netConsole.writeToConsole(`🗂️ Topología ordenada (${direction === 'TB' ? 'Vertical' : 'Horizontal'})`);
+        netConsole.writeToConsole(`\U0001f5c2\ufe0f Topolog\u00eda ordenada (${direction==='TB'?'Vertical':'Horizontal'})`);
     }
 
     // ── Example network ───────────────────────────────

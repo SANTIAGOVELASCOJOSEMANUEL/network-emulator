@@ -1866,9 +1866,11 @@ class LabGuide {
 
         el.querySelector('#lb-hint').addEventListener('click', () => {
             this._hintLevel = Math.min(3, this._hintLevel + 1);
+            window.labChecker?.onHintUsed();
             this._render();
         });
         el.querySelector('#lb-skip').addEventListener('click', () => {
+            window.labChecker?.onStepSkipped();
             this._nextStep(true);
         });
         el.querySelector('#lb-quit').addEventListener('click', () => {
@@ -1928,6 +1930,8 @@ class LabGuide {
         if (this._currentStep >= this._currentLab.steps.length) {
             this._mode = 'complete';
             if (this._timer) clearInterval(this._timer);
+            const elapsed = this._startTime ? Date.now() - this._startTime : 0;
+            window.labChecker?.onLabComplete(this._currentLab.id, elapsed);
         }
         this._render();
     }
