@@ -13,8 +13,6 @@ class DeviceCLI {
         this.history    = [];
         this.histIdx    = -1;
         this._ifBuffer  = {};              // cambios pendientes en interfaz
-        this._sshSession = null;           // sesión SSH activa simulada
-        this.bgpContext  = null;           // contexto BGP (AS, neighbors)
     }
 
     get prompt() {
@@ -27,8 +25,6 @@ class DeviceCLI {
             case 'vlan':    return `${h}(config-vlan)#`;
             case 'router':  return `${h}(config-router)#`;
             case 'dhcp':    return `${h}(config-dhcp)#`;
-            case 'bgp':     return `${h}(config-router)#`;
-            case 'ssh':     return this._sshSession ? `${this._sshSession.target}#` : `${h}>`;
             default:        return `${h}>`;
         }
     }
@@ -65,8 +61,6 @@ class DeviceCLI {
             case 'vlan':   return this._vlanMode(cmd, parts);
             case 'router': return this._routerMode(cmd, parts);
             case 'dhcp':   return this._dhcpMode(cmd, parts);
-            case 'bgp':    return this._bgpMode(cmd, parts);
-            case 'ssh':    return this._sshMode(cmd, parts);
         }
     }
 
@@ -86,8 +80,6 @@ class DeviceCLI {
             ping    : () => this._doPing(parts),
             traceroute: () => this._doTraceroute(parts),
             show    : () => this._doShow(parts),
-            telnet  : () => this._doTelnet(parts),
-            ssh     : () => this._doSSHConnect(parts),
             help    : () => this._help(),
         };
         if (cmds[cmd]) cmds[cmd]();
@@ -105,8 +97,6 @@ class DeviceCLI {
             ping     : () => this._doPing(parts),
             traceroute: () => this._doTraceroute(parts),
             reload   : () => { this.write('Recargando dispositivo...','cli-warn'); setTimeout(()=>this.write('Done.'), 1200); },
-            telnet   : () => this._doTelnet(parts),
-            ssh      : () => this._doSSHConnect(parts),
             write    : () => this.write('Building configuration... [OK]','cli-ok'),
             copy     : () => this.write('Destination filename [startup-config]? [OK]','cli-ok'),
             clear    : () => this._doClear(parts),
@@ -191,24 +181,8 @@ class DeviceCLI {
                 }
                 break;
 
-            case 'crypto':
-                return this._configCrypto(parts);
-
-            case 'username': {
-                if (!this.device.localUsers) this.device.localUsers = {};
-                if (parts[1]) {
-                    const privIdx = parts.indexOf('privilege');
-                    const secIdx  = parts.indexOf('secret') !== -1 ? parts.indexOf('secret') : parts.indexOf('password');
-                    const priv = privIdx !== -1 ? parseInt(parts[privIdx+1]) : 1;
-                    const pwd  = secIdx  !== -1 ? parts[secIdx+1] : '';
-                    this.device.localUsers[parts[1]] = { privilege: priv, password: pwd };
-                    this.write(`User ${parts[1]} configured (privilege ${priv})`, 'cli-ok');
-                } else this._bad();
-                break;
-            }
-
             default:
-                this._unknown(cmd, ['hostname','interface','vlan','ip','router','no','access-list','spanning-tree','crypto','username']);
+                this._unknown(cmd, ['hostname','interface','vlan','ip','router','no','access-list','spanning-tree']);
         }
     }
 
@@ -397,18 +371,6 @@ class DeviceCLI {
     // ══════════════════════════════════════════════════════
     _enterRouter(parts) {
         const proto = parts[1]?.toLowerCase();
-        if (proto === 'bgp') {
-            const asn = parseInt(parts[2]);
-            if (!asn) { this.write('% Usage: router bgp <AS-number>', 'cli-err'); return; }
-            if (!this.device.bgp) this.device.bgp = { asn, neighbors: [], networks: [], redistributed: [] };
-            this.device.bgp.asn = asn;
-            this.bgpContext = this.device.bgp;
-            this.mode = 'bgp';
-            this.routerProto = 'bgp';
-            this.device.routingProtocol = 'bgp';
-            this.write(`Entering BGP configuration (AS ${asn})`, 'cli-ok');
-            return;
-        }
         this.mode = 'router';
         this.routerProto = proto;
         this.device.routingProtocol = proto;
@@ -530,9 +492,6 @@ class DeviceCLI {
                 this.device.domainName = parts[2];
                 this.write(`Domain name: ${parts[2]}`,'cli-ok');
                 break;
-
-            case 'ssh':
-                return this._configSSH(parts);
 
             default:
                 this._bad();
@@ -706,21 +665,6 @@ class DeviceCLI {
                 this._showNeighbors();
                 break;
 
-            case 'bgp':
-                return this._showBGP(parts);
-
-            case 'crypto': case 'key':
-                this._showCryptoKey();
-                break;
-
-            case 'ssh':
-                this._showSSH();
-                break;
-
-            case 'users':
-                this._showUsers();
-                break;
-
             case 'dhcp':
                 this._showDHCP();
                 break;
@@ -730,7 +674,7 @@ class DeviceCLI {
                 break;
 
             default:
-                this.write(`  show interfaces | ip route | ip interface | vlan | version | running-config | spanning-tree | arp | dhcp | cdp neighbors | bgp | bgp summary | ssh | users | crypto key`,'cli-dim');
+                this.write(`  show interfaces | ip route | ip interface | vlan | version | running-config | spanning-tree | arp | dhcp | cdp neighbors`,'cli-dim');
         }
     }
 
@@ -1008,9 +952,7 @@ class DeviceCLI {
                 case 'if':     this.mode='config'; this.ifContext=null; break;
                 case 'vlan':   this.mode='config'; this.vlanContext=null; break;
                 case 'router': this.mode='config'; break;
-                case 'bgp':    this.mode='config'; this.bgpContext=null; break;
                 case 'dhcp':   this.mode='config'; break;
-                case 'ssh':    this._exitSSH(); break;
             }
         }
     }
@@ -1029,7 +971,6 @@ class DeviceCLI {
             if:     ['ip address <ip> <mask>','ip address dhcp','no shutdown','shutdown','switchport mode [access|trunk]','switchport access vlan <id>','encapsulation dot1q <vlan>','description <text>','ip nat [inside|outside]','no ip address'],
             vlan:   ['name <name>','state [active|suspend]'],
             router: ['network <ip> <wildcard> area <id>','router-id <id>','passive-interface <intf>','redistribute connected'],
-            bgp:    ['neighbor <ip> remote-as <asn>','neighbor <ip> description <text>','neighbor <ip> shutdown','network <ip> mask <mask>','redistribute connected','redistribute static','bgp router-id <id>','aggregate-address <ip> <mask>'],
             dhcp:   ['network <ip> [mask]','default-router <ip>','dns-server <ip>','lease <days>','domain-name <name>'],
         };
         const list = helps[this.mode] || helps.user;
@@ -1037,388 +978,6 @@ class DeviceCLI {
         list.forEach(c => this.write(`  ${c}`,'cli-dim'));
         this.write(`  exit / end — leave context`,'cli-dim');
     }
-
-    // ══════════════════════════════════════════════════════
-    //  BGP MODE  (Router(config-router)# via router bgp <ASN>)
-    // ══════════════════════════════════════════════════════
-    _bgpMode(cmd, parts) {
-        const bgp = this.bgpContext || this.device.bgp;
-        if (!bgp) { this.mode = 'config'; return; }
-        switch(cmd) {
-            case 'neighbor': {
-                const ip  = parts[1];
-                const sub = parts[2]?.toLowerCase();
-                if (!ip || !sub) return this._bad();
-                let nb = bgp.neighbors.find(n => n.ip === ip);
-                if (!nb) { nb = { ip, state: 'Idle', uptime: null, prefixesRx: 0, prefixesTx: 0 }; bgp.neighbors.push(nb); }
-                if (sub === 'remote-as') {
-                    nb.remoteAs = parseInt(parts[3]);
-                    this.write(`BGP neighbor ${ip} remote-as ${nb.remoteAs}`, 'cli-ok');
-                } else if (sub === 'description') {
-                    nb.description = parts.slice(3).join(' ');
-                    this.write(`Neighbor ${ip} description: ${nb.description}`, 'cli-ok');
-                } else if (sub === 'shutdown') {
-                    nb.state = 'Idle'; nb.adminShutdown = true;
-                    this.write(`%BGP-5-ADJCHANGE: neighbor ${ip} Down Admin shutdown`, 'cli-warn');
-                } else if (sub === 'password') {
-                    nb.password = parts[3];
-                    this.write(`MD5 authentication configured for neighbor ${ip}`, 'cli-ok');
-                } else if (sub === 'update-source') {
-                    nb.updateSource = parts[3];
-                    this.write(`Update source: ${parts[3]} for neighbor ${ip}`, 'cli-ok');
-                } else if (sub === 'next-hop-self') {
-                    nb.nextHopSelf = true;
-                    this.write(`next-hop-self set for neighbor ${ip}`, 'cli-ok');
-                } else if (sub === 'route-map') {
-                    nb.routeMap = nb.routeMap || {};
-                    nb.routeMap[parts[4]||'in'] = parts[3];
-                    this.write(`Route-map ${parts[3]} applied ${parts[4]||'in'} for neighbor ${ip}`, 'cli-ok');
-                } else if (sub === 'soft-reconfiguration') {
-                    nb.softReconfig = true;
-                    this.write(`Soft-reconfiguration inbound enabled for ${ip}`, 'cli-ok');
-                } else {
-                    this.write(`% Unknown neighbor sub-command: ${sub}`, 'cli-err');
-                }
-                // Simulate neighbor state machine after config
-                if (!nb.adminShutdown && nb.remoteAs) {
-                    const remote = window.simulator?.devices?.find(d => d.ipConfig?.ipAddress === ip);
-                    nb.state = remote ? 'Established' : 'Active';
-                    if (nb.state === 'Established') {
-                        nb.uptime = '00:00:05';
-                        nb.prefixesRx = Math.floor(Math.random() * 10);
-                        this.write(`%BGP-5-ADJCHANGE: neighbor ${ip} Up`, 'cli-ok');
-                    } else {
-                        this.write(`%BGP-3-NOTIFICATION: neighbor ${ip} in Active state (no route to peer)`, 'cli-warn');
-                    }
-                }
-                break;
-            }
-            case 'no':
-                if (parts[1] === 'neighbor' && parts[2]) {
-                    const ip = parts[2];
-                    const sub = parts[3]?.toLowerCase();
-                    const nb = bgp.neighbors.find(n => n.ip === ip);
-                    if (sub === 'shutdown' && nb) {
-                        nb.adminShutdown = false;
-                        nb.state = 'Active';
-                        const remote = window.simulator?.devices?.find(d => d.ipConfig?.ipAddress === ip);
-                        if (remote) { nb.state = 'Established'; nb.uptime = '00:00:01'; }
-                        this.write(`%BGP-5-ADJCHANGE: neighbor ${ip} ${nb.state === 'Established' ? 'Up' : 'Active'}`, nb.state==='Established'?'cli-ok':'cli-warn');
-                    } else if (!sub) {
-                        bgp.neighbors = bgp.neighbors.filter(n => n.ip !== ip);
-                        this.write(`Neighbor ${ip} removed`, 'cli-ok');
-                    }
-                }
-                break;
-            case 'network': {
-                const net  = parts[1];
-                const mask = parts[3]; // network <ip> mask <mask>
-                if (!net) return this._bad();
-                bgp.networks = bgp.networks || [];
-                bgp.networks.push({ network: net, mask: mask || '255.255.255.0' });
-                this.write(`BGP network ${net}${mask ? ' mask '+mask : ''} added`, 'cli-ok');
-                break;
-            }
-            case 'aggregate-address':
-                if (!bgp.aggregates) bgp.aggregates = [];
-                bgp.aggregates.push({ network: parts[1], mask: parts[2], summaryOnly: parts.includes('summary-only') });
-                this.write(`Aggregate address ${parts[1]} ${parts[2]}${parts.includes('summary-only')?' summary-only':''}`, 'cli-ok');
-                break;
-            case 'bgp':
-                if (parts[1] === 'router-id') { bgp.routerId = parts[2]; this.write(`BGP router-id ${parts[2]}`, 'cli-ok'); }
-                else if (parts[1] === 'log-neighbor-changes') { bgp.logChanges = true; this.write('BGP neighbor change logging enabled', 'cli-ok'); }
-                else if (parts[1] === 'maximum-paths') { bgp.maxPaths = parseInt(parts[2])||1; this.write(`BGP maximum-paths ${bgp.maxPaths}`, 'cli-ok'); }
-                else if (parts[1] === 'bestpath') { this.write(`BGP bestpath ${parts.slice(2).join(' ')} configured`, 'cli-ok'); }
-                else this._bad();
-                break;
-            case 'redistribute':
-                bgp.redistributed = bgp.redistributed || [];
-                bgp.redistributed.push(parts[1]);
-                this.write(`BGP redistribute ${parts[1]} configured`, 'cli-ok');
-                break;
-            case 'timers':
-                bgp.keepalive = parseInt(parts[2]) || 60;
-                bgp.holdtime  = parseInt(parts[3]) || 180;
-                this.write(`BGP timers: keepalive ${bgp.keepalive}s, hold ${bgp.holdtime}s`, 'cli-ok');
-                break;
-            case 'maximum-paths':
-                bgp.maxPaths = parseInt(parts[1]) || 1;
-                this.write(`BGP maximum-paths: ${bgp.maxPaths}`, 'cli-ok');
-                break;
-            default:
-                this._unknown(cmd, ['neighbor','network','aggregate-address','bgp router-id','redistribute','timers','maximum-paths','no']);
-        }
-    }
-
-    // ══════════════════════════════════════════════════════
-    //  SHOW BGP
-    // ══════════════════════════════════════════════════════
-    _showBGP(parts) {
-        const bgp = this.device.bgp;
-        const sub = parts[2]?.toLowerCase();
-        if (!bgp) { this.write('  BGP not configured. Use: router bgp <ASN>', 'cli-dim'); return; }
-
-        if (sub === 'summary' || sub === 'sum') {
-            this.write(`\nBGP router identifier ${bgp.routerId || this.device.ipConfig?.ipAddress || '—'}, local AS number ${bgp.asn}`, 'cli-section');
-            this.write(`BGP table version 1, main routing table version 1`, 'cli-data');
-            this.write(`\nNeighbor         V    AS MsgRcvd MsgSent   TblVer  InQ OutQ Up/Down  State/PfxRcd`, 'cli-dim');
-            if (!bgp.neighbors?.length) { this.write('  (no neighbors configured)', 'cli-dim'); return; }
-            bgp.neighbors.forEach(n => {
-                const state  = n.adminShutdown ? 'Idle (Admin)' : (n.state || 'Idle');
-                const pfx    = state === 'Established' ? String(n.prefixesRx || 0) : state;
-                const uptime = n.uptime || 'never';
-                const rcv    = String(Math.floor(Math.random()*200)).padEnd(8);
-                const snt    = String(Math.floor(Math.random()*200)).padEnd(8);
-                this.write(`${n.ip.padEnd(17)} 4 ${String(n.remoteAs||'?').padEnd(6)} ${rcv}${snt}1       0    0 ${uptime.padEnd(9)} ${pfx}`, 'cli-data');
-            });
-            this.write(`\nTotal number of neighbors: ${bgp.neighbors.length}`, 'cli-dim');
-
-        } else if (sub === 'neighbors' || sub === 'neighbor') {
-            const filterIp = parts[3];
-            const nbs = filterIp ? bgp.neighbors.filter(n => n.ip === filterIp) : (bgp.neighbors || []);
-            if (!nbs.length) { this.write(`  No BGP neighbors${filterIp ? ' matching '+filterIp : ''}`, 'cli-dim'); return; }
-            nbs.forEach(n => {
-                this.write(`\nBGP neighbor is ${n.ip}, remote AS ${n.remoteAs||'?'}, external link`, 'cli-section');
-                this.write(`  BGP version 4, remote router ID ${n.ip}`, 'cli-data');
-                this.write(`  BGP state = ${n.adminShutdown ? 'Idle (Admin)' : (n.state||'Idle')}`, n.state==='Established'?'cli-ok':'cli-warn');
-                if (n.description) this.write(`  Description: ${n.description}`, 'cli-data');
-                if (n.uptime)      this.write(`  Up for: ${n.uptime}`, 'cli-data');
-                this.write(`  Prefixes received: ${n.prefixesRx||0}   Prefixes sent: ${n.prefixesTx||0}`, 'cli-data');
-                if (n.password)    this.write(`  MD5 authentication enabled`, 'cli-data');
-                if (n.nextHopSelf) this.write(`  Next-hop-self enabled`, 'cli-data');
-                if (n.updateSource) this.write(`  Update source: ${n.updateSource}`, 'cli-data');
-            });
-
-        } else {
-            // show ip bgp — BGP routing table
-            this.write(`\nBGP table version 1, local router ID ${bgp.routerId || this.device.ipConfig?.ipAddress || '—'}`, 'cli-section');
-            this.write(`Status codes: s suppressed, d damped, h history, * valid, > best, i internal`, 'cli-dim');
-            this.write(`Origin codes: i - IGP, e - EGP, ? - incomplete`, 'cli-dim');
-            this.write(`\n   Network            Next Hop        Metric LocPrf Weight Path`, 'cli-dim');
-            let hasEntries = false;
-            (bgp.networks || []).forEach(n => {
-                const cidr = n.mask ? this._maskToCidr(n.mask) : 24;
-                this.write(`*> ${(n.network+'/'+cidr).padEnd(20)} 0.0.0.0         0      100  32768 i`, 'cli-data');
-                hasEntries = true;
-            });
-            (bgp.neighbors || []).forEach(n => {
-                if (n.state === 'Established' && n.prefixesRx > 0) {
-                    for (let i = 0; i < n.prefixesRx; i++) {
-                        const fakeNet = `10.${n.remoteAs||0}.${i}.0/24`;
-                        this.write(`*  ${fakeNet.padEnd(20)} ${n.ip.padEnd(16)} 0             0 ${n.remoteAs||'?'} i`, 'cli-data');
-                        hasEntries = true;
-                    }
-                }
-            });
-            if (!hasEntries) this.write('  (BGP table empty — configure networks or establish neighbors)', 'cli-dim');
-        }
-    }
-
-    _maskToCidr(mask) {
-        return mask.split('.').reduce((c, o) => c + (parseInt(o).toString(2).match(/1/g)||[]).length, 0);
-    }
-
-    // ══════════════════════════════════════════════════════
-    //  CRYPTO KEY + SSH CONFIG
-    // ══════════════════════════════════════════════════════
-    _configCrypto(parts) {
-        const sub = parts[1]?.toLowerCase();
-        if (sub !== 'key') { this.write('% Usage: crypto key generate rsa [modulus <bits>]', 'cli-err'); return; }
-        const action = parts[2]?.toLowerCase();
-        if (action === 'generate') {
-            const algo   = parts[3]?.toLowerCase() || 'rsa';
-            const modIdx = parts.indexOf('modulus');
-            const bits   = modIdx !== -1 ? parseInt(parts[modIdx+1]) : 1024;
-            if (!this.device.domainName) {
-                this.write('% Please define a domain-name first.', 'cli-err');
-                this.write('  Hint: ip domain-name example.com', 'cli-dim');
-                return;
-            }
-            const label = `${this.device.config?.hostname||this.device.name}.${this.device.domainName}`;
-            this.write(`The name for the keys will be: ${label}`, 'cli-data');
-            this.write(`Choose the size of the key modulus in range 360 to 4096 for your General Purpose Keys:`, 'cli-data');
-            this.write(`% Generating ${bits} bit RSA keys, keys will be non-exportable...`, 'cli-warn');
-            this.device.cryptoKey = { algo, bits, generated: true, label };
-            setTimeout(() => {
-                this.write(`[OK] (elapsed time was 1 seconds)`, 'cli-ok');
-                this.write(`%SSH-5-ENABLED: SSH 2.0 has been enabled`, 'cli-ok');
-                this.device.sshEnabled = true;
-                if (!this.device.ssh) this.device.ssh = { version: 2, timeout: 120, retries: 3 };
-            }, 900);
-        } else if (action === 'zeroize') {
-            this.device.cryptoKey = null;
-            this.device.sshEnabled = false;
-            this.write('% All RSA keys have been removed.', 'cli-ok');
-            this.write('%SSH-5-DISABLED: SSH has been disabled', 'cli-warn');
-        } else {
-            this.write('% Usage: crypto key generate rsa [modulus <512|1024|2048>]', 'cli-err');
-        }
-    }
-
-    _configSSH(parts) {
-        const sub = parts[2]?.toLowerCase();
-        if (!this.device.ssh) this.device.ssh = { version: 2, timeout: 120, retries: 3 };
-        if (sub === 'version') {
-            const v = parseInt(parts[3]);
-            if (v !== 1 && v !== 2) { this.write('% SSH version must be 1 or 2', 'cli-err'); return; }
-            if (!this.device.cryptoKey?.generated) {
-                this.write('% SSH requires crypto keys first. Run: crypto key generate rsa', 'cli-err'); return;
-            }
-            this.device.ssh.version = v;
-            this.write(`SSH version ${v} configured`, 'cli-ok');
-        } else if (sub === 'time-out') {
-            this.device.ssh.timeout = parseInt(parts[3]) || 120;
-            this.write(`SSH timeout: ${this.device.ssh.timeout}s`, 'cli-ok');
-        } else if (sub === 'authentication-retries') {
-            this.device.ssh.retries = parseInt(parts[3]) || 3;
-            this.write(`SSH auth retries: ${this.device.ssh.retries}`, 'cli-ok');
-        } else {
-            this.write('% Usage: ip ssh version [1|2] | time-out <s> | authentication-retries <n>', 'cli-err');
-        }
-    }
-
-    _showCryptoKey() {
-        const k = this.device.cryptoKey;
-        this.write(`\nCrypto Keys — ${this.device.name}`, 'cli-section');
-        if (!k?.generated) {
-            this.write('  No RSA keys generated.', 'cli-dim');
-            this.write('  Hint: ip domain-name <n>  →  crypto key generate rsa modulus 2048', 'cli-dim');
-            return;
-        }
-        this.write(`  Key name    : ${k.label}`, 'cli-data');
-        this.write(`  Key type    : RSA General Purpose Keys`, 'cli-data');
-        this.write(`  Key size    : ${k.bits} bits`, 'cli-data');
-        this.write(`  Exportable  : No`, 'cli-data');
-        this.write(`  SSH enabled : ${this.device.sshEnabled ? 'Yes (v'+(this.device.ssh?.version||2)+')' : 'No'}`, 'cli-data');
-    }
-
-    _showSSH() {
-        const ssh = this.device.ssh;
-        this.write(`\nSSH — ${this.device.name}`, 'cli-section');
-        if (!this.device.sshEnabled || !this.device.cryptoKey?.generated) {
-            this.write('  SSH Enabled : No', 'cli-warn');
-            this.write('  Quick setup:', 'cli-dim');
-            this.write('    ip domain-name example.com', 'cli-dim');
-            this.write('    crypto key generate rsa modulus 2048', 'cli-dim');
-            this.write('    ip ssh version 2', 'cli-dim');
-            this.write('    username admin privilege 15 secret cisco', 'cli-dim');
-            return;
-        }
-        this.write(`  SSH Enabled    : Yes`, 'cli-ok');
-        this.write(`  Version        : SSHv${ssh?.version || 2}`, 'cli-data');
-        this.write(`  Auth timeout   : ${ssh?.timeout || 120} seconds`, 'cli-data');
-        this.write(`  Auth retries   : ${ssh?.retries || 3}`, 'cli-data');
-        this.write(`  RSA key        : ${this.device.cryptoKey?.label || '—'} (${this.device.cryptoKey?.bits} bits)`, 'cli-data');
-        const active = this.device._sshSessions || [];
-        this.write(`\n  Active sessions: ${active.length}`, active.length ? 'cli-ok' : 'cli-dim');
-        active.forEach((s,i) => this.write(`    ${i+1}  from ${s.from}  user ${s.user}  ${s.uptime}`, 'cli-data'));
-    }
-
-    _showUsers() {
-        const users = this.device.localUsers || {};
-        this.write(`\nLocal Users — ${this.device.name}`, 'cli-section');
-        if (!Object.keys(users).length) {
-            this.write('  No local users configured.', 'cli-dim');
-            this.write('  Hint: username admin privilege 15 secret cisco', 'cli-dim');
-            return;
-        }
-        this.write(`  Username          Privilege  Password`, 'cli-dim');
-        this.write(`  ----------------  ---------  --------`, 'cli-dim');
-        Object.entries(users).forEach(([u, info]) => {
-            this.write(`  ${u.padEnd(18)} ${String(info.privilege||1).padEnd(11)} ${info.password ? '(configured)' : '(none)'}`, 'cli-data');
-        });
-    }
-
-    // ══════════════════════════════════════════════════════
-    //  TELNET / SSH CONNECT (simulado)
-    // ══════════════════════════════════════════════════════
-    _doTelnet(parts) {
-        const targetIP = parts[1];
-        const port     = parseInt(parts[2]) || 23;
-        if (!targetIP) { this.write('Usage: telnet <ip> [port]', 'cli-dim'); return; }
-        const net  = window.simulator;
-        const dest = net?.devices?.find(d => d.ipConfig?.ipAddress === targetIP);
-        if (!dest) {
-            this.write(`Trying ${targetIP}...`, 'cli-warn');
-            setTimeout(() => this.write(`% Connection refused to ${targetIP}:${port} — host unreachable`, 'cli-err'), 800);
-            return;
-        }
-        this.write(`Trying ${targetIP}...`, 'cli-warn');
-        setTimeout(() => {
-            this.write(`Connected to ${dest.name} (${targetIP}).`, 'cli-ok');
-            this.write(`Escape character is '^]'.`, 'cli-dim');
-            this.write(`\n*** Note: Telnet transmits data in cleartext. Consider SSH. ***`, 'cli-warn');
-            this._startRemoteSession(dest, 'telnet', 'admin');
-        }, 600);
-    }
-
-    _doSSHConnect(parts) {
-        // Supports: ssh <ip>  |  ssh -l <user> <ip>  |  ssh <user>@<ip>
-        let user = 'admin', targetIP = null;
-        const lIdx = parts.indexOf('-l');
-        if (lIdx !== -1) {
-            user = parts[lIdx+1]; targetIP = parts[lIdx+2];
-        } else {
-            const atArg = parts.slice(1).find(p => p.includes('@'));
-            if (atArg) { [user, targetIP] = atArg.split('@'); }
-            else { targetIP = parts[1]; user = parts[2] || 'admin'; }
-        }
-        if (!targetIP) { this.write('Usage: ssh -l <user> <ip>  |  ssh <user>@<ip>  |  ssh <ip>', 'cli-dim'); return; }
-        const net  = window.simulator;
-        const dest = net?.devices?.find(d => d.ipConfig?.ipAddress === targetIP);
-        if (!dest) {
-            this.write(`ssh: connect to host ${targetIP} port 22: No route to host`, 'cli-err'); return;
-        }
-        if (!dest.sshEnabled || !dest.cryptoKey?.generated) {
-            this.write(`ssh: connect to host ${targetIP} port 22: Connection refused`, 'cli-err');
-            this.write(`  (SSH not enabled on ${dest.name}. Run 'crypto key generate rsa' on that device)`, 'cli-dim');
-            return;
-        }
-        this.write(`Trying ${targetIP} ...`, 'cli-warn');
-        setTimeout(() => {
-            this.write(`Connected to ${dest.name}.`, 'cli-ok');
-            this.write(`Escape character is '^]'.`, 'cli-dim');
-            this.write(``, '');
-            const users = dest.localUsers || {};
-            if (users[user]) {
-                this.write(`Password: (simulated — authentication accepted)`, 'cli-dim');
-            } else {
-                this.write(`Password: (simulated — user '${user}' accepted)`, 'cli-dim');
-            }
-            this._startRemoteSession(dest, 'ssh', user);
-        }, 750);
-    }
-
-    _startRemoteSession(dest, proto, user) {
-        this._sshSession = { target: dest.name, targetDevice: dest, proto, user: user||'admin' };
-        this.mode = 'ssh';
-        this._remoteCLI = new DeviceCLI(
-            dest,
-            (text, cls) => this.write(text, cls),
-            () => window.simulator?.draw()
-        );
-        this.write(`\n[${proto.toUpperCase()} session established — ${user||'admin'}@${dest.name}]`, 'cli-section');
-        this.write(`  Type 'exit' or 'disconnect' to close session`, 'cli-dim');
-    }
-
-    _sshMode(cmd, parts) {
-        if (!this._remoteCLI) { this._exitSSH(); return; }
-        if (cmd === 'disconnect' || (cmd === 'exit' && this._sshSession)) {
-            this._exitSSH(); return;
-        }
-        // Forward all commands to remote device CLI
-        this._remoteCLI.run([cmd, ...parts.slice(1)].join(' '));
-    }
-
-    _exitSSH() {
-        if (this._sshSession) {
-            this.write(`\n[Connection to ${this._sshSession.target} closed by local host]`, 'cli-warn');
-            this._sshSession = null;
-            this._remoteCLI  = null;
-        }
-        this.mode = 'enable';
-    }
-
 }
 
 // ══════════════════════════════════════════════════════════
