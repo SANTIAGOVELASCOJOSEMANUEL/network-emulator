@@ -345,8 +345,84 @@ class DeviceCLI {
                 }
                 break;
 
+            case 'ipv6':
+                this._ipv6IfMode(parts);
+                break;
+
             default:
-                this._unknown(cmd,['ip','no','shutdown','description','duplex','speed','switchport','encapsulation','spanning-tree']);
+                this._unknown(cmd,['ip','ipv6','no','shutdown','description','duplex','speed','switchport','encapsulation','spanning-tree']);
+        }
+    }
+
+    // ══════════════════════════════════════════════════════
+    //  IPV6 INTERFACE COMMANDS
+    // ══════════════════════════════════════════════════════
+    _ipv6IfMode(parts) {
+        const intf = this.ifContext || this.device;
+        const sub  = parts[1]?.toLowerCase();
+
+        if (sub === 'address') {
+            const cidr = parts[2];
+            if (!cidr) {
+                this.write('% Usage: ipv6 address <address>/<prefix-length>', 'cli-err');
+                return;
+            }
+            if (typeof IPv6Utils === 'undefined') {
+                this.write('% IPv6Utils not loaded — ensure ipv6.js is included before cli.js', 'cli-err');
+                return;
+            }
+            const addr = cidr.includes('/') ? cidr.split('/')[0] : cidr;
+            if (!IPv6Utils.isValid(addr)) {
+                this.write(`% Invalid IPv6 address: ${cidr}`, 'cli-err');
+                return;
+            }
+            try {
+                const plen       = cidr.includes('/') ? parseInt(cidr.split('/')[1], 10) : 64;
+                const compressed = IPv6Utils.compress(addr);
+                intf.ipv6Config  = { address: compressed, prefixLen: plen };
+
+                // Auto link-local EUI-64
+                const mac = intf.mac || this.device.mac;
+                if (mac) intf.ipv6LinkLocal = IPv6Utils.generateLinkLocal(mac);
+
+                // ND cache on device
+                if (!this.device.ndCache) this.device.ndCache = new NDCache();
+
+                // Connected route in IPv6 routing table
+                if (!this.device.routingTableV6) this.device.routingTableV6 = new RoutingTableIPv6();
+                const net = IPv6Utils.networkAddress(compressed, plen);
+                if (net) {
+                    const exists = this.device.routingTableV6.routes.find(
+                        r => r.prefix === net && r.prefixLen === plen
+                    );
+                    if (!exists) this.device.routingTableV6.add(net, plen, '', intf.name || 'int0', 0, 'C');
+                }
+
+                this.write(`${intf.name || this.device.name}: IPv6 address ${compressed}/${plen}`, 'cli-ok');
+                if (intf.ipv6LinkLocal) this.write(`  Link-local: ${intf.ipv6LinkLocal}`, 'cli-dim');
+
+                if (typeof buildRoutingTablesIPv6 === 'function') {
+                    buildRoutingTablesIPv6(window.simulator?.devices || [], window.simulator?.connections || []);
+                }
+                this.redraw && this.redraw();
+            } catch(e) {
+                this.write(`% ${e.message}`, 'cli-err');
+            }
+
+        } else if (sub === 'enable') {
+            if (!this.device.ndCache) this.device.ndCache = new NDCache();
+            if (!this.device.routingTableV6) this.device.routingTableV6 = new RoutingTableIPv6();
+            const mac = intf.mac || this.device.mac;
+            if (mac && typeof IPv6Utils !== 'undefined') {
+                intf.ipv6LinkLocal = IPv6Utils.generateLinkLocal(mac);
+                this.write(`IPv6 enabled on ${intf.name || this.device.name} — link-local: ${intf.ipv6LinkLocal}`, 'cli-ok');
+            } else {
+                this.write(`IPv6 enabled on ${intf.name || this.device.name}`, 'cli-ok');
+            }
+
+        } else {
+            this.write(`% Unknown ipv6 command: ${sub || ''}`, 'cli-err');
+            this.write('  Available: ipv6 address <addr>/<prefix>  |  ipv6 enable', 'cli-dim');
         }
     }
 
@@ -631,6 +707,10 @@ class DeviceCLI {
             this.redraw && this.redraw();
         } else if (sub === 'ip' && parts[2]==='route') {
             this.write(`Static route removed`,'cli-ok');
+        } else if (sub === 'ipv6' && parts[2]==='address' && this.ifContext) {
+            delete this.ifContext.ipv6Config;
+            delete this.ifContext.ipv6LinkLocal;
+            this.write(`IPv6 address removed from ${this.ifContext.name}`,'cli-ok');
         } else if (sub === 'vlan') {
             const vid = parseInt(parts[2]);
             if (vid && this.device.vlans?.[vid]) {
@@ -740,6 +820,9 @@ class DeviceCLI {
 
             case 'bgp':
                 return this._showBGP(parts);
+
+            case 'ipv6':
+                return this._showIPv6(parts);
 
             case 'crypto': case 'key':
                 this._showCryptoKey();
@@ -1141,17 +1224,9 @@ class DeviceCLI {
                 } else {
                     this.write(`% Unknown neighbor sub-command: ${sub}`, 'cli-err');
                 }
-                // Simulate neighbor state machine after config
+                // BGP State Machine real — convergencia con el vecino
                 if (!nb.adminShutdown && nb.remoteAs) {
-                    const remote = window.simulator?.devices?.find(d => d.ipConfig?.ipAddress === ip);
-                    nb.state = remote ? 'Established' : 'Active';
-                    if (nb.state === 'Established') {
-                        nb.uptime = '00:00:05';
-                        nb.prefixesRx = Math.floor(Math.random() * 10);
-                        this.write(`%BGP-5-ADJCHANGE: neighbor ${ip} Up`, 'cli-ok');
-                    } else {
-                        this.write(`%BGP-3-NOTIFICATION: neighbor ${ip} in Active state (no route to peer)`, 'cli-warn');
-                    }
+                    BGPEngine.attemptSession(nb, ip, this.device, bgp, this);
                 }
                 break;
             }
@@ -1163,9 +1238,8 @@ class DeviceCLI {
                     if (sub === 'shutdown' && nb) {
                         nb.adminShutdown = false;
                         nb.state = 'Active';
-                        const remote = window.simulator?.devices?.find(d => d.ipConfig?.ipAddress === ip);
-                        if (remote) { nb.state = 'Established'; nb.uptime = '00:00:01'; }
-                        this.write(`%BGP-5-ADJCHANGE: neighbor ${ip} ${nb.state === 'Established' ? 'Up' : 'Active'}`, nb.state==='Established'?'cli-ok':'cli-warn');
+                        const bgp2 = this.bgpContext || this.device.bgp;
+                        BGPEngine.attemptSession(nb, ip, this.device, bgp2, this);
                     } else if (!sub) {
                         bgp.neighbors = bgp.neighbors.filter(n => n.ip !== ip);
                         this.write(`Neighbor ${ip} removed`, 'cli-ok');
@@ -1213,6 +1287,65 @@ class DeviceCLI {
     }
 
     // ══════════════════════════════════════════════════════
+    //  SHOW IPV6
+    // ══════════════════════════════════════════════════════
+    _showIPv6(parts) {
+        const what = parts[2]?.toLowerCase();
+        const d    = this.device;
+
+        if (what === 'route' || what === 'routes') {
+            this.write(`\nIPv6 Routing Table — ${d.name}`, 'cli-section');
+            this.write('Codes: C-Connected, S-Static, R-RIPng, B-BGP, S*-Default', 'cli-dim');
+            const rtv6 = d.routingTableV6;
+            if (!rtv6 || !rtv6.routes?.length) {
+                this.write('  (no IPv6 routes — use: ipv6 address <addr>/<prefix> on an interface)', 'cli-dim');
+                return;
+            }
+            rtv6.entries().forEach(r => {
+                const type   = (r._type || 'S').padEnd(3);
+                const prefix = `${r.prefix}/${r.prefixLen}`;
+                const via    = r.gateway ? `via ${r.gateway}` : 'directly connected';
+                const iface  = r.iface   ? `, ${r.iface}` : '';
+                this.write(`${type} ${prefix.padEnd(32)} ${via}${iface}`, 'cli-data');
+            });
+
+        } else if (what === 'interface' || what === 'interfaces') {
+            this.write(`\nIPv6 Interface Summary — ${d.name}`, 'cli-section');
+            const ifaces = d.interfaces?.length ? d.interfaces : [d];
+            ifaces.forEach(i => {
+                const glob = i.ipv6Config
+                    ? `${i.ipv6Config.address}/${i.ipv6Config.prefixLen}`
+                    : '(not configured)';
+                const ll   = i.ipv6LinkLocal || '(none)';
+                this.write(`  ${i.name || i.id || 'int0'}`, 'cli-section');
+                this.write(`    Global IPv6:  ${glob}`, 'cli-data');
+                this.write(`    Link-local:   ${ll}`, 'cli-data');
+                this.write(`    Status:       ${i.status || 'up'}`, 'cli-data');
+            });
+
+        } else if (what === 'neighbors') {
+            this.write(`\nIPv6 Neighbor Discovery Cache — ${d.name}`, 'cli-section');
+            this.write('IPv6 Address                               Age  MAC               State       Iface', 'cli-dim');
+            this.write('─'.repeat(84), 'cli-dim');
+            const nd = d.ndCache;
+            if (!nd || typeof nd.entries !== 'function' || !nd.entries().length) {
+                this.write('  (ND cache empty)', 'cli-dim');
+                return;
+            }
+            nd.entries().forEach(e => {
+                const ip    = (e.ipv6 || '').padEnd(42);
+                const age   = String(e.age || 0).padEnd(5);
+                const mac   = (e.mac || '—').padEnd(18);
+                const state = (e.state || 'REACHABLE').padEnd(11);
+                this.write(`${ip} ${age} ${mac} ${state} ${e.iface || '—'}`, 'cli-data');
+            });
+
+        } else {
+            this.write('% Usage: show ipv6 route | interface | neighbors', 'cli-err');
+        }
+    }
+
+    // ══════════════════════════════════════════════════════
     //  SHOW BGP
     // ══════════════════════════════════════════════════════
     _showBGP(parts) {
@@ -1252,27 +1385,31 @@ class DeviceCLI {
             });
 
         } else {
-            // show ip bgp — BGP routing table
-            this.write(`\nBGP table version 1, local router ID ${bgp.routerId || this.device.ipConfig?.ipAddress || '—'}`, 'cli-section');
+            // show ip bgp — BGP routing table (rutas reales propagadas por BGPEngine)
+            this.write(`\nBGP table version ${(bgp._tableVersion||1)}, local router ID ${bgp.routerId || this.device.ipConfig?.ipAddress || '—'}`, 'cli-section');
             this.write(`Status codes: s suppressed, d damped, h history, * valid, > best, i internal`, 'cli-dim');
             this.write(`Origin codes: i - IGP, e - EGP, ? - incomplete`, 'cli-dim');
             this.write(`\n   Network            Next Hop        Metric LocPrf Weight Path`, 'cli-dim');
             let hasEntries = false;
+
+            // Rutas locales (network command)
             (bgp.networks || []).forEach(n => {
                 const cidr = n.mask ? this._maskToCidr(n.mask) : 24;
                 this.write(`*> ${(n.network+'/'+cidr).padEnd(20)} 0.0.0.0         0      100  32768 i`, 'cli-data');
                 hasEntries = true;
             });
-            (bgp.neighbors || []).forEach(n => {
-                if (n.state === 'Established' && n.prefixesRx > 0) {
-                    for (let i = 0; i < n.prefixesRx; i++) {
-                        const fakeNet = `10.${n.remoteAs||0}.${i}.0/24`;
-                        this.write(`*  ${fakeNet.padEnd(20)} ${n.ip.padEnd(16)} 0             0 ${n.remoteAs||'?'} i`, 'cli-data');
-                        hasEntries = true;
-                    }
-                }
+
+            // Rutas aprendidas de vecinos BGP (propagadas por BGPEngine)
+            (bgp.bgpTable || []).forEach(entry => {
+                const flag = entry.best ? '*>' : '* ';
+                const net  = (entry.network + '/' + (entry.cidr||24)).padEnd(20);
+                const nh   = (entry.nextHop || '0.0.0.0').padEnd(16);
+                const path = (entry.asPath || []).join(' ') || entry.origin || 'i';
+                this.write(`${flag} ${net} ${nh} 0             0 ${path} i`, 'cli-data');
+                hasEntries = true;
             });
-            if (!hasEntries) this.write('  (BGP table empty — configure networks or establish neighbors)', 'cli-dim');
+
+            if (!hasEntries) this.write('  (BGP table empty — configure: network <ip> mask <mask>, entonces espera convergencia)', 'cli-dim');
         }
     }
 
@@ -2213,3 +2350,349 @@ document.addEventListener('DOMContentLoaded', () => {
     window.cliPanel = new CLIPanel();
 });
 
+
+// ══════════════════════════════════════════════════════════════════════
+//  BGPEngine — Motor de convergencia BGP real
+//  Propaga rutas entre vecinos Established, actualiza bgpTable,
+//  instala rutas en la routing table IPv4, y mantiene uptime real.
+// ══════════════════════════════════════════════════════════════════════
+
+const BGPEngine = {
+
+    /**
+     * Intenta establecer una sesión BGP con un vecino.
+     * Sigue el state machine: Idle → Connect → Active → OpenSent → Established
+     * Cuando llega a Established, lanza la propagación de rutas.
+     *
+     * @param {object}        nb      — objeto neighbor del bgp config
+     * @param {string}        ip      — IP del vecino
+     * @param {NetworkDevice} device  — router local
+     * @param {object}        bgp     — config bgp del router local
+     * @param {DeviceCLI}    cli     — instancia CLI para escribir output
+     */
+    attemptSession(nb, ip, device, bgp, cli) {
+        // Buscar el dispositivo remoto en el simulador
+        const remote = window.simulator?.devices?.find(d =>
+            d.ipConfig?.ipAddress === ip || d.interfaces?.some(i => i.ipConfig?.ipAddress === ip)
+        );
+
+        nb.state = 'Connect';
+        cli.write(`%BGP-5-NBR_RESET: neighbor ${ip} — attempting connection (Connect)`, 'cli-dim');
+
+        // Simular el handshake con delays progresivos
+        setTimeout(() => {
+            if (nb.adminShutdown) return;
+            nb.state = 'Active';
+            cli.write(`%BGP-4-MSGDUMP: neighbor ${ip} — sending OPEN (AS ${bgp.asn})`, 'cli-dim');
+        }, 300);
+
+        setTimeout(() => {
+            if (nb.adminShutdown) return;
+
+            if (!remote) {
+                // No hay dispositivo con esa IP → quedarse en Active
+                nb.state = 'Active';
+                cli.write(`%BGP-3-NOTIFICATION: neighbor ${ip} Active — no route to peer`, 'cli-warn');
+                return;
+            }
+
+            // Verificar que el remoto tenga BGP configurado con nuestro AS como remoteAs
+            const remoteBgp = remote.bgp;
+            const myIP      = device.ipConfig?.ipAddress;
+            const remoteExpectsUs = remoteBgp?.neighbors?.find(n =>
+                n.ip === myIP && n.remoteAs === bgp.asn
+            );
+
+            if (remoteBgp && !remoteExpectsUs) {
+                // Remoto tiene BGP pero no nos espera → Notification
+                nb.state = 'Active';
+                cli.write(`%BGP-3-NOTIFICATION: neighbor ${ip} sent NOTIFICATION (AS mismatch or not configured)`, 'cli-warn');
+                return;
+            }
+
+            // Verificar conectividad L3 básica (mismo segmento o ruta existente)
+            const reachable = BGPEngine._isReachable(device, remote);
+            if (!reachable) {
+                nb.state = 'Active';
+                cli.write(`%BGP-3-NOTIFICATION: neighbor ${ip} Active — no L3 path to peer`, 'cli-warn');
+                return;
+            }
+
+            // ── Sesión Established ─────────────────────────────────────
+            nb.state       = 'Established';
+            nb.establishedAt = Date.now();
+            nb.uptime      = '00:00:00';
+            nb.prefixesTx  = 0;
+            nb.prefixesRx  = 0;
+
+            // Actualizar uptime cada segundo
+            if (nb._uptimeInterval) clearInterval(nb._uptimeInterval);
+            nb._uptimeInterval = setInterval(() => {
+                if (nb.state !== 'Established') { clearInterval(nb._uptimeInterval); return; }
+                nb.uptime = BGPEngine._formatUptime(Date.now() - nb.establishedAt);
+            }, 1000);
+
+            cli.write(`%BGP-5-ADJCHANGE: neighbor ${ip} Up`, 'cli-ok');
+
+            // Lanzar convergencia BGP
+            BGPEngine.converge(device, bgp, remote, remoteBgp, nb, cli);
+
+        }, 800);
+    },
+
+    /**
+     * Propaga rutas entre los dos routers que acaban de establecer sesión.
+     * Instala rutas en bgpTable y en la routing table IPv4 de cada router.
+     *
+     * @param {NetworkDevice} localDev   — router local
+     * @param {object}        localBgp   — config bgp local
+     * @param {NetworkDevice} remoteDev  — router remoto
+     * @param {object}        remoteBgp  — config bgp remoto (puede ser null)
+     * @param {object}        nb         — objeto neighbor (local → remoto)
+     * @param {DeviceCLI}    cli
+     */
+    converge(localDev, localBgp, remoteDev, remoteBgp, nb, cli) {
+        setTimeout(() => {
+            if (nb.state !== 'Established') return;
+
+            // ── 1. Recolectar rutas que el remoto anuncia ──────────────
+            const remoteRoutes = BGPEngine._collectAdvertisedRoutes(remoteDev, remoteBgp);
+
+            // ── 2. Instalar en bgpTable local ──────────────────────────
+            if (!localBgp.bgpTable) localBgp.bgpTable = [];
+            if (!localBgp._tableVersion) localBgp._tableVersion = 1;
+
+            let newRoutes = 0;
+            remoteRoutes.forEach(route => {
+                const exists = localBgp.bgpTable.find(
+                    e => e.network === route.network && e.cidr === route.cidr
+                );
+                if (!exists) {
+                    localBgp.bgpTable.push({
+                        network : route.network,
+                        cidr    : route.cidr,
+                        nextHop : remoteDev.ipConfig?.ipAddress || nb.ip,
+                        asPath  : [remoteBgp?.asn || nb.remoteAs, ...(route.asPath || [])],
+                        origin  : 'i',
+                        best    : true,
+                        learnedFrom: nb.ip,
+                    });
+                    newRoutes++;
+
+                    // Instalar en routing table IPv4
+                    BGPEngine._installRoute(localDev, route.network, route.cidr,
+                        remoteDev.ipConfig?.ipAddress || nb.ip, remoteBgp?.asn || nb.remoteAs);
+                }
+            });
+
+            nb.prefixesRx = remoteRoutes.length;
+            localBgp._tableVersion++;
+
+            if (newRoutes > 0) {
+                cli.write(`%BGP-5-UPDATE: received ${newRoutes} prefix(es) from ${nb.ip}`, 'cli-ok');
+            }
+
+            // ── 3. Anunciar nuestras rutas al remoto ───────────────────
+            const localRoutes = BGPEngine._collectAdvertisedRoutes(localDev, localBgp);
+            if (remoteBgp) {
+                if (!remoteBgp.bgpTable) remoteBgp.bgpTable = [];
+                const remoteNb = remoteBgp.neighbors?.find(n => n.ip === localDev.ipConfig?.ipAddress);
+
+                localRoutes.forEach(route => {
+                    const exists = remoteBgp.bgpTable.find(
+                        e => e.network === route.network && e.cidr === route.cidr
+                    );
+                    if (!exists) {
+                        remoteBgp.bgpTable.push({
+                            network : route.network,
+                            cidr    : route.cidr,
+                            nextHop : localDev.ipConfig?.ipAddress,
+                            asPath  : [localBgp.asn, ...(route.asPath || [])],
+                            origin  : 'i',
+                            best    : true,
+                            learnedFrom: localDev.ipConfig?.ipAddress,
+                        });
+                        BGPEngine._installRoute(remoteDev, route.network, route.cidr,
+                            localDev.ipConfig?.ipAddress, localBgp.asn);
+                    }
+                });
+
+                nb.prefixesTx = localRoutes.length;
+                if (remoteNb) {
+                    remoteNb.state        = 'Established';
+                    remoteNb.prefixesRx   = localRoutes.length;
+                    remoteNb.prefixesTx   = remoteRoutes.length;
+                    remoteNb.establishedAt = Date.now();
+                    remoteNb.uptime       = '00:00:00';
+                    if (remoteNb._uptimeInterval) clearInterval(remoteNb._uptimeInterval);
+                    remoteNb._uptimeInterval = setInterval(() => {
+                        if (remoteNb.state !== 'Established') { clearInterval(remoteNb._uptimeInterval); return; }
+                        remoteNb.uptime = BGPEngine._formatUptime(Date.now() - remoteNb.establishedAt);
+                    }, 1000);
+                }
+            }
+
+            // ── 4. Propagar a otros vecinos (iBGP/eBGP reflection simple) ──
+            BGPEngine._reflectRoutes(localDev, localBgp, nb.ip);
+
+        }, 400);
+    },
+
+    /**
+     * Propaga las rutas de bgpTable a los demás vecinos Established.
+     * Implementa split-horizon: no re-anuncia a quien nos lo mandó.
+     */
+    _reflectRoutes(device, bgp, excludeIP) {
+        if (!bgp.bgpTable?.length) return;
+        (bgp.neighbors || []).forEach(nb => {
+            if (nb.ip === excludeIP || nb.state !== 'Established' || nb.adminShutdown) return;
+            const remoteDev = window.simulator?.devices?.find(d => d.ipConfig?.ipAddress === nb.ip);
+            if (!remoteDev || !remoteDev.bgp) return;
+
+            bgp.bgpTable.forEach(route => {
+                // No re-anunciar si el AS path ya incluye el AS remoto (loop prevention)
+                if ((route.asPath || []).includes(remoteDev.bgp.asn)) return;
+
+                const exists = remoteDev.bgp.bgpTable?.find(
+                    e => e.network === route.network && e.cidr === route.cidr
+                );
+                if (!exists) {
+                    if (!remoteDev.bgp.bgpTable) remoteDev.bgp.bgpTable = [];
+                    remoteDev.bgp.bgpTable.push({
+                        network     : route.network,
+                        cidr        : route.cidr,
+                        nextHop     : device.ipConfig?.ipAddress,
+                        asPath      : [bgp.asn, ...(route.asPath || [])],
+                        origin      : route.origin || 'i',
+                        best        : true,
+                        learnedFrom : device.ipConfig?.ipAddress,
+                    });
+                    BGPEngine._installRoute(remoteDev, route.network, route.cidr,
+                        device.ipConfig?.ipAddress, bgp.asn);
+                    nb.prefixesTx = (nb.prefixesTx || 0) + 1;
+                }
+            });
+        });
+    },
+
+    /**
+     * Recolecta las rutas que un router anuncia por BGP:
+     * 1. Comandos `network` configurados
+     * 2. Rutas `redistribute connected`
+     * 3. Rutas `redistribute static`
+     * 4. Rutas ya en bgpTable (re-anuncio)
+     */
+    _collectAdvertisedRoutes(device, bgp) {
+        if (!bgp) return [];
+        const routes = [];
+
+        // network commands
+        (bgp.networks || []).forEach(n => {
+            const cidr = n.mask ? n.mask.split('.').reduce((c,o) =>
+                c + (parseInt(o).toString(2).match(/1/g)||[]).length, 0) : 24;
+            routes.push({ network: n.network, cidr, asPath: [] });
+        });
+
+        // redistribute connected
+        if ((bgp.redistributed || []).includes('connected') && device.routingTable) {
+            const rt = device.routingTable instanceof RoutingTable
+                ? device.routingTable : null;
+            if (rt) {
+                rt.entries().filter(r => r._type === 'C' && r.network !== '0.0.0.0').forEach(r => {
+                    const cidr = r.mask.split('.').reduce((c,o) =>
+                        c + (parseInt(o).toString(2).match(/1/g)||[]).length, 0);
+                    if (!routes.find(x => x.network === r.network)) {
+                        routes.push({ network: r.network, cidr, asPath: [] });
+                    }
+                });
+            }
+        }
+
+        // redistribute static
+        if ((bgp.redistributed || []).includes('static') && device.routingTable) {
+            const rt = device.routingTable instanceof RoutingTable ? device.routingTable : null;
+            if (rt) {
+                rt.entries().filter(r => r._static).forEach(r => {
+                    const cidr = r.mask.split('.').reduce((c,o) =>
+                        c + (parseInt(o).toString(2).match(/1/g)||[]).length, 0);
+                    if (!routes.find(x => x.network === r.network)) {
+                        routes.push({ network: r.network, cidr, asPath: [] });
+                    }
+                });
+            }
+        }
+
+        return routes;
+    },
+
+    /**
+     * Instala una ruta aprendida por BGP en la routing table IPv4 del dispositivo.
+     */
+    _installRoute(device, network, cidr, gateway, remoteAsn) {
+        if (!device) return;
+        if (!(device.routingTable instanceof RoutingTable)) {
+            device.routingTable = new RoutingTable();
+        }
+        const mask = BGPEngine._cidrToMask(cidr);
+        const existing = device.routingTable.routes.find(
+            r => r.network === network && r.mask === mask
+        );
+        if (!existing) {
+            device.routingTable.add(network, mask, gateway, 'bgp0', 200);
+            const added = device.routingTable.routes.find(
+                r => r.network === network && r.mask === mask && r.gateway === gateway
+            );
+            if (added) added._type = 'B'; // B = BGP
+        }
+    },
+
+    /**
+     * Verifica si hay conectividad L3 entre dos routers
+     * (mismo segmento IP o ruta existente en la routing table).
+     */
+    _isReachable(srcDev, dstDev) {
+        if (!srcDev.ipConfig || !dstDev.ipConfig) return false;
+        const srcIP  = srcDev.ipConfig.ipAddress;
+        const dstIP  = dstDev.ipConfig.ipAddress;
+        const mask   = srcDev.ipConfig.subnetMask || '255.255.255.0';
+
+        if (!srcIP || !dstIP || srcIP === '0.0.0.0' || dstIP === '0.0.0.0') return false;
+
+        // Mismo segmento
+        if (typeof NetUtils !== 'undefined' && NetUtils.inSameSubnet(srcIP, dstIP, mask)) return true;
+
+        // Ruta en routing table
+        if (srcDev.routingTable instanceof RoutingTable) {
+            const route = srcDev.routingTable.lookup(dstIP);
+            if (route) return true;
+        }
+
+        // Conectividad via engine graph
+        if (window.simulator?.engine) {
+            const path = window.simulator.engine.findRoute(srcDev.id, dstDev.id);
+            if (path && path.length > 0) return true;
+        }
+
+        return false;
+    },
+
+    _cidrToMask(cidr) {
+        const n = (cidr === 0 || cidr === '0') ? 0 : (parseInt(cidr, 10) || 24);
+        const mask = n === 0 ? 0 : ((~0) << (32 - n)) >>> 0;
+        return [(mask >>> 24) & 255, (mask >>> 16) & 255, (mask >>> 8) & 255, mask & 255].join('.');
+    },
+
+    _formatUptime(ms) {
+        const s = Math.floor(ms / 1000);
+        const h = Math.floor(s / 3600);
+        const m = Math.floor((s % 3600) / 60);
+        const sec = s % 60;
+        if (h > 0) return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+        return `${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+    },
+};
+
+window.BGPEngine = BGPEngine;
+
+
+// ══════════════════════════════════════════════════════════════════════

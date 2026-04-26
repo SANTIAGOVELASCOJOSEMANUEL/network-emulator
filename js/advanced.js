@@ -5,59 +5,8 @@
 //  NAT ENGINE
 // ══════════════════════════════════════════════════════════════════════
 
-class NATEngineClass {
-    constructor(simulator) {
-        this.sim = simulator;
-    }
+// NATEngineClass defined in nat.js — removed duplicate declaration
 
-    // Aplica reglas NAT de un dispositivo
-    applyRules(router) {
-        if (!router.natRules?.length) return;
-        if (!router.natTable) router.natTable = {};
-        const privateCIDRs = ['10.','172.16.','172.17.','172.18.','172.19.','172.20.',
-            '172.21.','172.22.','172.23.','172.24.','172.25.','172.26.','172.27.','172.28.',
-            '172.29.','172.30.','172.31.','192.168.'];
-        const isPrivate = ip => privateCIDRs.some(p=>ip.startsWith(p));
-
-        this.sim.devices.forEach(d => {
-            const ip = d.ipConfig?.ipAddress;
-            if (!ip || ip==='0.0.0.0' || !isPrivate(ip)) return;
-            // Check if reachable from this router
-            const ruta = this.sim.engine.findRoute(router.id, d.id);
-            if (!ruta.length) return;
-            // Assign NAT translation
-            const wanIntf = router.interfaces.find(i=>i.natDirection==='outside' || i.type==='WAN');
-            const publicIP = wanIntf?.ipConfig?.ipAddress || router.ipConfig?.ipAddress;
-            if (publicIP && publicIP!=='0.0.0.0') {
-                const port = 49152 + (Object.keys(router.natTable).length % 16383);
-                router.natTable[`${ip}:ANY`] = `${publicIP}:${port}`;
-            }
-        });
-    }
-
-    // Simula traducción de un paquete
-    translate(router, srcIP, dstIP) {
-        if (!router.natTable) return null;
-        const key = `${srcIP}:ANY`;
-        return router.natTable[key] || null;
-    }
-
-    showTable(router, writeCallback) {
-        const write = writeCallback;
-        const tbl = router.natTable || {};
-        write(`\n[NAT] Tabla de traducciones — ${router.name}`,'nat-section');
-        write(`  Protocolo  IP Privada             IP Pública:Puerto`,'nat-dim');
-        write(`  ---------  ---------------------  -----------------------`,'nat-dim');
-        const entries = Object.entries(tbl);
-        if (!entries.length) { write('  (vacía)','nat-dim'); return; }
-        entries.forEach(([priv,pub]) => write(`  IP         ${priv.padEnd(22)} ${pub}`,'nat-data'));
-        write(`\n  Total: ${entries.length} entradas`,'nat-dim');
-    }
-
-    clearTable(router) {
-        router.natTable = {};
-    }
-}
 
 // ══════════════════════════════════════════════════════════════════════
 //  FIREWALL ENGINE

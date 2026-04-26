@@ -253,3 +253,126 @@ function processPacket(packet, device, allDevices = []) {
         return null;
     }
 }
+// ══════════════════════════════════════════════════════════════════════
+//  NetUtils — Extensión IPv6
+//  Añadido en v2: métodos que delegan a IPv6Utils (ipv6.js).
+//  Garantizan que el código existente (engine, routing, cli) pueda
+//  detectar y operar direcciones IPv6 sin reescribir toda la lógica.
+// ══════════════════════════════════════════════════════════════════════
+
+Object.assign(NetUtils, {
+
+    /**
+     * Detecta si una cadena es una dirección IPv6 (con o sin prefixLen).
+     * Usa IPv6Utils si está disponible, de lo contrario regex de respaldo.
+     */
+    isIPv6(addr) {
+        if (!addr || typeof addr !== 'string') return false;
+        if (typeof IPv6Utils !== 'undefined') return IPv6Utils.isValid(addr.split('/')[0]);
+        return addr.includes(':');
+    },
+
+    /**
+     * Detecta si una cadena es IPv4.
+     */
+    isIPv4(addr) {
+        if (!addr || typeof addr !== 'string') return false;
+        return /^\d{1,3}(\.\d{1,3}){3}$/.test(addr.split('/')[0]);
+    },
+
+    /**
+     * inSameSubnet universal: detecta automáticamente IPv4 vs IPv6.
+     *
+     * @param {string} ip
+     * @param {string} networkAddr — red (IPv4) o prefijo IPv6 (ej: "2001:db8::")
+     * @param {string|number} mask — IPv4 mask o prefixLen para IPv6
+     */
+    inSameSubnetAny(ip, networkAddr, mask) {
+        if (this.isIPv6(ip)) {
+            if (typeof IPv6Utils === 'undefined') return false;
+            return IPv6Utils.inPrefix(ip, networkAddr, mask);
+        }
+        return this.inSameSubnet(ip, networkAddr, mask);
+    },
+
+    /**
+     * Dirección de red universal (IPv4 o IPv6).
+     */
+    networkAddressAny(ip, mask) {
+        if (this.isIPv6(ip)) {
+            if (typeof IPv6Utils === 'undefined') return ip;
+            return IPv6Utils.networkAddress(ip, mask);
+        }
+        return this.networkAddress(ip, mask);
+    },
+
+    /**
+     * Genera una IP aleatoria del pool, con soporte IPv6.
+     *
+     * @param {object} pool — { network: '192.168.1.0/24' } o { network: '2001:db8::/64', v6: true }
+     */
+    randomIpFromPoolAny(pool) {
+        if (pool.v6 || (pool.network && pool.network.includes(':'))) {
+            if (typeof IPv6Utils !== 'undefined') return IPv6Utils.randomAddress(pool.network);
+        }
+        return this.randomIpFromPool(pool);
+    },
+});
+
+// ══════════════════════════════════════════════════════════════════════
+//  processPacket — Soporte IPv6 (ND, routing v6)
+// ══════════════════════════════════════════════════════════════════════
+
+/**
+ * Extiende processPacket para manejar paquetes ICMPv6 / Neighbor Discovery.
+ * Se sobrescribe la función original con una versión que delega a la
+ * lógica IPv6 antes de caer en el flujo IPv4.
+ */
+const _processPacketOriginal = typeof processPacket === 'function' ? processPacket : null;
+
+function processPacketV2(packet, device, allDevices = []) {
+    // ICMPv6 / Neighbor Discovery
+    if (packet.tipo === 'icmpv6' || packet.tipo === 'nd' || packet.type === 'ICMPv6') {
+        // Neighbor Solicitation → aprender en NDCache y responder
+        if (device.ndCache instanceof NDCache && packet.srcMAC) {
+            const srcIPv6 = packet.srcIPv6 || packet.origen?.ipv6Config?.address;
+            if (srcIPv6 && typeof IPv6Utils !== 'undefined' && IPv6Utils.isValid(srcIPv6)) {
+                device.ndCache.learn(srcIPv6, packet.srcMAC, packet.iface || 'eth0');
+            }
+        }
+        return { delivered: true, packet };
+    }
+
+    // Paquete con dirección destino IPv6 → routing v6
+    const dstIPv6 = packet.dstIPv6 || (
+        packet.destino?.ipv6Config?.address && typeof IPv6Utils !== 'undefined'
+            ? packet.destino.ipv6Config.address
+            : null
+    );
+
+    if (dstIPv6 && typeof IPv6Utils !== 'undefined' && IPv6Utils.isValid(dstIPv6)) {
+        // Router con tabla IPv6 → longest-prefix match
+        if (['Router', 'RouterWifi', 'Firewall', 'SDWAN'].includes(device.type)) {
+            if (device.routingTableV6 instanceof RoutingTableIPv6) {
+                const route = device.routingTableV6.lookup(dstIPv6);
+                if (route) {
+                    packet.ttl = (packet.ttl || 64) - 1;
+                    if (packet.ttl <= 0) return null;
+                    return { nextHop: route.gateway || dstIPv6, nextHopIPv6: route.gateway, packet };
+                }
+            }
+        }
+        // Endpoint: si la dirección destino es propia → entrega
+        const ownIPv6 = device.ipv6Config?.address;
+        if (ownIPv6 && IPv6Utils.compress(ownIPv6) === IPv6Utils.compress(dstIPv6)) {
+            return { delivered: true, packet };
+        }
+    }
+
+    // Fallback al procesamiento original
+    if (_processPacketOriginal) return _processPacketOriginal(packet, device, allDevices);
+    return { delivered: true, packet };
+}
+
+// Reemplazar la función global si existe
+if (typeof window !== 'undefined') window.processPacket = processPacketV2;

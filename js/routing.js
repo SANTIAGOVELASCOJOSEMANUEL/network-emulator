@@ -280,3 +280,107 @@ function buildRoutingTables(devices, connections, logFn) {
         });
     }
 }
+// ══════════════════════════════════════════════════════════════════════
+//  routing.js — Extensión IPv6
+//  Agrega: routePacketIPv6, nextHopIPv6, soporte dual-stack en routePacket
+// ══════════════════════════════════════════════════════════════════════
+
+/**
+ * Extiende RoutingTable con lookup dual-stack (IPv4/IPv6).
+ * Si destIP es IPv6, delega a RoutingTableIPv6 del mismo dispositivo.
+ */
+const _originalLookup = RoutingTable.prototype.lookup;
+RoutingTable.prototype.lookupDual = function(destIP, device) {
+    if (typeof NetUtils !== 'undefined' && NetUtils.isIPv6 && NetUtils.isIPv6(destIP)) {
+        if (device && device.routingTableV6 instanceof RoutingTableIPv6) {
+            return device.routingTableV6.lookup(destIP);
+        }
+        return null;
+    }
+    return this.lookup(destIP);
+};
+
+/**
+ * routePacketIPv6 — Equivalente a routePacket pero para paquetes IPv6.
+ * Decrementa Hop Limit (TTL en IPv6) y busca en RoutingTableIPv6.
+ *
+ * @param {object}        packet  — { dstIPv6, hopLimit }
+ * @param {NetworkDevice} device  — router con routingTableV6
+ * @returns {{ nextHop: string, packet }|null}
+ */
+function routePacketIPv6(packet, device) {
+    if (!device.routingTableV6) return null;
+    if (!(device.routingTableV6 instanceof RoutingTableIPv6)) return null;
+
+    const dstIPv6 = packet.dstIPv6 || packet.destino?.ipv6Config?.address;
+    if (!dstIPv6) return null;
+    if (typeof IPv6Utils === 'undefined' || !IPv6Utils.isValid(dstIPv6)) return null;
+
+    const route = device.routingTableV6.lookup(dstIPv6);
+    if (!route) return null;
+
+    // Decrementar Hop Limit
+    packet.hopLimit = (packet.hopLimit ?? packet.ttl ?? 64) - 1;
+    if (packet.hopLimit <= 0) return null; // ICMPv6 Time Exceeded (simulado como drop)
+
+    return { nextHop: route.gateway || dstIPv6, nextHopIPv6: route.gateway, route, packet };
+}
+
+/**
+ * nextHopIPv6 — Decide next-hop para un paquete IPv6 en un dispositivo dado.
+ *
+ * @param {NetworkDevice} src
+ * @param {NetworkDevice} destDevice
+ * @param {NetworkDevice[]} allDevices
+ * @returns {NetworkDevice}
+ */
+function nextHopIPv6(src, destDevice, allDevices) {
+    if (!src.ipv6Config || !destDevice.ipv6Config) return destDevice;
+    const destIPv6 = destDevice.ipv6Config.address;
+    const srcIPv6  = src.ipv6Config.address;
+    const plen     = src.ipv6Config.prefixLen ?? 64;
+
+    if (!destIPv6 || !srcIPv6) return destDevice;
+    if (typeof IPv6Utils === 'undefined') return destDevice;
+
+    // Mismo prefijo → entrega directa
+    if (IPv6Utils.inPrefix(destIPv6, srcIPv6, plen)) return destDevice;
+
+    // Diferente prefijo → consultar routing table IPv6
+    if (src.routingTableV6 instanceof RoutingTableIPv6) {
+        const route = src.routingTableV6.lookup(destIPv6);
+        if (route && route.gateway) {
+            const gwDev = allDevices.find(d =>
+                d.ipv6Config?.address && IPv6Utils.compress(d.ipv6Config.address) === IPv6Utils.compress(route.gateway)
+            );
+            return gwDev || destDevice;
+        }
+    }
+
+    return destDevice;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  routePacket — Parchado para dual-stack
+//  La función original solo soporta IPv4. Esta versión detecta el tipo
+//  de paquete y delega a routePacketIPv6 cuando corresponde.
+// ══════════════════════════════════════════════════════════════════════
+
+const _routePacketOriginal = routePacket;
+
+function routePacketDual(packet, device) {
+    // Si el paquete tiene dirección IPv6 destino, usar routing IPv6
+    const dstIPv6 = packet.dstIPv6 || packet.destino?.ipv6Config?.address;
+    if (dstIPv6 && typeof IPv6Utils !== 'undefined' && IPv6Utils.isValid(dstIPv6)) {
+        return routePacketIPv6(packet, device);
+    }
+    // Fallback a IPv4
+    return _routePacketOriginal(packet, device);
+}
+
+// Exponer globalmente
+if (typeof window !== 'undefined') {
+    window.routePacketIPv6   = routePacketIPv6;
+    window.nextHopIPv6       = nextHopIPv6;
+    window.routePacket       = routePacketDual; // reemplaza la original
+}
