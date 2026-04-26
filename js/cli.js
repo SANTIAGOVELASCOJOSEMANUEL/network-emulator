@@ -100,10 +100,11 @@ class DeviceCLI {
             ssh       : () => this._doSSHConnect(parts),
             dial      : () => this._doDial(parts),
             hangup    : () => this._doHangup(),
+            curl      : () => this._doCurl(parts),
             help      : () => this._help(),
         };
         if (cmds[cmd]) cmds[cmd]();
-        else this._unknown(cmd, ['enable','ping','traceroute','show','dial','hangup']);
+        else this._unknown(cmd, ['enable','ping','traceroute','show','curl','dial','hangup']);
     }
 
     // ══════════════════════════════════════════════════════
@@ -127,6 +128,7 @@ class DeviceCLI {
             disable   : () => { this.mode='user'; },
             dial      : () => this._doDial(parts),
             hangup    : () => this._doHangup(),
+            curl      : () => this._doCurl(parts),
         };
         if (cmds[cmd]) cmds[cmd]();
         else { this._privExec(parts); }
@@ -180,6 +182,12 @@ class DeviceCLI {
                 if (parts[1]==='dhcp') {
                     this.write('DHCP service enabled','cli-ok');
                     if (this.device.dhcpServer) this.device.dhcpServer.enabled = true;
+                } else if (parts[1]==='apache2' || parts[1]==='http') {
+                    if (!window.HTTPEngine) { this.write('% HTTPEngine no disponible','cli-err'); break; }
+                    window.HTTPEngine.installApache(this.device);
+                    this.write(`Apache2 instalado en ${this.device.name} — escuchando en :80`,'cli-ok');
+                    this.write(`  Página por defecto disponible en /`,'cli-dim');
+                    this.write(`  Use:  ip http title <texto>   para personalizar`,'cli-dim');
                 }
                 break;
 
@@ -634,6 +642,9 @@ class DeviceCLI {
             case 'access-list':
                 return this._configACL(parts.slice(1));
 
+            case 'iptables':
+                return this._configIptables(parts.slice(1));
+
             case 'domain-name':
                 this.device.domainName = parts[2];
                 this.write(`Domain name: ${parts[2]}`,'cli-ok');
@@ -642,8 +653,86 @@ class DeviceCLI {
             case 'ssh':
                 return this._configSSH(parts);
 
+            case 'http':
+                return this._configHTTP(parts);
+
             default:
                 this._bad();
+        }
+    }
+
+    _configHTTP(parts) {
+        // parts: ['ip', 'http', <subcommand>, ...]
+        const sub = parts[2]?.toLowerCase();
+        const dev = this.device;
+
+        if (!window.HTTPEngine) { this.write('% HTTPEngine no disponible','cli-err'); return; }
+        if (!window.HTTPEngine.isRunning(dev)) {
+            this.write('% Apache2 no está activo en este dispositivo','cli-err');
+            this.write('  Ejecuta primero:  service apache2','cli-dim');
+            return;
+        }
+
+        switch(sub) {
+            case 'title': {
+                // ip http title <texto libre>
+                const title = parts.slice(3).join(' ');
+                if (!title) { this.write('Usage: ip http title <texto>','cli-dim'); return; }
+                const ip = dev.ipConfig?.ipAddress || '0.0.0.0';
+                const html = `<!DOCTYPE html><html lang="es">
+<head><meta charset="UTF-8"><title>${title}</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;display:flex;align-items:center;justify-content:center}
+  .card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:2rem 2.5rem;max-width:560px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+  .badge{display:inline-flex;align-items:center;gap:.4rem;background:#166534;color:#bbf7d0;font-size:.75rem;font-weight:600;padding:.25rem .75rem;border-radius:999px;margin-bottom:1rem}
+  .dot{width:6px;height:6px;background:#4ade80;border-radius:50%;animation:blink 1.2s infinite}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+  h1{font-size:1.6rem;font-weight:700;color:#f1f5f9;margin-bottom:.5rem}
+  .sub{color:#94a3b8;font-size:.9rem;margin-bottom:1.5rem}
+  .info{display:flex;gap:1rem;font-size:.8rem;color:#64748b;font-family:monospace}
+  .footer{border-top:1px solid #334155;padding-top:1rem;margin-top:1.5rem;font-size:.78rem;color:#475569;text-align:center}
+</style></head>
+<body><div class="card">
+  <div class="badge"><span class="dot"></span> Apache2 activo</div>
+  <h1>${title}</h1>
+  <p class="sub">Servidor: <b style="color:#38bdf8">${dev.name}</b></p>
+  <div class="info"><span>IP: ${ip}</span><span>Puerto: 80/tcp</span><span>Estado: RUNNING</span></div>
+  <div class="footer">Apache2 SimuladorRed/7.0</div>
+</div></body></html>`;
+                window.HTTPEngine.setPage(dev, '/', html);
+                this.write(`Página / actualizada con título: "${title}"`, 'cli-ok');
+                break;
+            }
+
+            case 'page': {
+                // ip http page <ruta> <html inline simple>
+                // ip http page /about <h1>Hola</h1>
+                const ruta = parts[3];
+                const contenido = parts.slice(4).join(' ');
+                if (!ruta) { this.write('Usage: ip http page <ruta> <html>','cli-dim'); return; }
+                const html = contenido
+                    ? `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${dev.name}</title>
+<style>body{font-family:system-ui;background:#0f172a;color:#e2e8f0;padding:2rem;max-width:800px;margin:0 auto}</style>
+</head><body>${contenido}</body></html>`
+                    : `<!DOCTYPE html><html><head><title>${ruta}</title></head><body><h1>${ruta}</h1><p>Página vacía</p></body></html>`;
+                window.HTTPEngine.setPage(dev, ruta, html);
+                this.write(`Página "${ruta}" creada en ${dev.name}`, 'cli-ok');
+                break;
+            }
+
+            case 'show': case 'pages': case 'list': {
+                const pages = window.HTTPEngine.listPages(dev);
+                this.write(`\n[HTTP] Páginas en ${dev.name}:`, 'cli-section');
+                pages.forEach(p => this.write(`  GET  ${p}`, 'cli-data'));
+                break;
+            }
+
+            default:
+                this.write('Subcomandos disponibles:', 'cli-dim');
+                this.write('  ip http title <texto>          — cambia el título/contenido de /', 'cli-dim');
+                this.write('  ip http page <ruta> [html]     — crea una nueva página', 'cli-dim');
+                this.write('  ip http show                   — lista las páginas activas', 'cli-dim');
         }
     }
 
@@ -856,9 +945,90 @@ class DeviceCLI {
             case 'class-map':
                 return this._showClassMap();
 
+            case 'firewall':
+                return this._showFirewall(parts[2] || 'filter');
+
+            case 'firewall-log':
+                return this._showFirewallLog();
+
             default:
-                this.write(`  show interfaces | ip route | ip interface | vlan | version | running-config | spanning-tree | arp | dhcp | cdp neighbors | bgp | bgp summary | ssh | users | crypto key | sip | qos | policy-map`,'cli-dim');
+                this.write(`  show interfaces | ip route | ip interface | vlan | version | running-config | spanning-tree | arp | dhcp | cdp neighbors | bgp | bgp summary | ssh | users | crypto key | sip | qos | policy-map | firewall | firewall-log`,'cli-dim');
         }
+    }
+
+
+    // ══════════════════════════════════════════════════════
+    //  IPTABLES  — firewall real portado de PackeTTrino
+    // ══════════════════════════════════════════════════════
+
+    _configIptables(parts) {
+        const fw = window.FirewallEngine;
+        if (!fw) { this.write('% FirewallEngine no disponible','cli-err'); return; }
+        const d = this.device;
+        if (!['Firewall','Router','RouterWifi','SDWAN'].includes(d.type)) {
+            this.write('% iptables solo disponible en Firewall, Router y SDWAN','cli-err');
+            return;
+        }
+        const opts = {};
+        let i = 0;
+        while (i < parts.length) {
+            switch(parts[i]) {
+                case '-t':  opts.table    = parts[++i]; break;
+                case '-A':  opts.chain    = parts[++i]; break;
+                case '-F':  opts._flush   = parts[++i] || 'ALL'; break;
+                case '-P':  opts._policy  = { chain: parts[++i], action: parts[++i] }; break;
+                case '-p':  opts.proto    = parts[++i]; break;
+                case '-s':  opts.srcIP    = parts[++i]; break;
+                case '-d':  opts.dstIP    = parts[++i]; break;
+                case '-i':  opts.inIface  = parts[++i]; break;
+                case '-o':  opts.outIface = parts[++i]; break;
+                case '--sport':          opts.sport = parts[++i]; break;
+                case '--dport':          opts.dport = parts[++i]; break;
+                case '--to-source':      opts.toSrc = parts[++i]; break;
+                case '--to-destination': opts.toDst = parts[++i]; break;
+                case '-j':  opts.action   = parts[++i]; break;
+            }
+            i++;
+        }
+        try {
+            if (opts._policy) {
+                fw.setDefaultPolicy(d, opts._policy.chain, opts._policy.action);
+                this.write(`Policy ${opts._policy.chain} -> ${opts._policy.action}`,'cli-ok');
+                return;
+            }
+            if (opts._flush !== undefined) {
+                fw.clearChain(d, opts._flush, opts.table || 'filter');
+                this.write(`Cadena ${opts._flush || 'ALL'} limpiada`,'cli-ok');
+                return;
+            }
+            if (!opts.chain || !opts.action) {
+                this.write('Uso: iptables [-t filter|nat] -A <CHAIN> [-p tcp|udp|icmp] [-s src] [-d dst] [-i in] [-o out] [--sport p] [--dport p] -j ACCEPT|DROP|REJECT|SNAT|DNAT','cli-warn');
+                return;
+            }
+            const rule = fw.addRule(d, opts);
+            this.write(`Regla añadida: ${rule.toString()}`,'cli-ok');
+        } catch(e) {
+            this.write(`% ${e.message}`,'cli-err');
+        }
+    }
+
+    _showFirewall(table = 'filter') {
+        const fw = window.FirewallEngine;
+        if (!fw) { this.write('% FirewallEngine no disponible','cli-err'); return; }
+        fw.showRules(this.device, table).forEach(l => {
+            if (l.startsWith('Chain') || l.startsWith('Firewall') || l.startsWith('[TABLE'))
+                this.write(l,'cli-section');
+            else if (l.startsWith('  (') || l === '')
+                this.write(l,'cli-dim');
+            else
+                this.write(l,'cli-data');
+        });
+    }
+
+    _showFirewallLog() {
+        const fw = window.FirewallEngine;
+        if (!fw) { this.write('% FirewallEngine no disponible','cli-err'); return; }
+        fw.showLog(this.device, 30).forEach(l => this.write(l,'cli-data'));
     }
 
     _showRunningConfig() {
@@ -2157,6 +2327,95 @@ class DeviceCLI {
             this.write(`\n  Class Map ${name} (${cm.matchType||'match-all'})`, 'cli-ok');
             if (!cm.matches.length) { this.write('    (no match criteria)','cli-dim'); return; }
             cm.matches.forEach(m => this.write(`    match ${m.type} ${m.value}`, 'cli-data'));
+        });
+    }
+
+    // ══════════════════════════════════════════════════════
+    //  CURL — cliente HTTP con visualizador de navegador
+    // ══════════════════════════════════════════════════════
+    _doCurl(parts) {
+        // Usage: curl <ip|hostname> [path]
+        // Example: curl 192.168.1.10  /  curl 192.168.1.10 /index.html
+        let target = parts[1];
+        if (!target) {
+            this.write('Usage: curl <ip|hostname> [ruta]', 'cli-dim');
+            this.write('  Ejemplo: curl 192.168.1.10', 'cli-dim');
+            this.write('  Ejemplo: curl 192.168.1.10 /pagina.html', 'cli-dim');
+            return;
+        }
+        // Strip http:// if user typed it
+        target = target.replace(/^https?:\/\//, '');
+        const path = parts[2] || '/';
+
+        const net = window.simulator;
+        if (!net) return;
+
+        const src = this.device;
+        if (!src.ipConfig?.ipAddress) {
+            this.write('❌ Este dispositivo no tiene IP configurada', 'cli-err');
+            return;
+        }
+
+        // Resolve target: try IP match first, then DNS name
+        let dstDev = net.devices.find(d => d.ipConfig?.ipAddress === target);
+        let dnsName = target;
+
+        if (!dstDev) {
+            // Try DNS resolution
+            if (window.DNSEngine) {
+                const resolved = window.DNSEngine.resolveGlobal(target, net.devices);
+                if (resolved) {
+                    dstDev = net.devices.find(d => d.ipConfig?.ipAddress === resolved.ip);
+                    dnsName = target;
+                }
+            }
+        }
+
+        if (!dstDev) {
+            this.write(`❌ No se encontró host: ${target}`, 'cli-err');
+            this.write(`  Verifica la IP o que exista un registro DNS`, 'cli-dim');
+            return;
+        }
+
+        if (!window.HTTPEngine) {
+            this.write('❌ HTTPEngine no disponible', 'cli-err');
+            return;
+        }
+
+        if (!window.HTTPEngine.isRunning(dstDev)) {
+            this.write(`❌ Apache2 no está activo en ${dstDev.name}`, 'cli-err');
+            this.write(`  En el servidor ejecuta:  enable → configure terminal → service apache2`, 'cli-dim');
+            return;
+        }
+
+        this.write(`\n  % Conectando a ${target}${path} ...`, 'cli-section');
+
+        // animateFn: wraps net.sendPacket to animate an http packet
+        const animateFn = (pkt) => new Promise(resolve => {
+            if (pkt && net.sendPacket) {
+                net.sendPacket(src, dstDev, pkt.tipo || 'data', 64, { ttl: 64 });
+            }
+            setTimeout(resolve, 400);
+        });
+
+        const logFn = (msg) => this.write('  ' + msg, 'cli-data');
+
+        window.HTTPEngine.request(
+            src, dstDev,
+            { method: 'GET', path, dnsName },
+            net.engine,
+            animateFn,
+            logFn
+        ).then(result => {
+            if (!result) return;
+            if (window.SimBrowser) {
+                window.SimBrowser.show(result, src.name);
+                this.write(`\n  ✅ Respuesta recibida — abriendo navegador...`, 'cli-ok');
+            } else {
+                this.write(`\n  ✅ HTTP ${result.statusCode} — ${result.requestTime}ms`, 'cli-ok');
+            }
+        }).catch(err => {
+            this.write(`  ❌ Error: ${err.message}`, 'cli-err');
         });
     }
 
