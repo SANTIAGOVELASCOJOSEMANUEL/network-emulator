@@ -87,21 +87,27 @@ function nextHop(src, destDevice, allDevices) {
  * @returns {{ nextHop: string, packet }|null}
  */
 function routePacket(packet, device) {
-    if (!device.routingTable) return null;
+    const dstIP = packet.dstIP || packet.destino?.ipConfig?.ipAddress;
 
-    const rt = device.routingTable instanceof RoutingTable
-        ? device.routingTable
-        : null;
+    // Si el dispositivo tiene RoutingTable, usarla (longest-prefix match)
+    if (device.routingTable instanceof RoutingTable) {
+        const route = device.routingTable.lookup(dstIP);
+        if (route) {
+            packet.ttl = (packet.ttl ?? 64) - 1;
+            if (packet.ttl <= 0) return null;
+            return { nextHop: route.gateway, packet };
+        }
+    }
 
-    if (!rt) return null;
+    // Fallback: usar gateway configurado en ipConfig (router sin tabla explícita)
+    const gw = device.ipConfig?.gateway;
+    if (gw && gw !== '0.0.0.0') {
+        packet.ttl = (packet.ttl ?? 64) - 1;
+        if (packet.ttl <= 0) return null;
+        return { nextHop: gw, packet };
+    }
 
-    const route = rt.lookup(packet.dstIP || packet.destino?.ipConfig?.ipAddress);
-    if (!route) return null;
-
-    packet.ttl--;
-    if (packet.ttl <= 0) return null;
-
-    return { nextHop: route.gateway, packet };
+    return null;
 }
 
 /**
@@ -141,16 +147,33 @@ function buildRoutingTables(devices, connections, logFn) {
         staticRoutes.forEach(r => router.routingTable.routes.push(r));
 
         // Redes directamente conectadas (métrica 0, tipo 'C' = connected)
-        // Buscar vecinos directos para obtener IPs de interfaz del router
+        // IMPORTANTE: usar SIEMPRE la IP de la interfaz específica del enlace,
+        // nunca el ipConfig global del router. En routers multi-interfaz el global
+        // puede pertenecer a una sola subred y romper las rutas de las demás.
         connections.forEach(conn => {
-            let myIntf = null, neighborDev = null;
-            if (conn.from === router) { myIntf = conn.fromInterface; neighborDev = conn.to; }
-            else if (conn.to === router) { myIntf = conn.toInterface; neighborDev = conn.from; }
+            let myIntf = null, neighborDev = null, neighborIntf = null;
+            if (conn.from === router) {
+                myIntf      = conn.fromInterface;
+                neighborDev = conn.to;
+                neighborIntf = conn.toInterface;
+            } else if (conn.to === router) {
+                myIntf      = conn.toInterface;
+                neighborDev = conn.from;
+                neighborIntf = conn.fromInterface;
+            }
             if (!myIntf) return;
 
-            // IP de la interfaz del router en este enlace
-            const myIP = myIntf.ipConfig?.ipAddress || router.ipConfig?.ipAddress;
-            const myMask = myIntf.ipConfig?.subnetMask || router.ipConfig?.subnetMask || '255.255.255.0';
+            // IP de la interfaz del router en este enlace.
+            // Solo caer al ipConfig global si la interfaz no tiene IP propia
+            // Y únicamente cuando el router tiene una sola interfaz activa.
+            const myIP   = myIntf.ipConfig?.ipAddress
+                        || (router.interfaces.filter(i => i.ipConfig?.ipAddress && i.ipConfig.ipAddress !== '0.0.0.0').length === 1
+                            ? router.ipConfig?.ipAddress
+                            : null);
+            const myMask = myIntf.ipConfig?.subnetMask
+                        || router.ipConfig?.subnetMask
+                        || '255.255.255.0';
+
             if (myIP && myIP !== '0.0.0.0') {
                 const net = NetUtils.networkAddress(myIP, myMask);
                 if (!router.routingTable.routes.some(r => r.network === net && r.mask === myMask)) {
@@ -159,14 +182,18 @@ function buildRoutingTables(devices, connections, logFn) {
                 }
             }
 
-            // Red del vecino directamente conectado (métrica 1, tipo 'C')
-            const nIP   = neighborDev.ipConfig?.ipAddress;
-            const nMask = neighborDev.ipConfig?.subnetMask || '255.255.255.0';
+            // Red del vecino directamente conectado.
+            // Preferir la IP de la interfaz del vecino sobre su ipConfig global,
+            // igual que hacemos con el router propio.
+            const nIP   = neighborIntf?.ipConfig?.ipAddress || neighborDev.ipConfig?.ipAddress;
+            const nMask = neighborIntf?.ipConfig?.subnetMask
+                       || neighborDev.ipConfig?.subnetMask
+                       || '255.255.255.0';
             if (nIP && nIP !== '0.0.0.0') {
                 const net = NetUtils.networkAddress(nIP, nMask);
                 if (!router.routingTable.routes.some(r => r.network === net)) {
                     const gw = routerTypes.includes(neighborDev.type) ? nIP : '';
-                    router.routingTable.add(net, nMask, gw, myIntf?.name || '', 1);
+                    router.routingTable.add(net, nMask, gw, myIntf.name, 1);
                     router.routingTable.routes[router.routingTable.routes.length - 1]._type = 'C';
                 }
             }
@@ -184,6 +211,8 @@ function buildRoutingTables(devices, connections, logFn) {
         iteration++;
 
         // Construir mapa de adyacencias: router → [{ neighbor, gwIP, intfName }]
+        // gwIP = IP de la interfaz del VECINO que da hacia ese router (el next-hop real).
+        // Usar la IP de la interfaz específica del enlace, no el ipConfig global.
         const adjacency = new Map();
         routers.forEach(r => adjacency.set(r.id, []));
 
@@ -192,19 +221,25 @@ function buildRoutingTables(devices, connections, logFn) {
             const isToRouter   = routerTypes.includes(conn.to.type);
 
             if (isFromRouter) {
-                const gwIP = conn.to.ipConfig?.ipAddress;
+                // gwIP = IP de la interfaz del vecino (conn.to) que conecta hacia conn.from
+                const gwIP = conn.toInterface?.ipConfig?.ipAddress
+                          || conn.to.ipConfig?.ipAddress
+                          || '';
                 adjacency.get(conn.from.id)?.push({
-                    neighbor  : conn.to,
-                    gwIP      : gwIP || '',
-                    intfName  : conn.fromInterface?.name || '',
+                    neighbor : conn.to,
+                    gwIP,
+                    intfName : conn.fromInterface?.name || '',
                 });
             }
             if (isToRouter) {
-                const gwIP = conn.from.ipConfig?.ipAddress;
+                // gwIP = IP de la interfaz del vecino (conn.from) que conecta hacia conn.to
+                const gwIP = conn.fromInterface?.ipConfig?.ipAddress
+                          || conn.from.ipConfig?.ipAddress
+                          || '';
                 adjacency.get(conn.to.id)?.push({
-                    neighbor  : conn.from,
-                    gwIP      : gwIP || '',
-                    intfName  : conn.toInterface?.name || '',
+                    neighbor : conn.from,
+                    gwIP,
+                    intfName : conn.toInterface?.name || '',
                 });
             }
         });

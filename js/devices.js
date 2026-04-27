@@ -20,16 +20,36 @@ function isValidIP(ip) {
  * @param {string} mask
  * @returns {boolean}
  */
+/**
+ * Valida que una máscara de subred sea correcta.
+ * Una máscara válida es cualquier secuencia contigua de bits 1 seguida de bits 0
+ * en su representación de 32 bits (e.g. /0 a /32).
+ * Acepta tanto notación decimal punteada ("255.255.255.0") como prefijo CIDR ("/24").
+ * @param {string} mask
+ * @returns {boolean}
+ */
 function isValidMask(mask) {
-    const valid = [
-        '255.255.255.0','255.255.0.0','255.0.0.0',
-        '255.255.255.128','255.255.255.192','255.255.255.224',
-        '255.255.255.240','255.255.255.248','255.255.255.252',
-        '255.255.128.0','255.255.192.0','255.255.224.0',
-        '255.255.240.0','255.255.248.0','255.255.252.0',
-        '255.255.254.0','0.0.0.0',
-    ];
-    return valid.includes(mask);
+    if (!mask) return false;
+
+    // Aceptar notación CIDR: /0 a /32
+    if (/^\/?\d{1,2}$/.test(mask.trim())) {
+        const bits = parseInt(mask.replace('/', ''), 10);
+        return bits >= 0 && bits <= 32;
+    }
+
+    // Notación decimal punteada
+    if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(mask)) return false;
+
+    const octets = mask.split('.').map(Number);
+    if (octets.some(o => o < 0 || o > 255)) return false;
+
+    // Convertir a entero de 32 bits
+    const n = (octets[0] << 24 | octets[1] << 16 | octets[2] << 8 | octets[3]) >>> 0;
+
+    // Una máscara válida en binario es: 1...10...0
+    // Invertida + 1 debe ser potencia de 2 (o cero para /0 y /32)
+    const inv = (~n) >>> 0;
+    return inv === 0 || (inv & (inv + 1)) === 0;
 }
 
 /**
@@ -78,12 +98,66 @@ function applyIPConfig(device, ip, mask, gateway, allDevices = []) {
 // ────────────────────────────────────────────────────────────────────
 
 class NetworkDevice {
-    constructor(id,name,type,x,y){this.id=id;this.name=name;this.type=type;this.x=x;this.y=y;this.interfaces=[];this.selected=false;this.status='up';this.config={hostname:name};}
-    addInterface(name,type,speed,mediaType='cobre'){const i={name,type,speed,mediaType,connectedTo:null,connectedInterface:null,ipConfig:null,vlan:1,status:'up',number:this.interfaces.length,mac:this._mac()};this.interfaces.push(i);return i;}
-    _mac(){const h='0123456789ABCDEF';let m='';for(let i=0;i<6;i++){m+=h[Math.floor(Math.random()*16)]+h[Math.floor(Math.random()*16)];if(i<5)m+=':';}return m;}
-    getAvailableInterfaces(){return this.interfaces.filter(i=>!i.connectedTo);}
-    getInterfaceByName(n){return this.interfaces.find(i=>i.name===n);}
-    disconnectInterface(intf){if(intf.connectedTo){const o=intf.connectedInterface;if(o){o.connectedTo=null;o.connectedInterface=null;}intf.connectedTo=null;intf.connectedInterface=null;return true;}return false;}
+    constructor(id, name, type, x, y) {
+        this.id         = id;
+        this.name       = name;
+        this.type       = type;
+        this.x          = x;
+        this.y          = y;
+        this.interfaces = [];
+        this.selected   = false;
+        this.status     = 'up';
+        this.config     = { hostname: name };
+    }
+
+    addInterface(name, type, speed, mediaType = 'cobre') {
+        const intf = {
+            name,
+            type,
+            speed,
+            mediaType,
+            connectedTo       : null,
+            connectedInterface: null,
+            ipConfig          : null,
+            vlan              : 1,
+            status            : 'up',
+            number            : this.interfaces.length,
+            mac               : this._mac(),
+        };
+        this.interfaces.push(intf);
+        return intf;
+    }
+
+    /** Genera una MAC address aleatoria en formato XX:XX:XX:XX:XX:XX */
+    _mac() {
+        const h = '0123456789ABCDEF';
+        let m = '';
+        for (let i = 0; i < 6; i++) {
+            m += h[Math.floor(Math.random() * 16)] + h[Math.floor(Math.random() * 16)];
+            if (i < 5) m += ':';
+        }
+        return m;
+    }
+
+    getAvailableInterfaces() {
+        return this.interfaces.filter(i => !i.connectedTo);
+    }
+
+    getInterfaceByName(name) {
+        return this.interfaces.find(i => i.name === name);
+    }
+
+    disconnectInterface(intf) {
+        if (!intf.connectedTo) return false;
+        const other = intf.connectedInterface;
+        if (other) {
+            other.connectedTo        = null;
+            other.connectedInterface = null;
+        }
+        intf.connectedTo        = null;
+        intf.connectedInterface = null;
+        return true;
+    }
 }
 class Internet extends NetworkDevice {
     constructor(id,name,x,y){

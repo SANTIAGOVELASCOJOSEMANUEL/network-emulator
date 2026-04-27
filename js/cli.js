@@ -94,17 +94,20 @@ class DeviceCLI {
         const cmds = {
             enable    : () => { this.mode = 'enable'; },
             ping      : () => this._doPing(parts),
+            ping6     : () => this._doPing6(parts),
             traceroute: () => this._doTraceroute(parts),
+            traceroute6: () => this._doTraceroute6(parts),
             show      : () => this._doShow(parts),
             telnet    : () => this._doTelnet(parts),
             ssh       : () => this._doSSHConnect(parts),
             dial      : () => this._doDial(parts),
             hangup    : () => this._doHangup(),
             curl      : () => this._doCurl(parts),
+            tcp       : () => this._doTCPConnect(parts),
             help      : () => this._help(),
         };
         if (cmds[cmd]) cmds[cmd]();
-        else this._unknown(cmd, ['enable','ping','traceroute','show','curl','dial','hangup']);
+        else this._unknown(cmd, ['enable','ping','ping6','traceroute','tcp connect','show','curl','dial','hangup']);
     }
 
     // ══════════════════════════════════════════════════════
@@ -116,7 +119,9 @@ class DeviceCLI {
             conf      : () => { this.mode='config'; },
             show      : () => this._doShow(parts),
             ping      : () => this._doPing(parts),
+            ping6     : () => this._doPing6(parts),
             traceroute: () => this._doTraceroute(parts),
+            traceroute6: () => this._doTraceroute6(parts),
             reload    : () => { this.write('Recargando dispositivo...','cli-warn'); setTimeout(()=>this.write('Done.'), 1200); },
             telnet    : () => this._doTelnet(parts),
             ssh       : () => this._doSSHConnect(parts),
@@ -129,6 +134,7 @@ class DeviceCLI {
             dial      : () => this._doDial(parts),
             hangup    : () => this._doHangup(),
             curl      : () => this._doCurl(parts),
+            tcp       : () => this._doTCPConnect(parts),
         };
         if (cmds[cmd]) cmds[cmd]();
         else { this._privExec(parts); }
@@ -913,6 +919,9 @@ class DeviceCLI {
             case 'ipv6':
                 return this._showIPv6(parts);
 
+            case 'tcp':
+                return this._showTCP(parts);
+
             case 'crypto': case 'key':
                 this._showCryptoKey();
                 break;
@@ -1333,10 +1342,10 @@ class DeviceCLI {
 
     _help() {
         const helps = {
-            user:         ['enable','ping <ip>','traceroute <ip>','show interfaces','show version','dial <ext>','hangup'],
-            enable:       ['configure terminal','show running-config','show ip route','show ip interface','show vlan','copy run start','write','ping <ip>','traceroute <ip>','clear ip arp','reload','dial <ext>','hangup'],
+            user:         ['enable','ping <ip>','ping6 <ipv6>','traceroute <ip>','traceroute6 <ipv6>','tcp connect <ip> [port]','show interfaces','show version','dial <ext>','hangup'],
+            enable:       ['configure terminal','show running-config','show ip route','show ip interface','show ipv6 route','show ipv6 interface','show ipv6 neighbors','show tcp sessions','show vlan','copy run start','write','ping <ip>','ping6 <ipv6>','traceroute <ip>','traceroute6 <ipv6>','tcp connect <ip> [port]','clear ip arp','reload','dial <ext>','hangup'],
             config:       ['hostname <n>','interface <intf>','ip route <net> <mask> <gw>','ip dhcp pool <n>','ip nat inside source list <n> interface <intf> overload','vlan <id>','router ospf <pid>','no <cmd>','telephony-service','ephone-dn <n>','ephone <n>','class-map <n>','policy-map <n>','qos apply policy-map <n> interface <intf> [in|out]'],
-            if:           ['ip address <ip> <mask>','ip address dhcp','no shutdown','shutdown','switchport mode [access|trunk]','switchport access vlan <id>','encapsulation dot1q <vlan>','description <text>','ip nat [inside|outside]','no ip address'],
+            if:           ['ip address <ip> <mask>','ip address dhcp','ipv6 address <addr>/<prefix>','ipv6 enable','no shutdown','shutdown','switchport mode [access|trunk]','switchport access vlan <id>','encapsulation dot1q <vlan>','description <text>','ip nat [inside|outside]','no ip address'],
             vlan:         ['name <n>','state [active|suspend]'],
             router:       ['network <ip> <wildcard> area <id>','router-id <id>','passive-interface <intf>','redistribute connected'],
             bgp:          ['neighbor <ip> remote-as <asn>','neighbor <ip> description <text>','neighbor <ip> shutdown','network <ip> mask <mask>','redistribute connected','redistribute static','bgp router-id <id>','aggregate-address <ip> <mask>'],
@@ -1516,8 +1525,250 @@ class DeviceCLI {
     }
 
     // ══════════════════════════════════════════════════════
-    //  SHOW BGP
+    //  SHOW TCP
     // ══════════════════════════════════════════════════════
+    _showTCP(parts) {
+        const sub = parts[2]?.toLowerCase();
+        const engine = window.TCPEngine;
+
+        if (!engine) {
+            this.write('% TCPEngine not available', 'cli-err');
+            return;
+        }
+
+        if (!sub || sub === 'sessions' || sub === 'session') {
+            this.write(`\nTCP Sessions — ${this.device.name}`, 'cli-section');
+            this.write('Proto  Local Address          Foreign Address        State', 'cli-dim');
+            this.write('─'.repeat(62), 'cli-dim');
+
+            const sessions = engine.getSessionsForDevice
+                ? engine.getSessionsForDevice(this.device)
+                : [...(engine._sessions?.values() || [])].filter(s =>
+                    s.srcIP === this.device.ipConfig?.ipAddress ||
+                    s.dstIP === this.device.ipConfig?.ipAddress
+                  );
+
+            if (!sessions.length) {
+                this.write('  (no active TCP sessions)', 'cli-dim');
+                return;
+            }
+            sessions.forEach(s => {
+                const local   = `${s.srcIP}:${s.sport}`.padEnd(22);
+                const foreign = `${s.dstIP}:${s.dport}`.padEnd(22);
+                this.write(`tcp    ${local} ${foreign} ${s.state}`, 'cli-data');
+            });
+
+        } else {
+            this.write('% Usage: show tcp sessions', 'cli-err');
+        }
+    }
+
+    // ══════════════════════════════════════════════════════
+    //  PING6  — ping con dirección IPv6
+    // ══════════════════════════════════════════════════════
+    _doPing6(parts) {
+        const targetIPv6 = parts[1];
+        if (!targetIPv6) {
+            this.write('Usage: ping6 <ipv6-address>', 'cli-dim');
+            return;
+        }
+        if (typeof IPv6Utils === 'undefined' || !IPv6Utils.isValid(targetIPv6)) {
+            this.write(`% Invalid IPv6 address: ${targetIPv6}`, 'cli-err');
+            return;
+        }
+
+        const src = this.device;
+        const net = window.simulator;
+        if (!net) { this.write('% Simulator not ready', 'cli-err'); return; }
+
+        // Verificar que el origen tenga IPv6 configurado
+        const srcIPv6 = src.ipv6Config?.address;
+        if (!srcIPv6) {
+            this.write(`% ${src.name} has no IPv6 address configured`, 'cli-err');
+            this.write('  Hint: ipv6 address <addr>/<prefix>', 'cli-dim');
+            return;
+        }
+
+        // Buscar dispositivo destino por IPv6
+        const dest = net.devices.find(d => {
+            const addr = d.ipv6Config?.address || d.interfaces?.find(i => i.ipv6Config)?.ipv6Config?.address;
+            if (!addr) return false;
+            return IPv6Utils.compress(addr) === IPv6Utils.compress(targetIPv6);
+        });
+
+        this.write(`\nPinging ${targetIPv6} (ICMPv6) from ${src.name} [${IPv6Utils.compress(srcIPv6)}]:`, 'cli-section');
+
+        if (!dest) {
+            this.write(`% No device found with IPv6 address ${IPv6Utils.compress(targetIPv6)}`, 'cli-err');
+            this.write('  Hint: configure an IPv6 address with: ipv6 address <addr>/<prefix>', 'cli-dim');
+            return;
+        }
+
+        // Verificar ruta en el grafo
+        const route = net.engine ? net.engine.findRoute(src.id, dest.id) : [];
+        const hasRoute = route.length > 1;
+
+        const count = 4;
+        let sent = 0, received = 0;
+        const hopCount = Math.max(1, route.length - 1);
+
+        const interval = setInterval(() => {
+            sent++;
+            if (hasRoute) {
+                // Animar paquete ICMPv6 si el simulador está corriendo
+                if (net.simulationRunning && net.sendPacket) {
+                    try { net.sendPacket(src, dest, 'ping', 32, { ttl: 64, label: 'ICMPv6' }); } catch(e) {}
+                }
+                const rtt = Math.floor(Math.random() * 6 + hopCount * 2);
+                received++;
+                this.write(`Reply from ${IPv6Utils.compress(targetIPv6)}: bytes=32 time=${rtt}ms Hops=${hopCount}`, 'cli-ok');
+            } else {
+                this.write(`Request timeout for icmp6_seq ${sent}`, 'cli-warn');
+            }
+            if (sent >= count) {
+                clearInterval(interval);
+                const loss = Math.round(((sent - received) / sent) * 100);
+                this.write(`\nPing statistics for ${IPv6Utils.compress(targetIPv6)}:`, 'cli-dim');
+                this.write(`  Packets: Sent = ${sent}, Received = ${received}, Lost = ${sent - received} (${loss}% loss)`, 'cli-data');
+                if (received > 0) {
+                    this.write(`  Round-trip: estimated ${hopCount * 2}ms per hop`, 'cli-dim');
+                }
+            }
+        }, 500);
+    }
+
+    // ══════════════════════════════════════════════════════
+    //  TRACEROUTE6 — traceroute para IPv6
+    // ══════════════════════════════════════════════════════
+    _doTraceroute6(parts) {
+        const targetIPv6 = parts[1];
+        if (!targetIPv6) {
+            this.write('Usage: traceroute6 <ipv6-address>', 'cli-dim');
+            return;
+        }
+        if (typeof IPv6Utils === 'undefined' || !IPv6Utils.isValid(targetIPv6)) {
+            this.write(`% Invalid IPv6 address: ${targetIPv6}`, 'cli-err');
+            return;
+        }
+
+        const src = this.device;
+        const net = window.simulator;
+        if (!net) { this.write('% Simulator not ready', 'cli-err'); return; }
+
+        const srcIPv6 = src.ipv6Config?.address;
+        if (!srcIPv6) {
+            this.write(`% ${src.name} has no IPv6 address configured`, 'cli-err');
+            return;
+        }
+
+        // Buscar destino por IPv6
+        const dest = net.devices.find(d => {
+            const addr = d.ipv6Config?.address || d.interfaces?.find(i => i.ipv6Config)?.ipv6Config?.address;
+            if (!addr) return false;
+            return IPv6Utils.compress(addr) === IPv6Utils.compress(targetIPv6);
+        });
+
+        this.write(`\nTraceroute6 to ${IPv6Utils.compress(targetIPv6)} from ${src.name}:`, 'cli-section');
+        this.write(`  (max 30 hops, 32 byte packets)`, 'cli-dim');
+
+        if (!dest) {
+            this.write(`% No device found with IPv6 address ${IPv6Utils.compress(targetIPv6)}`, 'cli-err');
+            this.write('  Hint: configure IPv6 with: ipv6 address <addr>/<prefix>', 'cli-dim');
+            return;
+        }
+
+        // Obtener ruta completa del grafo
+        const route = net.engine ? net.engine.findRoute(src.id, dest.id) : [];
+
+        if (route.length < 2) {
+            this.write(`% Network ${IPv6Utils.compress(targetIPv6)} unreachable`, 'cli-err');
+            return;
+        }
+
+        // Reconstruir dispositivos del camino
+        const pathDevices = route.map(id => net.devices.find(d => d.id === id)).filter(Boolean);
+        let hop = 0;
+
+        const printHop = () => {
+            if (hop >= pathDevices.length - 1) return;
+            hop++;
+            const hopDev = pathDevices[hop];
+            const hopIPv6 = hopDev.ipv6Config?.address
+                || hopDev.interfaces?.find(i => i.ipv6Config?.address)?.ipv6Config?.address
+                || hopDev.ipConfig?.ipAddress
+                || '*';
+            const rtt1 = Math.floor(Math.random() * 4 + hop * 2);
+            const rtt2 = rtt1 + Math.floor(Math.random() * 2);
+            const rtt3 = rtt2 + Math.floor(Math.random() * 2);
+            const addrStr = hopIPv6 !== '*' ? ` ${hopDev.name} [${IPv6Utils.compress(hopIPv6)}]` : ` ${hopDev.name}`;
+            this.write(`  ${String(hop).padStart(2)}${addrStr}  ${rtt1} ms  ${rtt2} ms  ${rtt3} ms`, 'cli-data');
+
+            if (hop < pathDevices.length - 1) {
+                setTimeout(printHop, 250);
+            } else {
+                this.write('\nTrace complete.', 'cli-ok');
+            }
+        };
+
+        setTimeout(printHop, 200);
+    }
+
+    // ══════════════════════════════════════════════════════
+    //  TCP CONNECT  — inicia handshake TCP visual
+    //  Uso: tcp connect <ip> <puerto>
+    // ══════════════════════════════════════════════════════
+    _doTCPConnect(parts) {
+        const sub  = parts[1]?.toLowerCase();
+        if (sub !== 'connect') {
+            this.write('Usage: tcp connect <ip> <port>', 'cli-dim');
+            this.write('       tcp connect <ip> <port>  — inicia handshake TCP con animación visual', 'cli-dim');
+            return;
+        }
+
+        const dstIP  = parts[2];
+        const dport  = parseInt(parts[3], 10) || 80;
+
+        if (!dstIP) {
+            this.write('% Usage: tcp connect <dst-ip> [port]', 'cli-err');
+            return;
+        }
+
+        const net = window.simulator;
+        const engine = window.TCPEngine;
+
+        if (!net)    { this.write('% Simulator not ready', 'cli-err'); return; }
+        if (!engine) { this.write('% TCPEngine not available', 'cli-err'); return; }
+
+        const src  = this.device;
+        const dest = net.devices.find(d => d.ipConfig?.ipAddress === dstIP);
+
+        if (!dest) {
+            this.write(`% No device with IP ${dstIP}`, 'cli-err');
+            return;
+        }
+        if (!src.ipConfig?.ipAddress || src.ipConfig.ipAddress === '0.0.0.0') {
+            this.write('% Source device has no IP configured', 'cli-err');
+            return;
+        }
+
+        this.write(`\nTCP Connect: ${src.name} → ${dstIP}:${dport}`, 'cli-section');
+        this.write('Sending SYN...', 'cli-dim');
+
+        const log  = msg => this.write(msg, 'cli-data');
+        const anim = pkt => { try { net.packets?.push(pkt); } catch(_) {} };
+
+        engine.handshake(src, dest, dport, net.engine, anim, log)
+            .then(session => {
+                if (session) {
+                    this.write(`TCP session ESTABLISHED  ${src.ipConfig.ipAddress}:${session.sport} → ${dstIP}:${dport}`, 'cli-ok');
+                } else {
+                    this.write('% TCP handshake failed — no route or destination unreachable', 'cli-err');
+                }
+            })
+            .catch(e => {
+                this.write(`% TCP error: ${e?.message || e}`, 'cli-err');
+            });
+    }
     _showBGP(parts) {
         const bgp = this.device.bgp;
         const sub = parts[2]?.toLowerCase();
@@ -2630,6 +2881,8 @@ const BGPEngine = {
      * @param {DeviceCLI}    cli     — instancia CLI para escribir output
      */
     attemptSession(nb, ip, device, bgp, cli) {
+        // Guard: simulador no disponible
+        if (!window.simulator) { nb.state = 'Idle'; cli.write(`%BGP-3-NOTIFICATION: simulator not ready`, 'cli-warn'); return; }
         // Buscar el dispositivo remoto en el simulador
         const remote = window.simulator?.devices?.find(d =>
             d.ipConfig?.ipAddress === ip || d.interfaces?.some(i => i.ipConfig?.ipAddress === ip)

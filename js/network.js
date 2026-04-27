@@ -1327,6 +1327,87 @@ class NetworkSimulator {
     download()       { NetworkPersistence.download(this); }
     importFile(file) { return NetworkPersistence.importFile(this, file); }
 
+    /**
+     * Exporta el canvas actual como imagen PNG con fondo blanco o negro según el tema.
+     * Incluye un margen de 40px alrededor del contenido visible.
+     */
+    exportToPNG() {
+        const MARGIN = 40;
+        // Calcular bounding box del contenido
+        if (!this.devices.length && !this.annotations.length) {
+            alert('No hay contenido para exportar.');
+            return;
+        }
+
+        // Determinar extensión del contenido en coordenadas mundo
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        this.devices.forEach(d => {
+            minX = Math.min(minX, d.x - 50);
+            minY = Math.min(minY, d.y - 50);
+            maxX = Math.max(maxX, d.x + 50);
+            maxY = Math.max(maxY, d.y + 50);
+        });
+        (this.annotations || []).forEach(a => {
+            minX = Math.min(minX, a.x - 10);
+            minY = Math.min(minY, a.y - 10);
+            maxX = Math.max(maxX, a.x + 200);
+            maxY = Math.max(maxY, a.y + 30);
+        });
+
+        const contentW = maxX - minX;
+        const contentH = maxY - minY;
+        const exportW  = contentW + MARGIN * 2;
+        const exportH  = contentH + MARGIN * 2;
+
+        // Crear canvas off-screen con fondo blanco
+        const offCanvas = document.createElement('canvas');
+        offCanvas.width  = exportW;
+        offCanvas.height = exportH;
+        const offCtx = offCanvas.getContext('2d');
+
+        // Fondo blanco (universal para PNG)
+        offCtx.fillStyle = '#ffffff';
+        offCtx.fillRect(0, 0, exportW, exportH);
+
+        // Aplicar transformación para centrar el contenido del mundo
+        offCtx.save();
+        offCtx.translate(MARGIN - minX, MARGIN - minY);
+
+        // Redibujar la red en el canvas off-screen
+        // Guardamos el contexto original y lo reemplazamos temporalmente
+        const origCtx    = this.ctx;
+        const origOffset = { x: this.offsetX, y: this.offsetY };
+        const origZoom   = this.zoom;
+
+        this.ctx     = offCtx;
+        this.offsetX = MARGIN - minX;
+        this.offsetY = MARGIN - minY;
+        this.zoom    = 1;
+
+        try {
+            this.draw();
+        } finally {
+            this.ctx     = origCtx;
+            this.offsetX = origOffset.x;
+            this.offsetY = origOffset.y;
+            this.zoom    = origZoom;
+            offCtx.restore();
+        }
+
+        // Redibujar en el canvas original (restaurar vista)
+        this.draw();
+
+        // Descargar
+        const filename = `topologia_${new Date().toISOString().slice(0, 16).replace('T', '_').replace(/:/g, '-')}.png`;
+        offCanvas.toBlob(blob => {
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(a.href);
+        }, 'image/png');
+    }
+
     // ── ANOTACIONES ───────────────────────────────
     addAnnotation(wx, wy, text = 'Comentario') {
         const ann = { id: `ann${Date.now()}`, x: wx, y: wy, text, selected: false, color: '#f59e0b' };

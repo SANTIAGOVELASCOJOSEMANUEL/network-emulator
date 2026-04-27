@@ -45,9 +45,21 @@ const NetUtils = {
     },
 
     randomIpFromPool(pool) {
-        const base = pool.network.split('/')[0].split('.');
-        const host = Math.floor(Math.random() * 190) + 10;
-        return `${base[0]}.${base[1]}.${base[2]}.${host}`;
+        // Parsear red del pool (soporta CIDR "192.168.1.0/24" o IP base)
+        const [netStr, cidrStr] = (pool.network || '').split('/');
+        const prefixLen = cidrStr ? parseInt(cidrStr, 10) : 24;
+        const hostBits  = 32 - prefixLen;
+        const maxHost   = (1 << hostBits) - 1; // ej: /24 → 255, /25 → 127
+        // Rango usable: host 10 → maxHost - 1 (evitar .0 y broadcast)
+        const minHost = 10;
+        const rangeMax = Math.max(minHost + 1, maxHost - 1);
+        const host = Math.floor(Math.random() * (rangeMax - minHost)) + minHost;
+        // Calcular dirección de red base como entero
+        const netInt = netStr.split('.').reduce((acc, o) => (acc << 8) + parseInt(o, 10), 0) >>> 0;
+        const mask   = prefixLen === 0 ? 0 : (0xFFFFFFFF << (32 - prefixLen)) >>> 0;
+        const baseInt = (netInt & mask) >>> 0;
+        const ipInt   = (baseInt | host) >>> 0;
+        return [(ipInt >>> 24) & 255, (ipInt >>> 16) & 255, (ipInt >>> 8) & 255, ipInt & 255].join('.');
     },
 };
 
@@ -160,28 +172,67 @@ class NetworkEngine {
     }
 
     // ── Dijkstra ────────────────────────────────────────────────────────
+    // Implementación con min-heap (O((V+E) log V)) en vez del sort() por
+    // iteración que era O(n² log n) y se notaba con 20+ nodos.
 
     findRoute(start, end) {
         if (start === end) return [start];
         if (!this.nodes.has(start) || !this.nodes.has(end)) return [];
 
-        const dist = {}, prev = {}, visited = new Set();
+        // Min-heap mínima: array de [dist, nodeId] ordenado por dist
+        // push: O(log n), pop: O(log n)
+        const heap = [];
+        const heapPush = (d, id) => {
+            heap.push([d, id]);
+            let i = heap.length - 1;
+            while (i > 0) {
+                const parent = (i - 1) >> 1;
+                if (heap[parent][0] <= heap[i][0]) break;
+                [heap[parent], heap[i]] = [heap[i], heap[parent]];
+                i = parent;
+            }
+        };
+        const heapPop = () => {
+            const top = heap[0];
+            const last = heap.pop();
+            if (heap.length) {
+                heap[0] = last;
+                let i = 0;
+                while (true) {
+                    let smallest = i;
+                    const l = 2 * i + 1, r = 2 * i + 2;
+                    if (l < heap.length && heap[l][0] < heap[smallest][0]) smallest = l;
+                    if (r < heap.length && heap[r][0] < heap[smallest][0]) smallest = r;
+                    if (smallest === i) break;
+                    [heap[i], heap[smallest]] = [heap[smallest], heap[i]];
+                    i = smallest;
+                }
+            }
+            return top;
+        };
+
+        const dist    = {};
+        const prev    = {};
+        const visited = new Set();
         this.nodes.forEach(n => { dist[n] = Infinity; });
         dist[start] = 0;
+        heapPush(0, start);
 
-        const queue = [...this.nodes];
-        while (queue.length) {
-            queue.sort((a, b) => dist[a] - dist[b]);
-            const current = queue.shift();
+        while (heap.length) {
+            const [d, current] = heapPop();
             if (current === end) break;
-            if (dist[current] === Infinity) break;
             if (visited.has(current)) continue;
+            if (d > dist[current]) continue; // entrada obsoleta
             visited.add(current);
 
             for (const { id: nb, weight } of this.getNeighbors(current)) {
                 if (visited.has(nb)) continue;
                 const alt = dist[current] + weight;
-                if (alt < dist[nb]) { dist[nb] = alt; prev[nb] = current; }
+                if (alt < dist[nb]) {
+                    dist[nb] = alt;
+                    prev[nb] = current;
+                    heapPush(alt, nb);
+                }
             }
         }
 

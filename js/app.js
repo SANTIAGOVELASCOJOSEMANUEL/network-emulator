@@ -490,6 +490,10 @@ document.addEventListener('DOMContentLoaded', () => {
     $('saveNet')?.addEventListener('click',   () => { if (simulator.save()) netConsole.writeToConsole('💾 Red guardada'); });
     $('loadNet')?.addEventListener('click',   () => { if (simulator.load()) { updateCounts(); simulator.fitAll(); netConsole.writeToConsole('📂 Red cargada'); _snapshot(); } });
     $('exportNet')?.addEventListener('click', () => simulator.download());
+    $('exportPNG')?.addEventListener('click', () => {
+        simulator.exportToPNG();
+        netConsole.writeToConsole('🖼️ Topología exportada como PNG');
+    });
     $('importFile')?.addEventListener('change', async e => {
         const file = e.target.files[0]; if (!file) return;
         await simulator.importFile(file); updateCounts(); simulator.fitAll();
@@ -1309,6 +1313,127 @@ document.addEventListener('DOMContentLoaded', () => {
     exBtn.innerHTML = '<span class="icon">📋</span> Ejemplo';
     exBtn.addEventListener('click', () => { buildExample(); _snapshot(); });
     lg?.appendChild(exBtn);
+
+    // ── Plantillas de topologías ──────────────────────────────────────
+    const TEMPLATES = [
+        {
+            name: '🏠 Red SOHO',
+            desc: 'Internet → Router WiFi → Switch → 3 PCs',
+            build(sim) {
+                sim.clear();
+                const inet   = sim.addDevice('Internet', 400, 60);
+                const router = sim.addDevice('RouterWifi', 400, 200);
+                const sw     = sim.addDevice('Switch', 400, 360);
+                const pc1    = sim.addDevice('PC', 180, 520);
+                const pc2    = sim.addDevice('PC', 400, 520);
+                const pc3    = sim.addDevice('PC', 620, 520);
+
+                inet.name   = 'Internet'; inet.ipConfig   = { ipAddress: '8.8.8.8', subnetMask: '255.0.0.0', gateway: '' };
+                router.name = 'Router-WiFi'; router.ipConfig = { ipAddress: '192.168.1.1', subnetMask: '255.255.255.0', gateway: '8.8.8.8' };
+                sw.name     = 'SW-Principal';
+                pc1.name    = 'PC1'; pc1.ipConfig    = { ipAddress: '192.168.1.10', subnetMask: '255.255.255.0', gateway: '192.168.1.1' };
+                pc2.name    = 'PC2'; pc2.ipConfig    = { ipAddress: '192.168.1.11', subnetMask: '255.255.255.0', gateway: '192.168.1.1' };
+                pc3.name    = 'PC3'; pc3.ipConfig    = { ipAddress: '192.168.1.12', subnetMask: '255.255.255.0', gateway: '192.168.1.1' };
+
+                const c = (a, b) => sim.connectDevices(a, b, a.interfaces[0], b.interfaces[0]);
+                c(inet, router); c(router, sw); c(sw, pc1); c(sw, pc2); c(sw, pc3);
+            },
+        },
+        {
+            name: '🏢 Red Corporativa',
+            desc: 'ISP → Firewall → Router → 2 Switches → PCs + Servidor',
+            build(sim) {
+                sim.clear();
+                const isp  = sim.addDevice('ISP', 500, 50);
+                const fw   = sim.addDevice('Firewall', 500, 180);
+                const r1   = sim.addDevice('Router', 500, 330);
+                const sw1  = sim.addDevice('Switch', 250, 490);
+                const sw2  = sim.addDevice('Switch', 750, 490);
+                const pc1  = sim.addDevice('PC', 100, 650); const pc2 = sim.addDevice('PC', 280, 650);
+                const srv  = sim.addDevice('Server', 420, 650);
+                const pc3  = sim.addDevice('PC', 620, 650); const pc4 = sim.addDevice('PC', 800, 650);
+                const lap  = sim.addDevice('Laptop', 950, 650);
+
+                isp.name  = 'ISP-Principal'; isp.ipConfig  = { ipAddress: '200.1.1.1', subnetMask: '255.255.255.0', gateway: '' };
+                fw.name   = 'Firewall';      fw.ipConfig   = { ipAddress: '10.0.0.1',  subnetMask: '255.255.255.0', gateway: '200.1.1.1' };
+                r1.name   = 'Core-Router';   r1.ipConfig   = { ipAddress: '192.168.0.1', subnetMask: '255.255.255.0', gateway: '10.0.0.1' };
+                sw1.name  = 'SW-LAN1'; sw2.name = 'SW-LAN2';
+                pc1.name  = 'PC-A1'; pc1.ipConfig = { ipAddress: '192.168.1.10', subnetMask: '255.255.255.0', gateway: '192.168.1.1' };
+                pc2.name  = 'PC-A2'; pc2.ipConfig = { ipAddress: '192.168.1.11', subnetMask: '255.255.255.0', gateway: '192.168.1.1' };
+                srv.name  = 'Servidor'; srv.ipConfig = { ipAddress: '192.168.1.100', subnetMask: '255.255.255.0', gateway: '192.168.1.1' };
+                pc3.name  = 'PC-B1'; pc3.ipConfig = { ipAddress: '192.168.2.10', subnetMask: '255.255.255.0', gateway: '192.168.2.1' };
+                pc4.name  = 'PC-B2'; pc4.ipConfig = { ipAddress: '192.168.2.11', subnetMask: '255.255.255.0', gateway: '192.168.2.1' };
+                lap.name  = 'Laptop-B'; lap.ipConfig = { ipAddress: '192.168.2.12', subnetMask: '255.255.255.0', gateway: '192.168.2.1' };
+
+                const c = (a, b) => sim.connectDevices(a, b, a.interfaces[0], b.interfaces[0]);
+                c(isp, fw); c(fw, r1); c(r1, sw1); c(r1, sw2);
+                c(sw1, pc1); c(sw1, pc2); c(sw1, srv);
+                c(sw2, pc3); c(sw2, pc4); c(sw2, lap);
+            },
+        },
+        {
+            name: '🌐 WAN / Multi-sitio',
+            desc: 'Dos sedes conectadas por routers WAN con switches y PCs en cada sitio',
+            build(sim) {
+                sim.clear();
+                const inet = sim.addDevice('Internet', 600, 60);
+                const r1   = sim.addDevice('Router', 280, 200);
+                const r2   = sim.addDevice('Router', 920, 200);
+                const sw1  = sim.addDevice('Switch', 280, 380);
+                const sw2  = sim.addDevice('Switch', 920, 380);
+                const pc1  = sim.addDevice('PC', 100, 540); const pc2 = sim.addDevice('PC', 280, 540); const pc3 = sim.addDevice('PC', 460, 540);
+                const pc4  = sim.addDevice('PC', 740, 540); const pc5 = sim.addDevice('PC', 920, 540); const pc6 = sim.addDevice('PC', 1100, 540);
+                const srv1 = sim.addDevice('Server', 100, 380); const srv2 = sim.addDevice('Server', 1100, 380);
+
+                inet.name = 'Internet'; inet.ipConfig = { ipAddress: '8.8.8.8', subnetMask: '255.0.0.0', gateway: '' };
+                r1.name   = 'R-SitioA'; r1.ipConfig = { ipAddress: '10.0.0.1', subnetMask: '255.255.255.0', gateway: '8.8.8.1' };
+                r2.name   = 'R-SitioB'; r2.ipConfig = { ipAddress: '10.0.1.1', subnetMask: '255.255.255.0', gateway: '8.8.8.1' };
+                sw1.name  = 'SW-SitioA'; sw2.name = 'SW-SitioB';
+                srv1.name = 'Servidor-A'; srv1.ipConfig = { ipAddress: '192.168.10.100', subnetMask: '255.255.255.0', gateway: '192.168.10.1' };
+                srv2.name = 'Servidor-B'; srv2.ipConfig = { ipAddress: '192.168.20.100', subnetMask: '255.255.255.0', gateway: '192.168.20.1' };
+                ['PC-A1','PC-A2','PC-A3'].forEach((n, i) => { [pc1,pc2,pc3][i].name = n; [pc1,pc2,pc3][i].ipConfig = { ipAddress: `192.168.10.${10+i}`, subnetMask: '255.255.255.0', gateway: '192.168.10.1' }; });
+                ['PC-B1','PC-B2','PC-B3'].forEach((n, i) => { [pc4,pc5,pc6][i].name = n; [pc4,pc5,pc6][i].ipConfig = { ipAddress: `192.168.20.${10+i}`, subnetMask: '255.255.255.0', gateway: '192.168.20.1' }; });
+
+                const c = (a, b) => sim.connectDevices(a, b, a.interfaces[0], b.interfaces[0]);
+                c(inet, r1); c(inet, r2); c(r1, sw1); c(r2, sw2);
+                c(sw1, srv1); c(sw1, pc1); c(sw1, pc2); c(sw1, pc3);
+                c(sw2, srv2); c(sw2, pc4); c(sw2, pc5); c(sw2, pc6);
+            },
+        },
+    ];
+
+    const tplBtn = document.createElement('button');
+    tplBtn.className = 'btn';
+    tplBtn.innerHTML = '<span class="icon">📐</span> Plantillas';
+    tplBtn.title = 'Cargar topología predefinida';
+    tplBtn.addEventListener('click', () => {
+        // Modal de selección de plantilla
+        const existing = document.getElementById('tpl-modal');
+        if (existing) { existing.remove(); return; }
+        const modal = document.createElement('div');
+        modal.id = 'tpl-modal';
+        modal.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:9999;background:var(--color-bg,#1a1f2e);border:1px solid #334;border-radius:12px;padding:20px;min-width:320px;max-width:400px;box-shadow:0 8px 32px rgba(0,0,0,.5)';
+        modal.innerHTML = `<div style="font-weight:600;font-size:15px;margin-bottom:14px;color:#e2e8f0">📐 Plantillas de topología</div>` +
+            TEMPLATES.map((t, i) => `<div class="tpl-item" data-idx="${i}" style="border:1px solid #334;border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer;transition:border-color .15s" onmouseover="this.style.borderColor='#6366f1'" onmouseout="this.style.borderColor='#334'"><div style="font-weight:500;color:#c4c9d4">${t.name}</div><div style="font-size:11px;color:#8892a4;margin-top:3px">${t.desc}</div></div>`).join('') +
+            `<button onclick="document.getElementById('tpl-modal')?.remove()" style="width:100%;margin-top:4px;background:transparent;border:1px solid #334;border-radius:6px;color:#8892a4;cursor:pointer;padding:7px">Cancelar</button>`;
+        document.body.appendChild(modal);
+        modal.querySelectorAll('.tpl-item').forEach(el => {
+            el.addEventListener('click', () => {
+                const idx = parseInt(el.dataset.idx, 10);
+                if (confirm(`¿Cargar "${TEMPLATES[idx].name}"? Se borrará la topología actual.`)) {
+                    TEMPLATES[idx].build(simulator);
+                    simulator.draw(); updateCounts(); simulator.fitAll(); _snapshot();
+                    netConsole.writeToConsole(`📐 Plantilla "${TEMPLATES[idx].name}" cargada`);
+                }
+                modal.remove();
+            });
+        });
+        // Cerrar al hacer clic fuera
+        setTimeout(() => document.addEventListener('click', function closer(e) {
+            if (!modal.contains(e.target) && e.target !== tplBtn) { modal.remove(); document.removeEventListener('click', closer); }
+        }), 100);
+    });
+    lg?.appendChild(tplBtn);
 
     // ── Init ──────────────────────────────────────────
     setTimeout(() => { simulator._resizeCanvas(); simulator.draw(); _snapshot(); _updateUndoRedo(); simulator._startCableAnim(); }, 0);

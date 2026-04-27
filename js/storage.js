@@ -1,7 +1,44 @@
 // utils/storage.js — Persistencia de la red (localStorage + JSON)
 'use strict';
 
-const STORAGE_KEY = 'netSimulator_v42';
+// Clave estable — nunca cambia aunque cambie el formato interno.
+// La versión vive DENTRO del JSON serializado (campo `version`),
+// no en la clave. Así los datos del usuario nunca se pierden
+// al actualizar el simulador: _migrateData() adapta formatos viejos.
+const STORAGE_KEY = 'netSimulator';
+
+// Versión actual del formato de serialización.
+// Incrementar aquí cuando se agrega un campo nuevo o se cambia estructura.
+const STORAGE_FORMAT_VERSION = 7;
+
+/**
+ * Migra datos guardados en un formato anterior al formato actual.
+ * Cada bloque `if (data.version < N)` aplica los cambios del salto N-1→N.
+ * @param {object} data — objeto deserializado de localStorage
+ * @returns {object} data migrado (puede ser el mismo objeto mutado)
+ */
+function _migrateData(data) {
+    if (!data || typeof data !== 'object') return data;
+
+    // v1-v4: no había campo `version`; se añadió en v5
+    if (!data.version) data.version = 5;
+
+    // v5 → v6: `annotations` era opcional, ahora siempre existe
+    if (data.version < 6) {
+        data.annotations = data.annotations || [];
+        data.version = 6;
+    }
+
+    // v6 → v7: `ipv6Config` y `_staticRoutesV6` en dispositivos (retrocompat: quedan undefined = no había)
+    if (data.version < 7) {
+        data.version = 7;
+    }
+
+    // Futuras migraciones: agregar bloques `if (data.version < N)` aquí.
+    // No borrar bloques anteriores — pueden llegar datos muy viejos en cualquier momento.
+
+    return data;
+}
 
 // ── NetworkPersistence ────────────────────────────────────────────────
 // Clase estática que expone serializar/deserializar + save/load/download/importFile
@@ -62,6 +99,15 @@ const NetworkPersistence = {
             if (d.brand      !== undefined) obj.brand      = d.brand;
             if (d.panel      !== undefined) obj.panel      = d.panel;
             if (d.armed      !== undefined) obj.armed      = d.armed;
+            // ── IPv6 config ────────────────────────────────────────────
+            if (d.ipv6Config !== undefined) obj.ipv6Config = d.ipv6Config ? { ...d.ipv6Config } : null;
+            // Guardar rutas estáticas IPv6
+            if (d.routingTableV6?.entries) {
+                try {
+                    const v6entries = d.routingTableV6.entries().filter(r => r._static);
+                    if (v6entries.length) obj._staticRoutesV6 = v6entries.map(r => ({ ...r }));
+                } catch(e) {}
+            }
             return obj;
         });
 
@@ -83,7 +129,7 @@ const NetworkPersistence = {
         const annotations = (sim.annotations || []).map(a => ({ ...a }));
 
         return {
-            version: 5,
+            version: STORAGE_FORMAT_VERSION,
             nextId: sim.nextId,
             devices,
             connections,
@@ -123,6 +169,7 @@ const NetworkPersistence = {
             if (sd.brand      !== undefined) dev.brand      = sd.brand;
             if (sd.panel      !== undefined) dev.panel      = sd.panel;
             if (sd.armed      !== undefined) dev.armed      = sd.armed;
+            if (sd.ipv6Config !== undefined) dev.ipv6Config = sd.ipv6Config ? { ...sd.ipv6Config } : null;
 
             // Restaurar estado de interfaces
             sd.interfaces.forEach((si, idx) => {
@@ -190,13 +237,26 @@ const NetworkPersistence = {
                     } catch(e) {}
                 });
             }
-            // Restaurar rutas estáticas
+            // Restaurar rutas estáticas IPv4
             if (sd._staticRoutes?.length && dev.routingTable) {
                 sd._staticRoutes.forEach(r => {
                     try {
                         dev.routingTable.add(r.network, r.mask, r.gateway, r.iface, r.metric);
                         const entry = dev.routingTable.routes.find(x => x.network === r.network);
                         if (entry) { entry._static = true; entry._type = r._type; }
+                    } catch(e) {}
+                });
+            }
+            // Restaurar rutas estáticas IPv6
+            if (sd._staticRoutesV6?.length) {
+                if (!(dev.routingTableV6 instanceof RoutingTableIPv6)) {
+                    dev.routingTableV6 = new RoutingTableIPv6();
+                }
+                sd._staticRoutesV6.forEach(r => {
+                    try {
+                        dev.routingTableV6.add(r.prefix, r.prefixLen, r.gateway, r.iface, r.metric, r._type || 'S');
+                        const entry = dev.routingTableV6.routes.find(x => x.prefix === r.prefix && x.prefixLen === r.prefixLen);
+                        if (entry) entry._static = true;
                     } catch(e) {}
                 });
             }
@@ -249,7 +309,9 @@ function loadNetwork(sim) {
     try {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (!raw) return false;
-        NetworkPersistence._deserialize(sim, JSON.parse(raw));
+        // Migrar formato antes de deserializar para compatibilidad con datos viejos
+        const data = _migrateData(JSON.parse(raw));
+        NetworkPersistence._deserialize(sim, data);
         return true;
     } catch (e) {
         handleError(e, true);
@@ -286,7 +348,8 @@ function importNetwork(sim, file) {
         const r = new FileReader();
         r.onload = ev => {
             try {
-                NetworkPersistence._deserialize(sim, JSON.parse(ev.target.result));
+                const data = _migrateData(JSON.parse(ev.target.result));
+                NetworkPersistence._deserialize(sim, data);
                 resolve(true);
             } catch (e) {
                 handleError(e);

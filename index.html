@@ -112,6 +112,9 @@
             <button class="tb-btn icon-only" id="exportNet" title="Exportar JSON">
                 <svg viewBox="0 0 20 20"><path d="M14 3h3v3M17 3l-7 7M8 5H4a1 1 0 00-1 1v10a1 1 0 001 1h10a1 1 0 001-1v-4" stroke="currentColor" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
+            <button class="tb-btn icon-only" id="exportPNG" title="Exportar imagen PNG">
+                <svg viewBox="0 0 20 20"><rect x="2" y="4" width="16" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="7" cy="9" r="1.5" fill="currentColor"/><path d="M2 14l4-4 3 3 3-4 4 5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
             <label class="tb-btn icon-only" title="Importar JSON" style="cursor:pointer">
                 <svg viewBox="0 0 20 20"><path d="M6 3H3v3M3 3l7 7M12 5h4a1 1 0 011 1v10a1 1 0 01-1 1H6a1 1 0 01-1-1v-4" stroke="currentColor" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 <input type="file" id="importFile" accept=".json" style="display:none">
@@ -363,33 +366,50 @@
 
 <div id="portTooltip" style="display:none;position:fixed;z-index:900;pointer-events:none;"></div>
 
-<!-- ══ Utilidades globales (cargadas primero) ═══════════════════════ -->
+<!-- ════════════════════════════════════════════════════════════════
+     SCRIPTS — carga en orden estricto de dependencias.
+     Regla: un módulo solo puede usar símbolos de módulos cargados ANTES que él.
+
+     Grupo 1 — Infraestructura global (sin dependencias entre sí)
+     Grupo 2 — Primitivas de red (IPv6 primero, lo usan routing y engine)
+     Grupo 3 — Motor de paquetes (depende de Grupo 2)
+     Grupo 4 — Dispositivos y render (dependen del motor)
+     Grupo 5 — Servicios de red (dependen de dispositivos)
+     Grupo 6 — UI y labs (dependen de todo lo anterior)
+     ════════════════════════════════════════════════════════════════ -->
+
+<!-- Grupo 1 — Infraestructura global -->
 <script src="js/errorhandler.js"></script>
 <script src="js/logger.js"></script>
 <script src="js/storage.js"></script>
 
-<!-- ══ Motor de red modular ════════════════════════════════════════ -->
-<!-- Orden obligatorio: primero los módulos, luego el orquestador   -->
+<!-- Grupo 2 — Primitivas de red
+     ipv6.js DEBE ir primero: define IPv6Utils, RoutingTableIPv6 y NDCache
+     que routing.js y engine.js usan en tiempo de ejecución. -->
+<script src="js/ipv6.js"></script>
 <script src="js/packet.js"></script>
 <script src="js/arp.js"></script>
 <script src="js/switching.js"></script>
 <script src="js/vlan.js"></script>
-    <script src="js/nat.js"></script>
+
+<!-- Grupo 3 — Motor de paquetes (usa primitivas del Grupo 2) -->
+<script src="js/nat.js"></script>
 <script src="js/firewall-engine.js"></script>
 <script src="js/routing.js"></script>
 <script src="js/engine.js"></script>
 
-<!-- ══ Dispositivos, renderer, red ════════════════════════════════ -->
+<!-- Grupo 4 — Dispositivos, renderer y simulador principal -->
 <script src="js/devices.js"></script>
 <script src="js/renderer.js"></script>
 <script src="js/network.js"></script>
 
-<!-- ══ Controladores y UI ════════════════════════════════════════ -->
+<!-- Grupo 5 — Servicios de red (dependen de devices + engine) -->
 <script src="js/networkcontroller.js"></script>
 <script src="js/dhcp.js"></script>
-<script src="js/ipv6.js"></script>
-<script src="js/cli.js"></script>
 <script src="js/tcp-engine.js"></script>
+
+<!-- Grupo 6 — UI, CLI, animaciones y labs (dependen de todo lo anterior) -->
+<script src="js/cli.js"></script>
 <script src="js/advanced.js"></script>
 <script src="js/packet-animator.js"></script>
 <script src="js/arp-visualizer.js"></script>
