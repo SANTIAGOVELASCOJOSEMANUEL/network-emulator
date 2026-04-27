@@ -330,7 +330,10 @@ function downloadNetwork(sim) {
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
         a.download = `red_${new Date().toISOString().slice(0, 10)}.json`;
+        a.style.display = 'none';
+        document.body.appendChild(a);
         a.click();
+        document.body.removeChild(a);
         URL.revokeObjectURL(a.href);
     } catch (e) {
         handleError(e);

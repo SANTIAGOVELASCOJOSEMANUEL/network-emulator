@@ -1147,13 +1147,53 @@ class DeviceCLI {
     }
 
     _showNeighbors() {
-        this.write(`\nCDP Neighbors`,'cli-section');
-        this.write(`  Device ID        Local Intf    Capability  Platform`,'cli-dim');
-        this.device.interfaces.forEach(i => {
-            if (i.connectedTo) {
-                this.write(`  ${i.connectedTo.name.padEnd(17)} ${i.name.padEnd(14)} ${i.connectedTo.type.padEnd(12)} Simulator`,'cli-data');
-            }
+        // Fix #5: CDP real — construir tabla desde interfaces conectadas
+        const device  = this.device;
+        const net     = window.simulator;
+        const uptime  = () => {
+            const m = Math.floor(Math.random() * 120 + 1);
+            return `${Math.floor(m/60)}h${String(m%60).padStart(2,'0')}m`;
+        };
+
+        // Capability map por tipo de dispositivo
+        const cap = t => ({
+            Router:'R', RouterWifi:'R', Firewall:'R S',
+            Switch:'S', SwitchPoE:'S', OLT:'S', Bridge:'S B',
+            PC:'H', Laptop:'H', Printer:'H', Phone:'H', IPPhone:'H',
+            Server:'S H', AP:'T', AC:'T',
+            Internet:'I', ISP:'I', SDWAN:'R'
+        }[t] || 'H');
+
+        const neighbors = [];
+        (device.interfaces || []).forEach(intf => {
+            if (!intf.connectedTo) return;
+            const peer     = intf.connectedTo;
+            const peerIntf = intf.connectedInterface;
+            const ip       = peer.ipConfig?.ipAddress || peer.interfaces?.find(i => i.ipConfig?.ipAddress)?.ipConfig?.ipAddress || '';
+            neighbors.push({ peer, intf, peerIntf, ip });
         });
+
+        this.write('', 'cli-data');
+        this.write('Capability Codes: R - Router, S - Switch, H - Host, T - Trans Bridge, I - IGMP, B - Bridge', 'cli-dim');
+        this.write('', 'cli-data');
+        if (!neighbors.length) {
+            this.write('CDP Neighbors: (none)', 'cli-dim');
+            return;
+        }
+
+        const hdr = 'Device ID'.padEnd(18) + 'Local Intrfce'.padEnd(16) + 'Holdtme'.padEnd(10) + 'Capability'.padEnd(13) + 'Platform'.padEnd(14) + 'Port ID';
+        this.write(hdr, 'cli-dim');
+        neighbors.forEach(({ peer, intf, peerIntf, ip }) => {
+            const devId   = (ip ? `${peer.name}(${ip})` : peer.name).slice(0, 17).padEnd(18);
+            const lintf   = (intf.name || intf.type || 'eth0').padEnd(16);
+            const hold    = String(Math.floor(Math.random() * 120 + 120)).padEnd(10);
+            const capStr  = cap(peer.type).padEnd(13);
+            const plat    = ('NetSim-' + peer.type).slice(0, 13).padEnd(14);
+            const portId  = peerIntf ? (peerIntf.name || peerIntf.type || 'eth0') : 'eth0';
+            this.write(`${devId}${lintf}${hold}${capStr}${plat}${portId}`, 'cli-data');
+        });
+        this.write('', 'cli-data');
+        this.write(`Total cdp entries displayed : ${neighbors.length}`, 'cli-dim');
     }
 
     // ══════════════════════════════════════════════════════
@@ -1581,8 +1621,13 @@ class DeviceCLI {
         const net = window.simulator;
         if (!net) { this.write('% Simulator not ready', 'cli-err'); return; }
 
-        // Verificar que el origen tenga IPv6 configurado
-        const srcIPv6 = src.ipv6Config?.address;
+        // Fix #4: buscar IPv6 en el dispositivo o en cualquiera de sus interfaces
+        const _getDevIPv6 = dev =>
+            dev.ipv6Config?.address ||
+            dev.interfaces?.find(i => i.ipv6Config?.address)?.ipv6Config?.address ||
+            null;
+
+        const srcIPv6 = _getDevIPv6(src);
         if (!srcIPv6) {
             this.write(`% ${src.name} has no IPv6 address configured`, 'cli-err');
             this.write('  Hint: ipv6 address <addr>/<prefix>', 'cli-dim');
@@ -1591,7 +1636,7 @@ class DeviceCLI {
 
         // Buscar dispositivo destino por IPv6
         const dest = net.devices.find(d => {
-            const addr = d.ipv6Config?.address || d.interfaces?.find(i => i.ipv6Config)?.ipv6Config?.address;
+            const addr = _getDevIPv6(d);
             if (!addr) return false;
             return IPv6Utils.compress(addr) === IPv6Utils.compress(targetIPv6);
         });
@@ -1655,7 +1700,13 @@ class DeviceCLI {
         const net = window.simulator;
         if (!net) { this.write('% Simulator not ready', 'cli-err'); return; }
 
-        const srcIPv6 = src.ipv6Config?.address;
+        // Fix #4: buscar IPv6 en el dispositivo o en cualquiera de sus interfaces
+        const _getDevIPv6t = dev =>
+            dev.ipv6Config?.address ||
+            dev.interfaces?.find(i => i.ipv6Config?.address)?.ipv6Config?.address ||
+            null;
+
+        const srcIPv6 = _getDevIPv6t(src);
         if (!srcIPv6) {
             this.write(`% ${src.name} has no IPv6 address configured`, 'cli-err');
             return;
@@ -1663,7 +1714,7 @@ class DeviceCLI {
 
         // Buscar destino por IPv6
         const dest = net.devices.find(d => {
-            const addr = d.ipv6Config?.address || d.interfaces?.find(i => i.ipv6Config)?.ipv6Config?.address;
+            const addr = _getDevIPv6t(d);
             if (!addr) return false;
             return IPv6Utils.compress(addr) === IPv6Utils.compress(targetIPv6);
         });

@@ -193,13 +193,26 @@ class Router extends NetworkDevice {
         super(id,name,'Router',x,y);
         this.lanPorts=lanPorts;this.wanPorts=wanPorts;this.loadBalancing=false;this.backupMode=false;this.isps=[];
         this.bandwidth={total:0,used:0,isps:[]};this.dhcpServer=null;this.routingTable=[];this.vlanConfig={};
+        // Mesh / WiFi capabilities
+        this.ssid=`WiFi-${name}`;this.band='2.4/5GHz';this.security='WPA3';this.wirelessEnabled=true;
+        this.operationMode='router'; // 'router' or 'ap'
+        this.meshEnabled=false;this.meshId=`Mesh-${name}`;this.meshRole='root'; // 'root' or 'node'
+        this.connectedClients=[];
         this.addInterface('WAN0','WAN','10Gbps','fibra');
         for(let i=1;i<wanPorts;i++)this.addInterface(`WAN${i}`,'WAN','1Gbps','cobre');
         for(let i=0;i<2;i++)this.addInterface(`LAN${i}`,'LAN','10Gbps','fibra');
         for(let i=2;i<lanPorts;i++)this.addInterface(`LAN${i}`,'LAN','1Gbps','cobre');
         this.addInterface('WLAN0','LAN','300Mbps','wireless');
+        this.addInterface('WLAN-MESH','LAN','867Mbps','wireless'); // backhaul mesh
         this._defaultCfg();
     }
+    setOperationMode(mode){
+        this.operationMode=mode;
+        if(mode==='ap'){this.dhcpServer=null;}
+        else{this._defaultCfg();}
+    }
+    enableMesh(meshId,role='node'){this.meshEnabled=true;this.meshId=meshId;this.meshRole=role;}
+    disableMesh(){this.meshEnabled=false;this.meshRole='root';}
     _defaultCfg(){
         this.defaultGateway='192.168.1.254';
         for(let i=0;i<this.lanPorts;i++){
@@ -229,10 +242,12 @@ class Router extends NetworkDevice {
 }
 class RouterWifi extends NetworkDevice {
     constructor(id,name,x,y){super(id,name,'RouterWifi',x,y);this.ssid=`WiFi-${name}`;this.band='2.4/5GHz';this.security='WPA3';this.wirelessEnabled=true;this.connectedClients=[];this.loadBalancing=false;this.backupMode=false;this.isps=[];this.bandwidth={total:0,used:0};this.vlanConfig={};
+    this.operationMode='router';this.meshEnabled=false;this.meshId=`Mesh-${name}`;this.meshRole='root';
     this.dhcpServer={poolName:'default',network:'192.168.1.0/24',subnetMask:'255.255.255.0',gateway:'192.168.1.1',dns:['8.8.8.8'],leases:{},range:{start:'192.168.1.10',end:'192.168.1.200'}};
     this.addInterface('WAN0','WAN','1Gbps','cobre');
     for(let i=0;i<4;i++){this.addInterface(`LAN${i}`,'LAN','1Gbps','cobre');this.vlanConfig[`LAN${i}`]={vlanId:i+1,network:`192.168.${i+1}.0/24`,gateway:`192.168.${i+1}.1`,dhcp:true};}
     this.addInterface('WLAN-OUT','LAN','300Mbps','wireless');
+    this.addInterface('WLAN-MESH','LAN','867Mbps','wireless'); // backhaul mesh
     this.ipConfig={ipAddress:'192.168.1.1',subnetMask:'255.255.255.0',gateway:''};}
     getCurrentBandwidth(){return this.isps.filter(i=>i.status==='up').reduce((s,i)=>s+i.bandwidth,0);}
     setISPStatus(isp,st){const c=this.isps.find(i=>i.isp===isp);if(c)c.status=st;}
@@ -240,6 +255,17 @@ class RouterWifi extends NetworkDevice {
     enableBackupMode(){}
     getVlanForInterface(intfName){return this.vlanConfig[intfName]||null;}
     setVlan(intfName,vlanId,network,gateway){this.vlanConfig[intfName]={vlanId,network,gateway,dhcp:true};}
+    // Clientes wireless reciben IP del pool propio del RouterWifi (no del gateway WAN)
+    getDHCPPool(){ return this.dhcpServer; }
+    requestDHCP(){
+        if(window.dhcpEngine){
+            window.dhcpEngine.runDHCP(this,
+                msg=>window.networkConsole?.writeToConsole(msg),
+                result=>{if(result&&window.simulator)window.simulator.draw();});
+            return true;
+        }
+        return null;
+    }
 }
 class WirelessBridge extends NetworkDevice {
     constructor(id,name,x,y){super(id,name,'Bridge',x,y);this.ssid=`Bridge-${name}`;this.band='5GHz';this.mode='bridge';this.addInterface('WL-LINK','LAN','300Mbps','wireless');this.addInterface('ETH0','LAN','1Gbps','cobre');this.ipConfig={ipAddress:'0.0.0.0',subnetMask:'255.255.255.0',gateway:''};}
@@ -256,37 +282,53 @@ class AccessPoint extends NetworkDevice {
         // WLAN1-WLAN4: puertos para clientes inalámbricos (laptops, celulares)
         for(let i=1;i<=4;i++)this.addInterface(`WLAN${i}`,'LAN','300Mbps','wireless');
         this.ipConfig={ipAddress:'0.0.0.0',subnetMask:'255.255.255.0',gateway:'',dhcpEnabled:true};
-        // El AP tiene su propio sub-pool DHCP para pasar IPs a sus clientes
-        // Se configura dinámicamente cuando el AP obtiene su propia IP
-        this.dhcpServer=null;
-    }
-    // Cuando el AP obtiene IP, configura su propio relay DHCP
-    _setupDHCPRelay(myIp, pool){
-        // AP actúa como relay: sus clientes van al mismo pool del router
-        // pero el AP excluye su propia IP del pool
-        this._relayPool = pool;
-        this._relayPool.excluded = this._relayPool.excluded||[];
-        if(!this._relayPool.excluded.includes(myIp)) this._relayPool.excluded.push(myIp);
+        // El AP tiene su propio sub-pool DHCP — se inicializa cuando el AP obtiene su IP
+        // Esto asegura que los clientes del AP obtengan IPs del mismo bloque que el AP
+        // pero NUNCA la misma IP que el propio AP.
+        this.dhcpServer = null;
     }
     requestDHCP(){
         if(window.dhcpEngine){
             window.dhcpEngine.runDHCP(this,
                 msg=>window.networkConsole?.writeToConsole(msg),
-                result=>{if(result&&window.simulator)window.simulator.draw();});
+                result=>{
+                    if(result && window.simulator){
+                        // Una vez que el AP tiene IP, construir su sub-pool de DHCP
+                        // basado en la misma red del uplink pero excluyendo la IP del AP
+                        this._buildAPDHCPPool(result.ip, result.mask, result.gw);
+                        window.simulator.draw();
+                    }
+                });
             return true;
         }
         return null;
     }
-    // getDHCPPool: cuando un cliente se conecta al AP, el AP relay al pool del router
+    // Construye el pool DHCP propio del AP, en la misma subred, excluyendo su propia IP
+    _buildAPDHCPPool(myIp, mask, gw){
+        if(!myIp || myIp==='0.0.0.0') return;
+        const parts = myIp.split('.');
+        const base = `${parts[0]}.${parts[1]}.${parts[2]}`;
+        this.dhcpServer = {
+            poolName  : `AP-${this.name}`,
+            network   : `${base}.0/24`,
+            subnetMask: mask || '255.255.255.0',
+            gateway   : gw || myIp,
+            dns       : ['8.8.8.8'],
+            leases    : {},
+            excluded  : [myIp],
+            range     : { start: `${base}.10`, end: `${base}.200` }
+        };
+    }
+    // getDHCPPool: si ya tiene pool propio úsalo, si no busca en el uplink
     getDHCPPool(){
-        // Buscar el pool del dispositivo al que estamos conectados (uplink)
+        if(this.dhcpServer) return this.dhcpServer;
+        // Fallback: relay al uplink
         const uplinkConn = (window.simulator?.connections||[]).find(c=>{
             const myIntf = c.from===this ? c.fromInterface : c.to===this ? c.toInterface : null;
             return myIntf && (myIntf.name==='ETH-UP'||myIntf.name==='WLAN0');
         });
         if(!uplinkConn) return null;
         const uplink = uplinkConn.from===this ? uplinkConn.to : uplinkConn.from;
-        // Pedir el pool al uplink (puede ser switch, AC, router)
         if(uplink.dhcpServer) return uplink.dhcpServer;
         if(uplink.getDHCPPool) return uplink.getDHCPPool();
         return null;
@@ -301,7 +343,17 @@ class Firewall extends NetworkDevice {
     constructor(id,name,x,y){super(id,name,'Firewall',x,y);this.rules=[];this.addInterface('WAN0','WAN','10Gbps','fibra');this.addInterface('WAN1','WAN','10Gbps','fibra');for(let i=0;i<4;i++)this.addInterface(`LAN${i}`,'LAN','1Gbps','cobre');this.addInterface('DMZ0','DMZ','1Gbps','cobre');this.ipConfig={ipAddress:'10.0.0.1',subnetMask:'255.255.255.0',gateway:''};}
 }
 class ONT extends NetworkDevice {
-    constructor(id,name,x,y){super(id,name,'ONT',x,y);this.model='GPON ONT';this.ponID=Math.floor(Math.random()*65535);this.addInterface('PON-IN','PON','1Gbps','fibra');for(let i=0;i<4;i++){this.addInterface(`ETH${i}`,'LAN','1Gbps','cobre');this.interfaces[i+1].ipConfig={ipAddress:'0.0.0.0',subnetMask:'255.255.255.0',gateway:''};}this.ipConfig={ipAddress:'192.168.100.1',subnetMask:'255.255.255.0',gateway:''};}
+    constructor(id,name,x,y){
+        super(id,name,'ONT',x,y);
+        this.model='GPON ONT';this.ponID=Math.floor(Math.random()*65535);
+        this.wirelessEnabled=true;this.ssid='ONT-'+name;this.band='2.4/5GHz';this.security='WPA2';
+        this.addInterface('PON-IN','PON','1Gbps','fibra');
+        for(let i=0;i<4;i++){this.addInterface(`ETH${i}`,'LAN','1Gbps','cobre');this.interfaces[i+1].ipConfig={ipAddress:'0.0.0.0',subnetMask:'255.255.255.0',gateway:''}}
+        this.addInterface('WLAN-OUT','LAN','300Mbps','wireless');
+        this.ipConfig={ipAddress:'192.168.100.1',subnetMask:'255.255.255.0',gateway:''};
+        this.dhcpServer={poolName:'ONT-default',network:'192.168.100.0/24',subnetMask:'255.255.255.0',gateway:'192.168.100.1',dns:['8.8.8.8'],leases:{},excluded:['192.168.100.1'],range:{start:'192.168.100.10',end:'192.168.100.200'}};
+    }
+    getDHCPPool(){ return this.dhcpServer; }
 }
 class Switch extends NetworkDevice {
     constructor(id,name,x,y,ports=24,configurable=true){super(id,name,'Switch',x,y);this.ports=ports;this.configurable=configurable;this.vlans={1:{name:'default',network:'192.168.1.0/24',gateway:'192.168.1.254'}};this.macAddressTable={};this.dhcpServer=null;this.inheritedVlan=null;
@@ -493,7 +545,7 @@ class Server extends NetworkDevice {
             subnetMask : '255.255.255.0',
             gateway    : '',
             dns        : ['8.8.8.8'],
-            dhcpEnabled: false,
+            dhcpEnabled: true,
         };
 
         // El servidor puede actuar como DHCP server
@@ -536,5 +588,105 @@ class Server extends NetworkDevice {
         return this.dhcpServer || null;
     }
 
-    requestDHCP() { return null; }   // Servers use static IPs
+    requestDHCP() {
+        // Servers can get IP via DHCP if dhcpEnabled
+        if(!this.ipConfig.dhcpEnabled) return false;
+        if(window.dhcpEngine){
+            window.dhcpEngine.runDHCP(this,
+                msg=>window.networkConsole?.writeToConsole(msg),
+                result=>{if(result&&window.simulator)window.simulator.draw();});
+            return true;
+        }
+        return null;
+    }
+}
+// ── Nuevos equipos de red ──────────────────────────────────────────────────
+
+/** Splitter óptico (pasivo): divide la señal de fibra en múltiples salidas.
+ *  No tiene IP propia. Actúa como un nodo pasivo de distribución. */
+class Splitter extends NetworkDevice {
+    constructor(id,name,x,y){
+        super(id,name,'Splitter',x,y);
+        this.ratio = '1:8';         // ratio de división (1:2, 1:4, 1:8, 1:16, 1:32)
+        this.loss  = 10.5;          // pérdida de inserción en dB (típica 1:8)
+        this.ipConfig = { ipAddress:'', subnetMask:'', gateway:'' };
+        // Un puerto de entrada y 8 de salida (por defecto)
+        this.addInterface('PON-IN','PON','1Gbps','fibra');
+        for(let i=0;i<8;i++) this.addInterface(`PON-OUT${i}`,'PON','1Gbps','fibra');
+    }
+    // Pasivo: sin DHCP, sin routing
+    requestDHCP(){ return null; }
+}
+
+/** ADN (Armario de Distribución de Nodo): punto de distribución en red HFC/FTTH.
+ *  Agrupa y distribuye señales de fibra hacia los splitters y usuarios. */
+class ADN extends NetworkDevice {
+    constructor(id,name,x,y){
+        super(id,name,'ADN',x,y);
+        this.capacity = 96;         // capacidad en puertos de fibra
+        this.type_hw  = 'FTTH';     // FTTH | HFC | FTTB
+        this.ipConfig = { ipAddress:'', subnetMask:'', gateway:'' };
+        // Puerto troncal de fibra hacia la OLT/ISP
+        this.addInterface('TRUNK-IN','PON','10Gbps','fibra');
+        // 4 puertos de distribución hacia splitters u ONTs
+        for(let i=0;i<4;i++) this.addInterface(`DIST${i}`,'PON','1Gbps','fibra');
+    }
+    requestDHCP(){ return null; }
+}
+
+/** Mufla (manga de empalme): elemento pasivo para empalmar fibras ópticas.
+ *  No tiene IP, es solo un punto de continuación/empalme de fibra. */
+class Mufla extends NetworkDevice {
+    constructor(id,name,x,y){
+        super(id,name,'Mufla',x,y);
+        this.splices   = 12;        // cantidad de empalmes
+        this.type_hw   = 'dome';    // dome | inline
+        this.ipConfig  = { ipAddress:'', subnetMask:'', gateway:'' };
+        this.addInterface('FIB-A','PON','1Gbps','fibra');
+        this.addInterface('FIB-B','PON','1Gbps','fibra');
+    }
+    requestDHCP(){ return null; }
+}
+
+/** Caja NAT: equipo que realiza NAT entre dos redes (típicamente privada/pública).
+ *  Tiene DHCP server en LAN y puede obtener IP en WAN por DHCP o estática. */
+class CajaNAT extends NetworkDevice {
+    constructor(id,name,x,y){
+        super(id,name,'CajaNAT',x,y);
+        this.natEnabled = true;
+        this.natTable   = {};
+        // Pool DHCP para la red interna LAN
+        this.dhcpServer = {
+            poolName  : 'LAN-NAT',
+            network   : '192.168.50.0/24',
+            subnetMask: '255.255.255.0',
+            gateway   : '192.168.50.1',
+            dns       : ['8.8.8.8'],
+            leases    : {},
+            excluded  : ['192.168.50.1'],
+            range     : { start:'192.168.50.10', end:'192.168.50.200' }
+        };
+        // WAN: 1 fibra + 1 cobre (entrada ISP)
+        this.addInterface('WAN-FIB','WAN','10Gbps','fibra');
+        this.addInterface('WAN-COB','WAN','1Gbps','cobre');
+        // LAN: 2 fibra + 4 cobre (salida red interna)
+        for(let i=0;i<2;i++) this.addInterface(`LAN-FIB${i}`,'LAN','10Gbps','fibra');
+        for(let i=0;i<4;i++) this.addInterface(`LAN${i}`,'LAN','1Gbps','cobre');
+        this.ipConfig = {
+            ipAddress  : '192.168.50.1',
+            subnetMask : '255.255.255.0',
+            gateway    : '',
+            dhcpEnabled: false
+        };
+    }
+    getDHCPPool(){ return this.dhcpServer; }
+    requestDHCP(){
+        if(window.dhcpEngine){
+            window.dhcpEngine.runDHCP(this,
+                msg=>window.networkConsole?.writeToConsole(msg),
+                result=>{if(result&&window.simulator)window.simulator.draw();});
+            return true;
+        }
+        return null;
+    }
 }

@@ -1,0 +1,70 @@
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <title>Mufla de laboratorio 64x64</title>
+
+  <!-- Sombra base -->
+  <ellipse cx="32" cy="62" rx="22" ry="1.6" fill="#005aaa" opacity="0.2"/>
+
+  <!-- ===== CUERPO PRINCIPAL ===== -->
+  <rect x="6" y="14" width="52" height="40" rx="3" fill="#0f3d6e"/>
+  <rect x="55" y="14" width="3" height="40" rx="0" fill="#082240"/>
+  <rect x="6" y="14" width="52" height="4" rx="3" fill="#1a5fa0"/>
+  <rect x="6" y="50" width="52" height="4" rx="2" fill="#082240"/>
+  <rect x="6" y="14" width="4" height="40" rx="2" fill="#1a5fa0"/>
+
+  <!-- ===== PANEL FRONTAL ===== -->
+  <rect x="10" y="18" width="34" height="30" rx="2" fill="#082240"/>
+  <rect x="11" y="19" width="32" height="28" rx="1.5" fill="#0a2d52"/>
+
+  <!-- ===== CÁMARA INTERIOR ===== -->
+  <rect x="12" y="20" width="30" height="26" rx="1" fill="#7c1a00"/>
+  <rect x="12.5" y="20.5" width="29" height="25" rx="0.8" fill="#a02200"/>
+  <rect x="13" y="21" width="28" height="12" rx="0.5" fill="#c43000" opacity="0.6"/>
+
+  <!-- Filamentos -->
+  <line x1="14" y1="25" x2="40" y2="25" stroke="#ffcc00" stroke-width="1" stroke-linecap="round"/>
+  <line x1="14" y1="29" x2="40" y2="29" stroke="#ffcc00" stroke-width="1" stroke-linecap="round"/>
+  <line x1="14" y1="33" x2="40" y2="33" stroke="#ffcc00" stroke-width="1" stroke-linecap="round"/>
+  <line x1="14" y1="37" x2="40" y2="37" stroke="#ffcc00" stroke-width="1" stroke-linecap="round"/>
+  <rect x="13" y="24.3" width="1.5" height="1.4" rx="0.3" fill="#cc9900"/>
+  <rect x="13" y="28.3" width="1.5" height="1.4" rx="0.3" fill="#cc9900"/>
+  <rect x="13" y="32.3" width="1.5" height="1.4" rx="0.3" fill="#cc9900"/>
+  <rect x="13" y="36.3" width="1.5" height="1.4" rx="0.3" fill="#cc9900"/>
+  <rect x="39.5" y="24.3" width="1.5" height="1.4" rx="0.3" fill="#cc9900"/>
+  <rect x="39.5" y="28.3" width="1.5" height="1.4" rx="0.3" fill="#cc9900"/>
+  <rect x="39.5" y="32.3" width="1.5" height="1.4" rx="0.3" fill="#cc9900"/>
+  <rect x="39.5" y="36.3" width="1.5" height="1.4" rx="0.3" fill="#cc9900"/>
+
+  <!-- ===== PANEL DE CONTROLES (derecho) ===== -->
+  <rect x="45" y="18" width="13" height="30" rx="1.5" fill="#0a2d52"/>
+  <rect x="45.5" y="18.5" width="12" height="29" rx="1" fill="#082240"/>
+
+  <!-- Pantalla temperatura -->
+  <rect x="46.5" y="20" width="9" height="5" rx="0.8" fill="#001a33"/>
+  <text x="51" y="24" font-family="Arial" font-size="3.5" fill="#22c55e" text-anchor="middle" font-weight="700">1050</text>
+  <text x="51" y="27" font-family="Arial" font-size="2.2" fill="#1ba0d7" text-anchor="middle">°C</text>
+
+  <!-- Perilla 1 -->
+  <circle cx="51" cy="33" r="3.5" fill="#0f3d6e" stroke="#1ba0d7" stroke-width="0.8"/>
+  <circle cx="51" cy="33" r="1.8" fill="#0070d2"/>
+  <line x1="51" y1="29.5" x2="51" y2="31.5" stroke="#5bc8f5" stroke-width="0.8" stroke-linecap="round"/>
+
+  <!-- Perilla 2 -->
+  <circle cx="51" cy="42" r="3.5" fill="#0f3d6e" stroke="#1ba0d7" stroke-width="0.8"/>
+  <circle cx="51" cy="42" r="1.8" fill="#0070d2"/>
+  <line x1="51" y1="38.5" x2="51" y2="40.5" stroke="#5bc8f5" stroke-width="0.8" stroke-linecap="round"/>
+
+  <!-- LED -->
+  <circle cx="47.5" cy="20.5" r="1" fill="#22c55e"/>
+
+  <!-- ===== TORNILLOS ===== -->
+  <circle cx="9" cy="20" r="1" fill="#1a5fa0" opacity="0.7"/>
+  <circle cx="9" cy="35" r="1" fill="#1a5fa0" opacity="0.7"/>
+  <circle cx="9" cy="50" r="1" fill="#1a5fa0" opacity="0.7"/>
+
+  <!-- ===== PATAS ===== -->
+  <rect x="10" y="53" width="8" height="3" rx="1" fill="#082240"/>
+  <rect x="46" y="53" width="8" height="3" rx="1" fill="#082240"/>
+
+  <!-- ===== ETIQUETA ===== -->
+  <text x="32" y="63" font-family="Arial" font-size="4.8" font-weight="700" fill="#0070d2" text-anchor="middle" letter-spacing="0.5">MUFLA</text>
+</svg>

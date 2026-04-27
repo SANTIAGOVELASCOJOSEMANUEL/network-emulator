@@ -217,6 +217,10 @@ document.addEventListener('DOMContentLoaded', () => {
             { label: '📶', name: 'ONT', title: 'ONT' },
             { label: '🟢', name: 'OLT', title: 'OLT' },
             { label: '📡', name: 'AP', title: 'Access Point' },
+            { label: '🔀', name: 'Splitter', title: 'Splitter' },
+            { label: '🗄️', name: 'ADN', title: 'ADN' },
+            { label: '🔗', name: 'Mufla', title: 'Mufla' },
+            { label: '🔁', name: 'CajaNAT', title: 'Caja NAT' },
         ]},
         // Endpoints
         { group: 'ep', items: [
@@ -468,6 +472,69 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }, 500);
 
+    // ── Fix #3: Vincular TCPEngine al simulador para que las sesiones persistan ──
+    // TCPEngine se instancia antes de que exista el simulator; aquí lo enlazamos.
+    setTimeout(() => {
+        if (window.TCPEngine && window.simulator) {
+            window.TCPEngine._sim = window.simulator;
+        }
+        if (window.HTTPEngine && window.simulator) {
+            window.HTTPEngine._sim = window.simulator;
+        }
+    }, 500);
+
+    // ── Fix #1 & #2: Inicializar MetricsDashboard, TrafficGenerator y LinkConfigPanel
+    //    desde app.js para que estén disponibles sin necesidad de abrir advanced.js ──
+    setTimeout(() => {
+        const sim = window.simulator;
+        if (!sim) return;
+
+        // LinkConfigPanel — necesario para doble clic en cables
+        if (typeof LinkConfigPanel !== 'undefined' && !window.linkConfigPanel) {
+            window.linkConfigPanel = new LinkConfigPanel(sim);
+        }
+
+        // MetricsDashboard — panel de métricas en tiempo real
+        if (typeof MetricsDashboard !== 'undefined' && !window.metricsDashboard) {
+            window.metricsDashboard = new MetricsDashboard(sim);
+            const trafficBtn = document.getElementById('openTrafficBtn');
+            if (trafficBtn && !trafficBtn._metricsInitialized) {
+                trafficBtn._metricsInitialized = true;
+                trafficBtn.addEventListener('click', () => {
+                    const panel = document.getElementById('mdbPanel');
+                    if (!panel) return;
+                    const visible = panel.style.display === 'flex';
+                    if (visible) { window.metricsDashboard.hide(); trafficBtn.classList.remove('active'); }
+                    else         { window.metricsDashboard.show(); trafficBtn.classList.add('active'); }
+                });
+            }
+        }
+
+        // TrafficGenerator — generador de tráfico automático
+        if (typeof TrafficGenerator !== 'undefined' && !window.trafficGenerator) {
+            window.trafficGenerator = new TrafficGenerator(sim);
+            const advSidebar = document.getElementById('advSidebar');
+            if (advSidebar && !document.getElementById('openTrafficGenBtn')) {
+                const tgBtn = document.createElement('button');
+                tgBtn.className = 'adv-btn';
+                tgBtn.id = 'openTrafficGenBtn';
+                tgBtn.title = 'Generador de Tráfico';
+                tgBtn.innerHTML = `
+                    <svg viewBox="0 0 20 20">
+                        <polyline points="2,16 5,10 8,13 11,7 14,11 17,5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+                        <circle cx="17" cy="5" r="1.8" fill="currentColor"/>
+                    </svg>
+                    <span>Gen.</span>
+                `;
+                advSidebar.appendChild(tgBtn);
+                tgBtn.addEventListener('click', () => {
+                    window.trafficGenerator.toggle();
+                    tgBtn.classList.toggle('active', document.getElementById('tgPanel')?.style.display === 'flex');
+                });
+            }
+        }
+    }, 400);
+
     // Hook: loggear eventos importantes del simulador
     const _origConnect = simulator.connectDevices?.bind(simulator);
     if (_origConnect) {
@@ -636,11 +703,47 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        // ── AP / WiFi ──
-        if (['AP', 'RouterWifi', 'Bridge'].includes(device.type) && device.ssid) {
+        // ── AP / WiFi / Mesh ──
+        if (['AP', 'Router', 'RouterWifi', 'Bridge'].includes(device.type) && device.ssid !== undefined) {
             h += `<div class="prop-section">📶 WiFi</div>
             <div class="property-item"><label>SSID</label><input type="text" value="${device.ssid}" id="devSSID" class="property-input"></div>`;
             if (device.security) h += `<div class="property-item"><label>Seguridad</label><span>${device.security}</span></div>`;
+            if (device.band) h += `<div class="property-item"><label>Banda</label><span>${device.band}</span></div>`;
+        }
+        // ── Modo Router / AP (solo para Router y RouterWifi) ──
+        if (['Router', 'RouterWifi'].includes(device.type) && device.operationMode !== undefined) {
+            const modeR = device.operationMode==='router' ? 'selected' : '';
+            const modeA = device.operationMode==='ap' ? 'selected' : '';
+            h += `<div class="prop-section">⚙️ Modo de Operación</div>
+            <div class="property-item"><label>Modo</label>
+              <select id="devOpMode" class="property-select">
+                <option value="router" ${modeR}>🌐 Router</option>
+                <option value="ap" ${modeA}>📡 Access Point</option>
+              </select>
+            </div>`;
+            // ── Malla WiFi ──
+            const meshChk = device.meshEnabled ? 'checked' : '';
+            const meshRoleR = device.meshRole==='root' ? 'selected' : '';
+            const meshRoleN = device.meshRole==='node' ? 'selected' : '';
+            h += `<div class="prop-section">🕸️ Malla WiFi (Mesh)</div>
+            <div class="property-item">
+              <label>Habilitar Mesh</label>
+              <input type="checkbox" id="devMeshEnable" ${meshChk} style="width:auto;accent-color:#a855f7">
+            </div>
+            <div id="meshOptions" style="display:${device.meshEnabled?'block':'none'}">
+              <div class="property-item"><label>Mesh ID</label>
+                <input type="text" value="${device.meshId||''}" id="devMeshId" class="property-input" placeholder="MiRedMesh">
+              </div>
+              <div class="property-item"><label>Rol en Malla</label>
+                <select id="devMeshRole" class="property-select">
+                  <option value="root" ${meshRoleR}>👑 Raíz (Gateway)</option>
+                  <option value="node" ${meshRoleN}>🔗 Nodo</option>
+                </select>
+              </div>
+              <div class="property-item" style="font-size:10px;color:var(--text-dim)">
+                Conecta routers mesh por WLAN-MESH para formar la red. El nodo raíz da acceso a internet.
+              </div>
+            </div>`;
         }
 
         // ── Camera ──
@@ -720,6 +823,22 @@ document.addEventListener('DOMContentLoaded', () => {
         // Bind events
         $('devName')?.addEventListener('change', e => { device.name = e.target.value; simulator.draw(); });
         $('devSSID')?.addEventListener('change', e => { device.ssid = e.target.value; });
+        $('devOpMode')?.addEventListener('change', e => {
+            if (device.setOperationMode) { device.setOperationMode(e.target.value); simulator.draw(); }
+            else { device.operationMode = e.target.value; }
+        });
+        $('devMeshEnable')?.addEventListener('change', e => {
+            device.meshEnabled = e.target.checked;
+            const opts = document.getElementById('meshOptions');
+            if (opts) opts.style.display = e.target.checked ? 'block' : 'none';
+            if (!e.target.checked && device.disableMesh) device.disableMesh();
+            simulator.draw();
+        });
+        $('devMeshId')?.addEventListener('change', e => { device.meshId = e.target.value; });
+        $('devMeshRole')?.addEventListener('change', e => {
+            device.meshRole = e.target.value;
+            if (device.enableMesh) device.enableMesh(device.meshId, e.target.value);
+        });
         $('devExt')?.addEventListener('change', e => { device.extension = e.target.value; });
         $('devSIP')?.addEventListener('change', e => { device.sipServer = e.target.value; });
         $('devZone')?.addEventListener('change', e => { device.zone = e.target.value; });
@@ -1111,7 +1230,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const ann = simulator.findAnnotationAt(wc.x, wc.y);
         if (ann) { const txt = prompt('Editar:', ann.text); if (txt?.trim()) { ann.text = txt.trim(); simulator.draw(); } return; }
         const dev = simulator.findDeviceAt(wc.x, wc.y);
-        if (dev) { simulator.selectDevice(dev); netConsole.setCurrentDevice(dev); simulator.openInterfaceModal(dev); updatePanel(dev); }
+        if (dev) { simulator.selectDevice(dev); netConsole.setCurrentDevice(dev); simulator.openInterfaceModal(dev); updatePanel(dev); return; }
+        // ── Doble clic sobre un cable → abrir panel de configuración ──
+        if (mode === 'select' || !mode) {
+            const conn = findClosestConn(wc, 14 / simulator.zoom);
+            if (conn && window.linkConfigPanel) { window.linkConfigPanel.show(conn); return; }
+        }
     });
 
     document.addEventListener('click', e => {

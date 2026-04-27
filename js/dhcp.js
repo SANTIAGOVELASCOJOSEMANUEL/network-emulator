@@ -19,7 +19,7 @@ class DHCPEngine {
     //   • NUNCA asignar como gateway la IP del propio cliente
     _findDHCPServer(client) {
         // Prioridad de tipo de servidor (menor número = mayor prioridad)
-        const PRIO = { Router:1, Firewall:1, RouterWifi:2, AC:3, Switch:4, SwitchPoE:4, AP:99 };
+        const PRIO = { Router:1, Firewall:1, RouterWifi:2, ONT:2, CajaNAT:2, AC:3, Switch:4, SwitchPoE:4, Splitter:999, ADN:999, Mufla:999, AP:5 };
 
         const visited  = new Set();
         // Cada candidato: { server, pool, gwIntf, firstHop, prio }
@@ -105,9 +105,18 @@ class DHCPEngine {
             }
         }
 
-        // Caso 2: AC, RouterWifi, Switch con dhcpServer directo
+        // Caso 2: RouterWifi, ONT, AP, CajaNAT, AC, Switch con dhcpServer directo
         const rawPool = srv.dhcpServer || (srv.getDHCPPool && srv.getDHCPPool());
-        if (rawPool && useGW) rawPool.gateway = useGW;
+        if (rawPool) {
+            // Si el servidor TIENE su propia IP definida (RouterWifi, ONT, CajaNAT),
+            // usar SU IP como gateway para los clientes, no la del upstream.
+            const srvOwnIP = srv.ipConfig?.ipAddress;
+            if (srvOwnIP && srvOwnIP !== '0.0.0.0') {
+                rawPool.gateway = srvOwnIP;
+            } else if (useGW) {
+                rawPool.gateway = useGW;
+            }
+        }
         return srv;
     }
 

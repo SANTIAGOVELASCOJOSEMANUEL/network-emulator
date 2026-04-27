@@ -163,6 +163,10 @@ class NetworkSimulator {
             PayTerminal  : () => new PayTerminal(id, name, wx, wy),
             Alarm        : () => new Alarm(id, name, wx, wy),
             Server       : () => new Server(id, name, wx, wy),
+            Splitter     : () => new Splitter(id, name, wx, wy),
+            ADN          : () => new ADN(id, name, wx, wy),
+            Mufla        : () => new Mufla(id, name, wx, wy),
+            CajaNAT      : () => new CajaNAT(id, name, wx, wy),
         };
         const fn = map[type]; if (!fn) return null;
         const dev = fn();
@@ -1333,79 +1337,96 @@ class NetworkSimulator {
      */
     exportToPNG() {
         const MARGIN = 40;
-        // Calcular bounding box del contenido
         if (!this.devices.length && !this.annotations.length) {
             alert('No hay contenido para exportar.');
             return;
         }
 
-        // Determinar extensión del contenido en coordenadas mundo
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        this.devices.forEach(d => {
-            minX = Math.min(minX, d.x - 50);
-            minY = Math.min(minY, d.y - 50);
-            maxX = Math.max(maxX, d.x + 50);
-            maxY = Math.max(maxY, d.y + 50);
-        });
-        (this.annotations || []).forEach(a => {
-            minX = Math.min(minX, a.x - 10);
-            minY = Math.min(minY, a.y - 10);
-            maxX = Math.max(maxX, a.x + 200);
-            maxY = Math.max(maxY, a.y + 30);
-        });
+        // Fix #6: Esperar a que todos los íconos pendientes terminen de cargar
+        // antes de dibujar el canvas off-screen, para evitar íconos en blanco.
+        const renderer = this.renderer;
+        const iconCache = renderer?._iconCache || {};
+        const pendingLoads = Object.values(iconCache).filter(v => v === 'loading');
 
-        const contentW = maxX - minX;
-        const contentH = maxY - minY;
-        const exportW  = contentW + MARGIN * 2;
-        const exportH  = contentH + MARGIN * 2;
+        const _doExport = () => {
+            // Determinar extensión del contenido en coordenadas mundo
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            this.devices.forEach(d => {
+                minX = Math.min(minX, d.x - 50);
+                minY = Math.min(minY, d.y - 50);
+                maxX = Math.max(maxX, d.x + 50);
+                maxY = Math.max(maxY, d.y + 50);
+            });
+            (this.annotations || []).forEach(a => {
+                minX = Math.min(minX, a.x - 10);
+                minY = Math.min(minY, a.y - 10);
+                maxX = Math.max(maxX, a.x + 200);
+                maxY = Math.max(maxY, a.y + 30);
+            });
 
-        // Crear canvas off-screen con fondo blanco
-        const offCanvas = document.createElement('canvas');
-        offCanvas.width  = exportW;
-        offCanvas.height = exportH;
-        const offCtx = offCanvas.getContext('2d');
+            const contentW = maxX - minX;
+            const contentH = maxY - minY;
+            const exportW  = contentW + MARGIN * 2;
+            const exportH  = contentH + MARGIN * 2;
 
-        // Fondo blanco (universal para PNG)
-        offCtx.fillStyle = '#ffffff';
-        offCtx.fillRect(0, 0, exportW, exportH);
+            // Canvas off-screen con fondo blanco
+            const offCanvas = document.createElement('canvas');
+            offCanvas.width  = exportW;
+            offCanvas.height = exportH;
+            const offCtx = offCanvas.getContext('2d');
+            offCtx.fillStyle = '#ffffff';
+            offCtx.fillRect(0, 0, exportW, exportH);
 
-        // Aplicar transformación para centrar el contenido del mundo
-        offCtx.save();
-        offCtx.translate(MARGIN - minX, MARGIN - minY);
+            // Intercambiar contexto temporalmente y redibujar
+            const origCtx    = this.ctx;
+            const origOffset = { x: this.offsetX, y: this.offsetY };
+            const origZoom   = this.zoom;
 
-        // Redibujar la red en el canvas off-screen
-        // Guardamos el contexto original y lo reemplazamos temporalmente
-        const origCtx    = this.ctx;
-        const origOffset = { x: this.offsetX, y: this.offsetY };
-        const origZoom   = this.zoom;
+            this.ctx     = offCtx;
+            this.offsetX = MARGIN - minX;
+            this.offsetY = MARGIN - minY;
+            this.zoom    = 1;
 
-        this.ctx     = offCtx;
-        this.offsetX = MARGIN - minX;
-        this.offsetY = MARGIN - minY;
-        this.zoom    = 1;
+            try {
+                this.draw();
+            } finally {
+                this.ctx     = origCtx;
+                this.offsetX = origOffset.x;
+                this.offsetY = origOffset.y;
+                this.zoom    = origZoom;
+            }
 
-        try {
+            // Restaurar vista principal
             this.draw();
-        } finally {
-            this.ctx     = origCtx;
-            this.offsetX = origOffset.x;
-            this.offsetY = origOffset.y;
-            this.zoom    = origZoom;
-            offCtx.restore();
+
+            const filename = `topologia_${new Date().toISOString().slice(0, 16).replace('T', '_').replace(/:/g, '-')}.png`;
+            offCanvas.toBlob(blob => {
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = filename;
+                a.style.display = 'none';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(a.href);
+            }, 'image/png');
+        };
+
+        if (pendingLoads.length === 0) {
+            // Todos los íconos ya están en cache — exportar de inmediato
+            _doExport();
+        } else {
+            // Hay íconos cargando; esperar con polling (max 3 s)
+            let waited = 0;
+            const poll = setInterval(() => {
+                waited += 100;
+                const stillLoading = Object.values(renderer._iconCache).some(v => v === 'loading');
+                if (!stillLoading || waited >= 3000) {
+                    clearInterval(poll);
+                    _doExport();
+                }
+            }, 100);
         }
-
-        // Redibujar en el canvas original (restaurar vista)
-        this.draw();
-
-        // Descargar
-        const filename = `topologia_${new Date().toISOString().slice(0, 16).replace('T', '_').replace(/:/g, '-')}.png`;
-        offCanvas.toBlob(blob => {
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = filename;
-            a.click();
-            URL.revokeObjectURL(a.href);
-        }, 'image/png');
     }
 
     // ── ANOTACIONES ───────────────────────────────

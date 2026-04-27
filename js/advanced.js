@@ -800,12 +800,13 @@ class EventLog {
 //  INICIALIZACIÓN GLOBAL
 // ══════════════════════════════════════════════════════════════════════
 
-window.NATEngine      = null;
-window.FirewallEngine = null;
-window.trafficMonitor = null;
-window.faultSimulator = null;
-window.networkDiag    = null;
-window.eventLog       = null;
+window.NATEngine        = null;
+window.FirewallEngine   = null;
+window.trafficMonitor   = null;
+window.metricsDashboard = null;
+window.faultSimulator   = null;
+window.networkDiag      = null;
+window.eventLog         = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => {
@@ -817,5 +818,52 @@ document.addEventListener('DOMContentLoaded', () => {
         window.faultSimulator = new FaultSimulator(sim);
         window.networkDiag    = new NetworkDiagnostics(sim);
         window.eventLog       = new EventLog();
+
+        // Dashboard de métricas en tiempo real (solo si app.js no lo inició ya)
+        if (typeof MetricsDashboard !== 'undefined' && !window.metricsDashboard) {
+            window.metricsDashboard = new MetricsDashboard(sim);
+            const trafficBtn = document.getElementById('openTrafficBtn');
+            if (trafficBtn && !trafficBtn._metricsInitialized) {
+                trafficBtn._metricsInitialized = true;
+                const newBtn = trafficBtn.cloneNode(true);
+                trafficBtn.parentNode.replaceChild(newBtn, trafficBtn);
+                newBtn.addEventListener('click', () => {
+                    const panel = document.getElementById('mdbPanel');
+                    if (!panel) return;
+                    const visible = panel.style.display === 'flex';
+                    if (visible) { window.metricsDashboard.hide(); newBtn.classList.remove('active'); }
+                    else         { window.metricsDashboard.show(); newBtn.classList.add('active'); }
+                });
+            }
+        }
+
+        // Panel de configuración de enlace — solo si app.js no lo inició ya
+        if (typeof LinkConfigPanel !== 'undefined' && !window.linkConfigPanel) {
+            window.linkConfigPanel = new LinkConfigPanel(sim);
+        }
+
+        // Generador de tráfico automático — solo si app.js no lo inició ya
+        if (typeof TrafficGenerator !== 'undefined' && !window.trafficGenerator) {
+            window.trafficGenerator = new TrafficGenerator(sim);
+            const advSidebar = document.getElementById('advSidebar');
+            if (advSidebar && !document.getElementById('openTrafficGenBtn')) {
+                const tgBtn = document.createElement('button');
+                tgBtn.className = 'adv-btn';
+                tgBtn.id = 'openTrafficGenBtn';
+                tgBtn.title = 'Generador de Tráfico';
+                tgBtn.innerHTML = `
+                    <svg viewBox="0 0 20 20">
+                        <polyline points="2,16 5,10 8,13 11,7 14,11 17,5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+                        <circle cx="17" cy="5" r="1.8" fill="currentColor"/>
+                    </svg>
+                    <span>Gen.</span>
+                `;
+                advSidebar.appendChild(tgBtn);
+                tgBtn.addEventListener('click', () => {
+                    window.trafficGenerator.toggle();
+                    tgBtn.classList.toggle('active', document.getElementById('tgPanel')?.style.display === 'flex');
+                });
+            }
+        }
     }, 300);
 });

@@ -1,0 +1,72 @@
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <title>Caja NAT 64x64</title>
+
+  <!-- Sombra base -->
+  <ellipse cx="32" cy="62" rx="22" ry="1.6" fill="#005aaa" opacity="0.2"/>
+
+  <!-- ===== CUERPO PRINCIPAL ===== -->
+  <rect x="4" y="18" width="56" height="32" rx="3" fill="#0f3d6e"/>
+  <!-- Sombra lateral derecha -->
+  <rect x="57" y="18" width="3" height="32" rx="0" fill="#082240"/>
+  <!-- Cara superior -->
+  <rect x="4" y="18" width="56" height="4" rx="3" fill="#1a5fa0"/>
+  <!-- Cara inferior -->
+  <rect x="4" y="46" width="56" height="4" rx="2" fill="#082240"/>
+  <!-- Highlight izquierdo -->
+  <rect x="4" y="18" width="4" height="32" rx="2" fill="#1a5fa0"/>
+
+  <!-- ===== PANEL FRONTAL ===== -->
+  <rect x="8" y="22" width="52" height="24" rx="2" fill="#082240"/>
+
+  <!-- ===== FRANJA SUPERIOR (header) ===== -->
+  <rect x="8.5" y="22.5" width="51" height="5" rx="1" fill="#0070d2"/>
+  <rect x="8.5" y="22.5" width="51" height="2" rx="1" fill="#1ba0d7"/>
+
+  <!-- ===== ZONA IZQUIERDA: IP privada → -->
+  <!-- Etiqueta -->
+  <text x="9" y="31.5" font-family="Arial" font-size="2.8" fill="#5bc8f5" font-weight="700">PRIVATE</text>
+  <!-- IPs privadas -->
+  <rect x="9" y="33" width="14" height="3" rx="0.5" fill="#0a2d52"/>
+  <text x="10" y="35.3" font-family="Arial" font-size="2.5" fill="#5bc8f5">192.168.1.x</text>
+  <rect x="9" y="37" width="14" height="3" rx="0.5" fill="#0a2d52"/>
+  <text x="10" y="39.3" font-family="Arial" font-size="2.5" fill="#5bc8f5">10.0.0.x</text>
+  <!-- LED verde -->
+  <circle cx="10" cy="42" r="1.2" fill="#22c55e"/>
+  <circle cx="13" cy="42" r="1.2" fill="#22c55e"/>
+  <circle cx="16" cy="42" r="1.2" fill="#f59e0b"/>
+
+  <!-- ===== ZONA CENTRAL: flechas NAT ===== -->
+  <!-- Flecha → (privado a público) -->
+  <line x1="25" y1="33" x2="38" y2="33" stroke="#1ba0d7" stroke-width="1.2" stroke-linecap="round"/>
+  <polygon points="38,31.5 38,34.5 41,33" fill="#1ba0d7"/>
+  <!-- Flecha ← (respuesta) -->
+  <line x1="25" y1="38" x2="38" y2="38" stroke="#0070d2" stroke-width="1" stroke-linecap="round" stroke-dasharray="2,1.5"/>
+  <polygon points="25,36.5 25,39.5 22,38" fill="#0070d2"/>
+  <!-- Etiqueta NAT -->
+  <rect x="25" y="41" width="14" height="4" rx="1" fill="#0070d2"/>
+  <text x="32" y="44" font-family="Arial" font-size="3.5" fill="white" font-weight="700" text-anchor="middle" letter-spacing="0.5">NAT</text>
+
+  <!-- ===== ZONA DERECHA: IP pública ===== -->
+  <text x="43" y="31.5" font-family="Arial" font-size="2.8" fill="#5bc8f5" font-weight="700">PUBLIC</text>
+  <rect x="43" y="33" width="16" height="3" rx="0.5" fill="#0a2d52"/>
+  <text x="44" y="35.3" font-family="Arial" font-size="2.5" fill="#22c55e">200.x.x.x</text>
+  <!-- Puerto WAN -->
+  <rect x="43" y="37" width="7" height="5" rx="1" fill="#003d7a" stroke="#1ba0d7" stroke-width="0.5"/>
+  <rect x="44.5" y="38" width="4" height="1.5" rx="0.3" fill="#1ba0d7"/>
+  <text x="55" y="40" font-family="Arial" font-size="2.5" fill="#5bc8f5" text-anchor="middle">WAN</text>
+  <!-- LED público -->
+  <circle cx="44" cy="43" r="1.2" fill="#22c55e"/>
+  <circle cx="47" cy="43" r="1.2" fill="#22c55e"/>
+
+  <!-- ===== TORNILLOS ===== -->
+  <circle cx="7" cy="24" r="1" fill="#1a5fa0" opacity="0.7"/>
+  <circle cx="7" cy="35" r="1" fill="#1a5fa0" opacity="0.7"/>
+  <circle cx="7" cy="46" r="1" fill="#1a5fa0" opacity="0.7"/>
+
+  <!-- ===== PATAS ===== -->
+  <rect x="10" y="50" width="8" height="3" rx="1" fill="#082240"/>
+  <rect x="46" y="50" width="8" height="3" rx="1" fill="#082240"/>
+
+  <!-- ===== ETIQUETA ===== -->
+  <text x="32" y="63" font-family="Arial" font-size="4.8" font-weight="700" fill="#0070d2" text-anchor="middle" letter-spacing="0.5">NAT</text>
+</svg>
