@@ -275,17 +275,99 @@ class AccessPoint extends NetworkDevice {
         super(id,name,'AP',x,y);
         this.ssid=`AP-${name}`;this.band='2.4/5GHz';this.security='WPA2';
         this.wirelessEnabled=true;this.connectedClients=[];
-        // ETH-UP: uplink al switch/AC/router
+        // ── Mesh / Malla WiFi ──
+        this.meshEnabled=false;
+        this.meshId=`Mesh-${name}`;
+        this.meshRole='node'; // Los APs siempre son nodos; el AC/RouterWifi es la raíz
+        this.meshAutoConnect=false; // Si true, busca y se conecta al AP más cercano
+        // ETH-UP: uplink cableado al switch/AC/router
         this.addInterface('ETH-UP','LAN','1Gbps','cobre');
-        // WLAN0: interfaz uplink inalámbrica (si viene por aire del AC)
+        // WLAN0: uplink inalámbrico (recibe SSID del AC cuando está bajo su gestión)
         this.addInterface('WLAN0','LAN','300Mbps','wireless');
+        // WLAN-MESH: backhaul mesh inalámbrico entre APs
+        this.addInterface('WLAN-MESH','LAN','867Mbps','wireless');
         // WLAN1-WLAN4: puertos para clientes inalámbricos (laptops, celulares)
         for(let i=1;i<=4;i++)this.addInterface(`WLAN${i}`,'LAN','300Mbps','wireless');
         this.ipConfig={ipAddress:'0.0.0.0',subnetMask:'255.255.255.0',gateway:'',dhcpEnabled:true};
         // El AP tiene su propio sub-pool DHCP — se inicializa cuando el AP obtiene su IP
-        // Esto asegura que los clientes del AP obtengan IPs del mismo bloque que el AP
-        // pero NUNCA la misma IP que el propio AP.
         this.dhcpServer = null;
+    }
+    enableMesh(meshId, role='node'){
+        this.meshEnabled=true;
+        this.meshId=meshId;
+        this.meshRole=role;
+    }
+    disableMesh(){
+        this.meshEnabled=false;
+        this.meshAutoConnect=false;
+    }
+    /** Devuelve el SSID efectivo: si está bajo un AC, usa el del AC; si no, el propio */
+    getEffectiveSSID(){
+        if(!this.meshEnabled){
+            // Buscar si está conectado a un AC por cable (ETH-UP)
+            const conns = window.simulator?.connections || [];
+            const uplinkConn = conns.find(c=>{
+                if(c.from===this) return c.fromInterface?.name==='ETH-UP';
+                if(c.to===this)   return c.toInterface?.name==='ETH-UP';
+                return false;
+            });
+            if(uplinkConn){
+                const uplink = uplinkConn.from===this ? uplinkConn.to : uplinkConn.from;
+                if(uplink?.type==='AC' && uplink.ssid) return uplink.ssid;
+            }
+        }
+        return this.ssid;
+    }
+    /**
+     * Busca el AP o RouterWifi mesh más cercano en el canvas (por distancia euclídea)
+     * y retorna el dispositivo encontrado, o null si no hay ninguno con mesh activo.
+     * @param {Array} allDevices
+     * @returns {NetworkDevice|null}
+     */
+    findNearestMeshPeer(allDevices){
+        let nearest=null, minDist=Infinity;
+        for(const d of allDevices){
+            if(d===this) continue;
+            if(!d.meshEnabled) continue;
+            if(!['AP','RouterWifi','Router'].includes(d.type)) continue;
+            if(d.meshId !== this.meshId) continue; // misma red mesh
+            const dx=d.x-this.x, dy=d.y-this.y;
+            const dist=Math.sqrt(dx*dx+dy*dy);
+            if(dist<minDist){ minDist=dist; nearest=d; }
+        }
+        return nearest;
+    }
+    /**
+     * Conecta automáticamente este AP al peer mesh más cercano via WLAN-MESH.
+     * Solo conecta si meshAutoConnect=true y no hay ya una conexión WLAN-MESH.
+     * @param {Array} allDevices
+     * @param {Array} connections  Array de conexiones del simulador (se modifica in-place)
+     * @returns {string}  Mensaje descriptivo del resultado
+     */
+    autoConnectMesh(allDevices, connections){
+        if(!this.meshEnabled || !this.meshAutoConnect)
+            return '⚠️ Mesh no habilitado o autoconexión desactivada';
+        // Verificar si WLAN-MESH ya está ocupado
+        const meshIntf=this.getInterfaceByName('WLAN-MESH');
+        if(!meshIntf) return '❌ Interfaz WLAN-MESH no encontrada';
+        if(meshIntf.connectedTo) return `ℹ️ ${this.name} ya está conectado en mesh`;
+        const peer=this.findNearestMeshPeer(allDevices);
+        if(!peer) return `🔍 ${this.name}: No se encontró peer mesh con ID "${this.meshId}"`;
+        // Buscar interfaz disponible en el peer
+        const peerMeshIntf = peer.getInterfaceByName('WLAN-MESH')
+            || peer.interfaces.find(i=>i.mediaType==='wireless'&&!i.connectedTo&&i.name!=='WLAN0');
+        if(!peerMeshIntf) return `❌ ${peer.name}: No tiene interfaz WLAN-MESH libre`;
+        // Crear la conexión
+        meshIntf.connectedTo=peer; meshIntf.connectedInterface=peerMeshIntf;
+        peerMeshIntf.connectedTo=this; peerMeshIntf.connectedInterface=meshIntf;
+        connections.push({
+            from:this, to:peer,
+            fromInterface:meshIntf, toInterface:peerMeshIntf,
+            status:'up', speed:'867Mbps', type:'wireless',
+            linkState:{bandwidth:867,latency:5,lossRate:0,status:'up'}
+        });
+        return `✅ ${this.name} → conectado en mesh a ${peer.name} (dist: ${
+            Math.round(Math.sqrt((peer.x-this.x)**2+(peer.y-this.y)**2))}px)`;
     }
     requestDHCP(){
         if(window.dhcpEngine){
@@ -335,8 +417,44 @@ class AccessPoint extends NetworkDevice {
     }
 }
 class AC extends NetworkDevice {
-    constructor(id,name,x,y){super(id,name,'AC',x,y);this.managedAPs=[];this.addInterface('WAN0','WAN','1Gbps','cobre');for(let i=0;i<8;i++)this.addInterface(`LAN${i}`,'LAN','1Gbps','cobre');this.addInterface('MGMT','MGMT','1Gbps','cobre');
-    this.dhcpServer={poolName:'default',network:'192.168.10.0/24',subnetMask:'255.255.255.0',gateway:'192.168.10.1',dns:['8.8.8.8'],leases:{},range:{start:'192.168.10.10',end:'192.168.10.200'}};this.ipConfig={ipAddress:'0.0.0.0',subnetMask:'255.255.255.0',gateway:'',dhcpEnabled:true};}
+    constructor(id,name,x,y){
+        super(id,name,'AC',x,y);
+        this.managedAPs=[];
+        // ── WiFi centralizado: el AC es quien define el SSID global ──
+        this.ssid=`WiFi-${name}`;
+        this.band='2.4/5GHz';
+        this.security='WPA3';
+        // ── Mesh: el AC actúa como raíz de la malla ──
+        this.meshEnabled=false;
+        this.meshId=`Mesh-${name}`;
+        this.meshRole='root'; // el AC siempre es raíz
+        this.addInterface('WAN0','WAN','1Gbps','cobre');
+        for(let i=0;i<8;i++)this.addInterface(`LAN${i}`,'LAN','1Gbps','cobre');
+        this.addInterface('MGMT','MGMT','1Gbps','cobre');
+        this.dhcpServer={poolName:'default',network:'192.168.10.0/24',subnetMask:'255.255.255.0',gateway:'192.168.10.1',dns:['8.8.8.8'],leases:{},range:{start:'192.168.10.10',end:'192.168.10.200'}};
+        this.ipConfig={ipAddress:'0.0.0.0',subnetMask:'255.255.255.0',gateway:'',dhcpEnabled:true};
+    }
+    enableMesh(meshId, role='root'){
+        this.meshEnabled=true;
+        this.meshId=meshId;
+        this.meshRole='root'; // el AC siempre es raíz, ignorar role si se pasa 'node'
+    }
+    disableMesh(){
+        this.meshEnabled=false;
+    }
+    /**
+     * Propaga el SSID del AC a todos los APs conectados por cable (ETH-UP).
+     * Llama a esto al cambiar el SSID del AC.
+     * @param {Array} connections  Array de conexiones del simulador
+     */
+    propagateSSID(connections){
+        for(const conn of connections){
+            let ap=null;
+            if(conn.to?.type==='AP' && conn.toInterface?.name==='ETH-UP' && conn.from===this) ap=conn.to;
+            if(conn.from?.type==='AP' && conn.fromInterface?.name==='ETH-UP' && conn.to===this) ap=conn.from;
+            if(ap) ap.ssid=this.ssid;
+        }
+    }
     requestDHCP(){if(window.dhcpEngine){window.dhcpEngine.runDHCP(this,msg=>window.networkConsole?.writeToConsole(msg),result=>{if(result&&window.simulator)window.simulator.draw();});return true;}return null;}
 }
 class Firewall extends NetworkDevice {

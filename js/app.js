@@ -7,6 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const simulator  = new NetworkSimulator('networkCanvas');
     const netConsole = new NetworkConsole(simulator);
     window.networkConsole = netConsole;
+    window.simulator = simulator; // exponer para acceso global (mesh autoconect, etc.)
     const $ = id => document.getElementById(id);
 
     // ── PacketAnimator — animación visual de paquetes ─────────────────
@@ -47,6 +48,24 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch(e) { console.warn('AutoLoad falló:', e); }
 
     // ── Autoguardado cada 30 segundos ────────────────────────────────
+
+    // ── Mesh autoconexión: conecta el AP al peer mesh más cercano ──
+    simulator._apMeshAutoConnect = function(ap) {
+        if (!ap || ap.type !== 'AP') {
+            window.networkConsole?.writeToConsole('⚠️ Selecciona un AP para usar la autoconexión mesh');
+            return;
+        }
+        if (!ap.meshEnabled) {
+            window.networkConsole?.writeToConsole('⚠️ Activa primero el Mesh en el AP');
+            return;
+        }
+        const allDevices = simulator.devices || [];
+        const connections = simulator.connections || [];
+        const msg = ap.autoConnectMesh(allDevices, connections);
+        window.networkConsole?.writeToConsole(msg);
+        simulator.draw();
+    };
+
     startAutoSave(simulator, 30000);
 
     let mode = 'select';
@@ -703,17 +722,61 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        // ── AP / WiFi / Mesh ──
-        if (['AP', 'Router', 'RouterWifi', 'Bridge'].includes(device.type) && device.ssid !== undefined) {
+        // ── AP / WiFi (Bridge) ──
+        // SSID propio solo para AP standalone y Bridge (no AC, no Router/RouterWifi que tienen su propio bloque)
+        if (['AP', 'Bridge'].includes(device.type) && device.ssid !== undefined) {
+            const ssidEfectivo = device.type==='AP' && device.getEffectiveSSID
+                ? device.getEffectiveSSID()
+                : device.ssid;
             h += `<div class="prop-section">📶 WiFi</div>
-            <div class="property-item"><label>SSID</label><input type="text" value="${device.ssid}" id="devSSID" class="property-input"></div>`;
+            <div class="property-item"><label>SSID propio</label><input type="text" value="${device.ssid}" id="devSSID" class="property-input"></div>`;
+            if (device.type==='AP') {
+                h += `<div class="property-item" style="font-size:10px;color:var(--text-dim)">
+                  📡 SSID efectivo: <strong style="color:#a78bfa">${ssidEfectivo}</strong>
+                  ${ssidEfectivo!==device.ssid?' (heredado del AC)':''}
+                </div>`;
+            }
             if (device.security) h += `<div class="property-item"><label>Seguridad</label><span>${device.security}</span></div>`;
-            if (device.band) h += `<div class="property-item"><label>Banda</label><span>${device.band}</span></div>`;
+            if (device.band)     h += `<div class="property-item"><label>Banda</label><span>${device.band}</span></div>`;
         }
-        // ── Modo Router / AP (solo para Router y RouterWifi) ──
+
+        // ── AC: WiFi centralizado + Mesh raíz ──
+        if (device.type === 'AC') {
+            h += `<div class="prop-section">🎛️ WiFi Controller (AC)</div>
+            <div class="property-item"><label>SSID Global</label>
+              <input type="text" value="${device.ssid||''}" id="devSSID" class="property-input" placeholder="WiFi-Empresa">
+            </div>
+            <div class="property-item" style="font-size:10px;color:var(--text-dim)">
+              Este SSID se propaga automáticamente a todos los APs cableados al AC.
+            </div>`;
+            if (device.security) h += `<div class="property-item"><label>Seguridad</label><span>${device.security}</span></div>`;
+            if (device.band)     h += `<div class="property-item"><label>Banda</label><span>${device.band}</span></div>`;
+            const acMeshChk = device.meshEnabled ? 'checked' : '';
+            h += `<div class="prop-section">🕸️ Malla WiFi (Mesh) — Raíz</div>
+            <div class="property-item">
+              <label>Habilitar Mesh</label>
+              <input type="checkbox" id="devMeshEnable" ${acMeshChk} style="width:auto;accent-color:#a855f7">
+            </div>
+            <div id="meshOptions" style="display:${device.meshEnabled?'block':'none'}">
+              <div class="property-item"><label>Mesh ID</label>
+                <input type="text" value="${device.meshId||''}" id="devMeshId" class="property-input" placeholder="MiRedMesh">
+              </div>
+              <div class="property-item" style="font-size:10px;color:var(--text-dim)">
+                👑 El AC es siempre la raíz de la malla. Los APs con el mismo Mesh ID se conectan a él.
+              </div>
+            </div>`;
+        }
+
+        // ── Router / RouterWifi: WiFi propio + Modo operación + Mesh (raíz o nodo) ──
         if (['Router', 'RouterWifi'].includes(device.type) && device.operationMode !== undefined) {
             const modeR = device.operationMode==='router' ? 'selected' : '';
             const modeA = device.operationMode==='ap' ? 'selected' : '';
+            if (device.ssid !== undefined) {
+                h += `<div class="prop-section">📶 WiFi</div>
+                <div class="property-item"><label>SSID</label><input type="text" value="${device.ssid}" id="devSSID" class="property-input"></div>`;
+                if (device.security) h += `<div class="property-item"><label>Seguridad</label><span>${device.security}</span></div>`;
+                if (device.band)     h += `<div class="property-item"><label>Banda</label><span>${device.band}</span></div>`;
+            }
             h += `<div class="prop-section">⚙️ Modo de Operación</div>
             <div class="property-item"><label>Modo</label>
               <select id="devOpMode" class="property-select">
@@ -721,10 +784,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 <option value="ap" ${modeA}>📡 Access Point</option>
               </select>
             </div>`;
-            // ── Malla WiFi ──
-            const meshChk = device.meshEnabled ? 'checked' : '';
-            const meshRoleR = device.meshRole==='root' ? 'selected' : '';
-            const meshRoleN = device.meshRole==='node' ? 'selected' : '';
+            const meshChk  = device.meshEnabled ? 'checked' : '';
+            const meshRoleR= device.meshRole==='root' ? 'selected' : '';
+            const meshRoleN= device.meshRole==='node' ? 'selected' : '';
             h += `<div class="prop-section">🕸️ Malla WiFi (Mesh)</div>
             <div class="property-item">
               <label>Habilitar Mesh</label>
@@ -741,7 +803,39 @@ document.addEventListener('DOMContentLoaded', () => {
                 </select>
               </div>
               <div class="property-item" style="font-size:10px;color:var(--text-dim)">
-                Conecta routers mesh por WLAN-MESH para formar la red. El nodo raíz da acceso a internet.
+                Conecta por WLAN-MESH para formar la red. El nodo raíz da acceso a internet.
+              </div>
+            </div>`;
+        }
+
+        // ── AP: Malla WiFi inalámbrica con autoconexión al más cercano ──
+        if (device.type === 'AP') {
+            const apMeshChk = device.meshEnabled ? 'checked' : '';
+            const apAutoChk = device.meshAutoConnect ? 'checked' : '';
+            h += `<div class="prop-section">🕸️ Malla WiFi (Mesh)</div>
+            <div class="property-item">
+              <label>Habilitar Mesh</label>
+              <input type="checkbox" id="devMeshEnable" ${apMeshChk} style="width:auto;accent-color:#a855f7">
+            </div>
+            <div id="meshOptions" style="display:${device.meshEnabled?'block':'none'}">
+              <div class="property-item"><label>Mesh ID</label>
+                <input type="text" value="${device.meshId||''}" id="devMeshId" class="property-input" placeholder="MiRedMesh">
+              </div>
+              <div class="property-item" style="font-size:10px;color:var(--text-dim)">
+                🔗 Rol: Nodo. El AC o RouterWifi con el mismo Mesh ID actúa como raíz.
+              </div>
+              <div class="property-item">
+                <label>🔍 Autoconexión inalámbrica</label>
+                <input type="checkbox" id="devMeshAuto" ${apAutoChk} style="width:auto;accent-color:#22d3ee">
+              </div>
+              <div class="property-item" style="font-size:10px;color:var(--text-dim)">
+                Cuando está activo, este AP se conecta vía WLAN-MESH al peer más cercano con el mismo Mesh ID.
+              </div>
+              <div class="property-item">
+                <button class="btn" style="width:100%;justify-content:center;background:rgba(168,85,247,.15);border-color:#a855f7"
+                  onclick="window.simulator._apMeshAutoConnect(window.simulator.selectedDevice)">
+                  📡 Buscar y conectar al más cercano
+                </button>
               </div>
             </div>`;
         }
@@ -834,11 +928,25 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!e.target.checked && device.disableMesh) device.disableMesh();
             simulator.draw();
         });
-        $('devMeshId')?.addEventListener('change', e => { device.meshId = e.target.value; });
+        $('devMeshId')?.addEventListener('change', e => {
+            device.meshId = e.target.value;
+            if (device.enableMesh) device.enableMesh(device.meshId, device.meshRole||'node');
+        });
         $('devMeshRole')?.addEventListener('change', e => {
             device.meshRole = e.target.value;
             if (device.enableMesh) device.enableMesh(device.meshId, e.target.value);
         });
+        $('devMeshAuto')?.addEventListener('change', e => {
+            device.meshAutoConnect = e.target.checked;
+        });
+        // Cuando el AC cambia su SSID, propagarlo a los APs cableados
+        if (device.type === 'AC') {
+            $('devSSID')?.addEventListener('change', e => {
+                device.ssid = e.target.value;
+                if (device.propagateSSID) device.propagateSSID(simulator.connections||[]);
+                simulator.draw();
+            });
+        }
         $('devExt')?.addEventListener('change', e => { device.extension = e.target.value; });
         $('devSIP')?.addEventListener('change', e => { device.sipServer = e.target.value; });
         $('devZone')?.addEventListener('change', e => { device.zone = e.target.value; });
