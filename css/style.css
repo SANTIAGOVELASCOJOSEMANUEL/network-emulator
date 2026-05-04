@@ -498,65 +498,171 @@ body {
     flex-direction: column;
     align-items: center;
     padding: 10px 0;
-    gap: 4px;
+    gap: 2px;
     z-index: 200;
     flex-shrink: 0;
+    position: relative;
 }
 
-.rail-btn {
-    width: 44px;
-    height: 52px;
+/* ── Categorías del rail derecho (espejo de dsb-cat) ── */
+.rail-cat {
+    width: 52px;
+    height: 56px;
+    border-radius: 8px;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-dim);
+    cursor: pointer;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 4px;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    cursor: pointer;
-    color: var(--text-dim);
+    gap: 5px;
     transition: all 0.15s ease;
-    padding: 4px 2px;
-    font-family: var(--ui);
+    flex-shrink: 0;
     position: relative;
 }
 
-.rail-btn svg { width: 18px; height: 18px; flex-shrink: 0; }
+.rail-cat:hover {
+    background: var(--bg-card);
+    border-color: var(--border-mid);
+    color: var(--text);
+}
 
-.rail-btn span {
-    font-size: 7.5px;
+.rail-cat.active {
+    background: rgba(56, 189, 248, 0.08);
+    border-color: rgba(56, 189, 248, 0.28);
+    color: var(--accent);
+}
+
+.rail-cat.active::after {
+    content: '';
+    position: absolute;
+    right: -1px; top: 28%; bottom: 28%;
+    width: 3px;
+    background: var(--accent);
+    border-radius: 3px 0 0 3px;
+    box-shadow: 0 0 8px var(--accent);
+}
+
+.rail-cat-icon { width: 22px; height: 22px; }
+
+.rail-cat span {
+    font-size: 9px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
     line-height: 1;
-    text-align: center;
     font-family: var(--ui);
 }
 
-.rail-btn:hover {
-    transform: translateX(-2px);
-    color: var(--text-bright);
-    border-color: var(--border-mid);
-    background: var(--bg-card2);
+/* ── Palettes del rail derecho (se abren hacia la izquierda) ── */
+.rail-palette {
+    position: absolute;
+    right: var(--rail-w);
+    z-index: 250;
+    background: var(--bg-card);
+    border: 1px solid var(--border-panel);
+    border-radius: var(--radius-xl);
+    padding: 14px 12px 12px;
+    box-shadow: -6px 6px 40px rgba(0,0,0,0.7), inset 0 1px 0 rgba(56,189,248,0.06);
+
+    width: 0;
+    max-height: 0;
+    opacity: 0;
+    pointer-events: none;
+    overflow: hidden;
+    transform: translateX(10px);
+    transition: opacity 0.18s ease, transform 0.18s ease, max-height 0.22s ease, width 0.18s ease;
 }
 
-#openCLIBtn      { color: #38bdf8; border-color: rgba(56,189,248,0.2); }
-#openCLIBtn:hover     { background: rgba(56,189,248,0.08); border-color: rgba(56,189,248,0.45); box-shadow: -2px 0 14px rgba(56,189,248,0.18); }
+.rail-palette.open {
+    width: 260px;
+    max-height: 480px;
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(0);
+    overflow-y: auto;
+}
 
-#openTrafficBtn  { color: #f59e0b; border-color: rgba(245,158,11,0.2); }
-#openTrafficBtn:hover { background: rgba(245,158,11,0.08); border-color: rgba(245,158,11,0.45); box-shadow: -2px 0 14px rgba(245,158,11,0.18); }
+/* Flecha apuntando a la derecha */
+.rp-arrow {
+    position: absolute;
+    right: -5px; top: 22px;
+    width: 9px; height: 9px;
+    background: var(--bg-card);
+    border-right: 1px solid var(--border-panel);
+    border-top: 1px solid var(--border-panel);
+    transform: rotate(45deg);
+}
 
-#openFaultBtn    { color: #ef4444; border-color: rgba(239,68,68,0.2); }
-#openFaultBtn:hover   { background: rgba(239,68,68,0.08);  border-color: rgba(239,68,68,0.45); box-shadow: -2px 0 14px rgba(239,68,68,0.18); }
+/* Lista vertical de herramientas */
+.rp-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
 
-#openDiagBtn     { color: #10b981; border-color: rgba(16,185,129,0.2); }
-#openDiagBtn:hover    { background: rgba(16,185,129,0.08); border-color: rgba(16,185,129,0.45); box-shadow: -2px 0 14px rgba(16,185,129,0.18); }
+.rp-btn {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    background: var(--bg-card2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 9px 11px;
+    cursor: pointer;
+    transition: all 0.12s ease;
+    color: var(--text);
+    text-align: left;
+    width: 100%;
+}
 
-#openEventLogBtn { color: #a78bfa; border-color: rgba(167,139,250,0.2); }
-#openEventLogBtn:hover{ background: rgba(167,139,250,0.08); border-color: rgba(167,139,250,0.45); box-shadow: -2px 0 14px rgba(167,139,250,0.18); }
+.rp-btn:hover {
+    background: rgba(56, 189, 248, 0.08);
+    border-color: rgba(56, 189, 248, 0.3);
+    color: var(--accent);
+    transform: translateX(-2px);
+}
 
-.rail-btn.rail-on { box-shadow: inset 0 0 0 1.5px currentColor; opacity: 1; }
+.rp-btn:active { transform: scale(0.98); }
+
+.rp-btn.rail-on {
+    background: rgba(56, 189, 248, 0.12);
+    border-color: rgba(56, 189, 248, 0.4);
+    color: var(--accent);
+}
+
+.rp-icon {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+}
+
+.rp-label {
+    font-family: var(--ui);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    flex: 1;
+    line-height: 1;
+}
+
+.rp-desc {
+    font-family: var(--ui);
+    font-size: 9px;
+    font-weight: 400;
+    color: var(--text-dim);
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.rp-btn:hover .rp-desc { color: rgba(56,189,248,0.7); }
+
+/* legacy: mantener .rail-btn para compatibilidad JS */
+.rail-btn { display: none; }
 
 .rail-sep { width: 70%; height: 1px; background: var(--border); margin: 4px auto; flex-shrink: 0; }
 
@@ -1292,9 +1398,10 @@ kbd {
 
     /* ── Rail herramientas derecha ──────────────────────────── */
     .tools-rail { width: 40px !important; min-width: 40px !important; }
-    .rail-btn { width: 34px; height: 40px; padding: 2px 1px; gap: 2px; }
-    .rail-btn svg { width: 15px; height: 15px; }
-    .rail-btn span { font-size: 5.5px; }
+    .rail-cat { width: 34px; height: 44px; }
+    .rail-cat-icon { width: 18px; height: 18px; }
+    .rail-cat span { font-size: 6.5px; }
+    .rail-palette { right: 40px !important; }
 
     /* ── Panel de configuración ─────────────────────────────── */
     .config-panel { width: 220px !important; min-width: 220px !important; }

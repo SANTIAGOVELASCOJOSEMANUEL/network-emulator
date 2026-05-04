@@ -1,253 +1,160 @@
-<div align="center">
+# NETOPS v5 — Guía de migración a Vite
 
-<img src="https://github.com/user-attachments/assets/4a1f8a5f-6152-4910-a0b0-5ec38a4b297b" alt="Network Simulator Banner" width="100%"/>
-
-# 🌐 Simulador de Red Web
-
-**Simulador de topologías de red que corre directo en el navegador.**  
-Sin instalaciones. Sin Java. Sin Packet Tracer.
-
-[![Live Demo](https://img.shields.io/badge/🚀_Live_Demo-santiagovelasco-0ea5e9?style=for-the-badge)](https://santiagovelascojosemanuel.github.io/network-emulator/)
-[![JavaScript](https://img.shields.io/badge/Vanilla_JS-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black)](https://developer.mozilla.org/es/docs/Web/JavaScript)
-[![Canvas API](https://img.shields.io/badge/Canvas_API-E44D26?style=for-the-badge&logo=html5&logoColor=white)](https://developer.mozilla.org/es/docs/Web/API/Canvas_API)
-[![License](https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge)](LICENSE)
-
-</div>
-
----
-
-## ✨ ¿Qué es esto?
-
-Un simulador de redes completo que vive en el navegador. Arrastra dispositivos, conecta cables, configura IPs, lanza pings, monta VLANs y observa los paquetes viajando en tiempo real — todo sin instalar nada.
-
-Inspirado en Packet Tracer y GNS3, construido con HTML5 Canvas puro.
-
----
-
-## 🖼️ Vista previa
-
-<div align="center">
-
-> **Modo oscuro** con íconos flotantes estilo GNS3 y animaciones de paquetes en tiempo real.
-
-</div>
-
----
-
-## 🚀 Características principales
-
-### 🗂️ Dispositivos disponibles
-
-| Categoría | Dispositivos |
-|---|---|
-| **Infraestructura WAN** | Internet, ISP, SD-WAN |
-| **Enrutamiento** | Router, Router WiFi, Firewall |
-| **Switching** | Switch (24p), Switch PoE (16p), OLT, ONT, Bridge |
-| **Wireless** | Access Point, WiFi Controller (AC) |
-| **Terminales** | PC, Laptop, Celular, Impresora, Teléfono IP |
-| **Servidores** | Servidor (Web, FTP, DNS, DHCP, Mail) |
-| **Seguridad / IoT** | Cámara IP, DVR/NVR, Alarma |
-| **Especializado** | Terminal de control, Terminal de cobro |
-
-### ⚙️ Motor de simulación
-
-- **Ping** — ICMP bidireccional con animación de paquetes y tiempo de respuesta
-- **Traceroute** — visualiza cada salto con TTL decreciente e íconos ICMP
-- **DHCP** — asignación automática de IPs, servidor configurable por pool, leases persistentes
-- **ARP** — resolución de MACs con tabla de caché y visualizador interactivo
-- **NAT** — traducción de direcciones con log de sesiones
-- **Routing** — tablas de enrutamiento dinámicas, soporte OSPF, RIP, EIGRP y rutas estáticas
-- **VLANs** — segmentación L2, trunks, acceso por puerto, spanning-tree (PVST)
-- **Switching** — tabla MAC, flooding, port-based forwarding
-- **Cables** — cobre, fibra óptica y wireless con animaciones diferenciadas
-
-### 🎨 Interfaz y UX
-
-- **Modo oscuro / claro** con persistencia en `localStorage`
-- **Íconos flotantes PNG/SVG** — carga tus propias imágenes en `assets/icons/`
-- **Animaciones de paquetes** en tiempo real (ICMP, ARP, DHCP, NAT, Broadcast)
-- **Snap-to-grid** al soltar dispositivos
-- **Zoom** con rueda del ratón (`+` / `-` / `0` para resetear / `F` para ajustar todo)
-- **Pan** con clic derecho o modo pan
-- **Undo / Redo** (`Ctrl+Z` / `Ctrl+Y`)
-- **Anotaciones** de texto en el canvas
-- **Visualizador ARP** — animación paso a paso del proceso ARP
-- **Visualizador de rutas** — tabla de routing con colores por protocolo
-- **Laboratorios guiados** — guías paso a paso integradas en la UI
-
----
-
-## 🖥️ CLI integrada
-
-Doble clic en cualquier dispositivo para abrir su consola. Sintaxis inspirada en Cisco IOS.
+## Estructura del proyecto
 
 ```
-Router> enable
-Router# configure terminal
-Router(config)# hostname R1
-R1(config)# interface eth0
-R1(config-if)# ip address 192.168.1.1 255.255.255.0
-R1(config-if)# no shutdown
-R1(config-if)# exit
-R1(config)# ip route 10.0.0.0 255.0.0.0 192.168.1.254
-R1(config)# router ospf 1
-R1(config-router)# network 192.168.1.0 0.0.0.255 area 0
-```
-
-**Comandos disponibles**
-
-| Comando | Descripción |
-|---|---|
-| `ping <ip>` | ICMP con animación visual |
-| `traceroute <ip>` | Traza saltos con TTL |
-| `show ip route` | Tabla de routing completa |
-| `show ip interface` | Estado de interfaces |
-| `show vlan` | VLANs configuradas |
-| `show arp` | Tabla ARP |
-| `show dhcp` | Leases activos |
-| `show running-config` | Configuración activa |
-| `show spanning-tree` | Estado STP |
-| `show cdp neighbors` | Vecinos conectados |
-| `ip dhcp pool <name>` | Crear pool DHCP |
-| `ip nat inside / outside` | Configurar NAT |
-| `vlan <id>` | Crear/configurar VLAN |
-| `spanning-tree mode pvst` | Activar STP |
-| `copy running-config startup-config` | Guardar config |
-
----
-
-## ⌨️ Atajos de teclado
-
-| Tecla | Acción |
-|---|---|
-| `C` | Modo cable |
-| `F` | Fit — ajustar todo en pantalla |
-| `0` | Reset zoom |
-| `+` / `-` | Zoom in / out |
-| `Delete` | Eliminar dispositivo seleccionado |
-| `Escape` | Volver a modo selección |
-| `Ctrl+Z` | Deshacer |
-| `Ctrl+Y` | Rehacer |
-| `Doble clic` | Abrir CLI del dispositivo |
-
----
-
-## 🎨 Íconos personalizados
-
-El simulador soporta íconos PNG o SVG propios para cada tipo de dispositivo.  
-Coloca tus imágenes en `assets/icons/` con el nombre exacto del tipo:
-
-```
-assets/icons/
-├── router.png
-├── router-wifi.png
-├── switch.png
-├── switch-poe.png
-├── firewall.png
-├── ap.png
-├── server.png
-├── pc.png
-├── laptop.png
-├── phone.png
-├── isp.png
-├── internet.png
-├── camera.png
-├── dvr.png
-├── alarm.png
-├── olt.png
-├── ont.png
-├── ac.png
-├── bridge.png
-├── sdwan.png
-├── ipphone.png
-├── control-terminal.png
-├── pay-terminal.png
-└── printer.png
-```
-
-> **Tip:** usa PNG con fondo transparente para mejor integración. SVG también funciona.  
-> Cuando se detecta un ícono, el dispositivo se renderiza en **modo flotante** (sin card) — estilo GNS3.
-
----
-
-## 📁 Estructura del proyecto
-
-```
-simulador-de-red/
-├── index.html
-├── assets/
-│   └── icons/              ← tus íconos personalizados aquí
+netops/
+├── index.html              ← HTML principal (ya no tiene 57 <script> tags)
 ├── css/
-│   └── styles.css
-└── js/
-    ├── app.js              ← punto de entrada, UI, eventos
-    ├── network.js          ← simulador principal, canvas, zoom, pan
-    ├── renderer.js         ← render 60FPS, íconos, cables, paquetes
-    ├── devices.js          ← clases de dispositivos
-    ├── engine.js           ← motor de paquetes (despacho L2/L3)
-    ├── routing.js          ← tablas de rutas, OSPF, RIP, next-hop
-    ├── switching.js        ← switching L2, VLANs, MAC table
-    ├── arp.js              ← caché ARP, resolución de MACs
-    ├── dhcp.js             ← servidor DHCP, pools, leases
-    ├── cli.js              ← interfaz CLI estilo Cisco IOS
-    ├── packet.js           ← modelo de paquetes
-    ├── packet-animator.js  ← animaciones de paquetes en canvas
-    ├── arp-visualizer.js   ← visualizador paso a paso ARP
-    ├── routing-visualizer.js ← visualizador de tablas de rutas
-    ├── storage.js          ← guardado/carga de topologías
-    ├── lab-guide.js        ← laboratorios guiados
-    ├── console.js          ← consola de simulación
-    ├── logger.js           ← sistema de logs
-    ├── advanced.js         ← configuración avanzada de dispositivos
-    ├── networkcontroller.js← controlador WiFi
-    └── errorhandler.js     ← manejo de errores global
+│   └── style.css
+├── src/
+│   ├── main.js             ← Punto de entrada único (Vite lo bundlea todo)
+│   ├── app.js              ← Inicialización del simulador
+│   │
+│   ├── core/               ← Motor principal
+│   │   ├── engine.js
+│   │   ├── network.js
+│   │   ├── networkcontroller.js
+│   │   ├── renderer.js
+│   │   ├── packet.js
+│   │   ├── devices.js
+│   │   ├── storage.js
+│   │   ├── errorhandler.js
+│   │   └── logger.js
+│   │
+│   ├── protocols/          ← Lógica de protocolos de red
+│   │   ├── arp.js / arp-table.js
+│   │   ├── bgp.js
+│   │   ├── dhcp.js / dhcp-relay.js
+│   │   ├── firewall-engine.js
+│   │   ├── forwarding-engine.js
+│   │   ├── ipv6.js
+│   │   ├── mpls.js
+│   │   ├── nat.js
+│   │   ├── ospf-engine.js / ospf-router.js
+│   │   ├── qos.js
+│   │   ├── routing.js / routing-engine.js
+│   │   ├── stp.js
+│   │   ├── switching.js / switching-engine.js
+│   │   ├── tcp-engine.js
+│   │   ├── vlan.js
+│   │   └── vpn.js
+│   │
+│   ├── visualizers/        ← Visualizaciones educativas
+│   │   ├── arp-visualizer.js
+│   │   ├── dhcp-visualizer.js
+│   │   ├── nat-visualizer.js
+│   │   ├── packet-animator.js
+│   │   ├── packet-inspector.js
+│   │   ├── packet-lifecycle-visualizer.js
+│   │   └── routing-visualizer.js
+│   │
+│   ├── ui/                 ← Paneles e interfaz de usuario
+│   │   ├── advanced.js
+│   │   ├── cli.js
+│   │   ├── console.js
+│   │   ├── device-palette.js   ← era el <script> inline en index.html
+│   │   ├── device-search.js
+│   │   ├── export-enhanced.js
+│   │   ├── inventory-page.js
+│   │   ├── ip-config-panel.js
+│   │   ├── lab-checker.js
+│   │   ├── lab-guide.js
+│   │   ├── link-config-panel.js
+│   │   ├── metrics-dashboard.js
+│   │   ├── project-manager.js
+│   │   ├── routing-engine-ui.js
+│   │   ├── traffic-generator.js
+│   │   ├── ux-enhancements.js
+│   │   └── ux-enhancements-2.js
+│   │
+│   └── utils/              ← Utilidades compartidas
+│       └── canvas-utils.js
+│
+├── package.json
+├── vite.config.js
+└── .gitignore
 ```
 
 ---
 
-## ⚡ Inicio rápido
-
-No requiere servidor, no requiere Node.js. Solo abre el archivo:
+## Cómo arrancar
 
 ```bash
-git clone https://github.com/santiagovelascojosemanuel/network-emulator.git
-cd network-emulator
+# Instalar dependencias (solo la primera vez)
+npm install
 
-# Opción A — abrir directo en el navegador
-open index.html
+# Servidor de desarrollo con hot-reload
+npm run dev
+# → abre http://localhost:3000 automáticamente
 
-# Opción B — servidor local (recomendado para íconos PNG/SVG)
-python3 -m http.server 8080
-# luego ve a http://localhost:8080
+# Build para producción (genera /dist)
+npm run build
+
+# Preview del build de producción
+npm run preview
 ```
 
-> ⚠️ Los íconos personalizados requieren servir los archivos desde un servidor HTTP (no `file://`) por restricciones de CORS del navegador.
-
 ---
 
-## 🛠️ Tecnologías
+## Próximos pasos para escalar más
 
-- **HTML5 Canvas API** — render 2D a 60 FPS con throttle
-- **JavaScript ES6+** — sin frameworks, sin dependencias
-- **CSS3** — dark/light mode, animaciones de UI
-- **LocalStorage** — persistencia de topologías y preferencias
+### Fase 2 — Convertir archivos a ES Modules reales
 
----
+Los archivos actuales siguen usando `window.*` para comunicarse. El siguiente paso es
+eliminar ese acoplamiento convirtiendo cada archivo a módulos con `export`/`import`:
 
-## 🤝 Contribuir
+**Ejemplo — antes (globals):**
+```js
+// packet-animator.js
+window._paInit = function(simulator) { ... }
+```
 
-Pull requests bienvenidos. Para cambios grandes, abre un issue primero.
+**Ejemplo — después (ES Module):**
+```js
+// src/visualizers/packet-animator.js
+export function initPacketAnimator(simulator) { ... }
 
+// src/main.js
+import { initPacketAnimator } from './visualizers/packet-animator.js';
+```
+
+**Orden de migración recomendado** (de menos a más dependencias):
+1. `utils/canvas-utils.js` — sin dependencias, fácil de empezar
+2. `core/logger.js`, `core/errorhandler.js`, `core/storage.js`
+3. `core/packet.js`, `protocols/ipv6.js`
+4. `core/devices.js`, `core/renderer.js`
+5. Los protocolos uno a uno
+6. Los visualizadores
+7. Los paneles UI
+
+### Fase 3 — TypeScript (opcional)
+
+Con módulos reales, agregar TypeScript es solo cambiar `.js` → `.ts` y
+`npm install -D typescript`. Vite lo soporta sin configuración extra.
+
+### Fase 4 — Tests unitarios
+
+Con módulos ES puros, puedes usar **Vitest** (mismo ecosistema que Vite):
 ```bash
-git checkout -b feature/mi-feature
-git commit -m "feat: descripción del cambio"
-git push origin feature/mi-feature
+npm install -D vitest
 ```
 
 ---
 
-<div align="center">
+## ¿Por qué Vite?
 
-Hecho con 🧠 y demasiado café · [Demo en vivo →](https://santiagovelascojosemanuel.github.io/network-emulator/)
+- **Sin configuración** para vanilla JS/HTML
+- **Hot Module Replacement** — los cambios se reflejan en el browser sin recargar
+- **Build optimizado** — minifica, hace tree-shaking y genera chunks automáticamente
+- **Compatible con tu código actual** — no necesitas reescribir nada para empezar
 
-</div>
+---
+
+## Notas sobre la migración
+
+- Los archivos JS están en `src/` organizados por dominio
+- El `index.html` ahora tiene **un solo** `<script type="module" src="src/main.js">`
+- El script inline de `NET_DEVICES` fue extraído a `src/ui/device-palette.js`
+- El orden de imports en `main.js` preserva el orden de dependencias original
+- Todo sigue funcionando igual — Vite carga los archivos en el mismo orden
