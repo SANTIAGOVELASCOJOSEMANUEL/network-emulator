@@ -89,6 +89,25 @@ function nextHop(src, destDevice, allDevices) {
 function routePacket(packet, device) {
     const dstIP = packet.dstIP || packet.destino?.ipConfig?.ipAddress;
 
+    // ── Lógica específica para SD-WAN ────────────────────────────────
+    if (device.type === 'SDWAN') {
+        // Seleccionar mejor enlace WAN basado en políticas y métricas
+        const bestWANLink = device.selectBestWANLink(packet, dstIP);
+        if (bestWANLink) {
+            packet.ttl = (packet.ttl ?? 64) - 1;
+            if (packet.ttl <= 0) return null;
+
+            // Log de selección de enlace
+            if (window.networkConsole) {
+                window.networkConsole.writeToConsole(`🔷 SD-WAN ${device.name}: ruta vía ${bestWANLink.name} (${bestWANLink.provider})`);
+            }
+
+            // Simular que el paquete sale por el enlace WAN seleccionado
+            return { nextHop: bestWANLink.name, packet, wanLink: bestWANLink };
+        }
+        // Si no hay enlaces disponibles, fallback a routing normal
+    }
+
     // Si el dispositivo tiene RoutingTable, usarla (longest-prefix match)
     if (device.routingTable instanceof RoutingTable) {
         const route = device.routingTable.lookup(dstIP);

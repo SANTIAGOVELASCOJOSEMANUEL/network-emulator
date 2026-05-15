@@ -53,3 +53,6 @@ const Logger = {
 };
 // — Exponer al scope global (compatibilidad legacy) —
 if (typeof Logger !== "undefined") window.Logger = Logger;
+
+// — ES6 Export —
+export { Logger };

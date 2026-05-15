@@ -670,6 +670,8 @@ function stpConnectionColor(conn, defaultColor) {
 window._stpInit = function(simulator) {
     const mgr = new STPManager(simulator);
     window.stpManager = mgr;
+    if (typeof ServiceRegistry !== 'undefined') ServiceRegistry.register('stp', mgr);
+    if (typeof EventBus !== 'undefined') EventBus.emit('SERVICE_READY', { name: 'stp', service: mgr });
 
     // Auto-run cuando cambia la topología
     const _origDraw = simulator.draw?.bind(simulator);
@@ -720,5 +722,57 @@ window.STP_PORT_STATE = STP_PORT_STATE;
 window.STP_PORT_ROLE  = STP_PORT_ROLE;
 window.stpConnectionColor = stpConnectionColor;
 // — Exponer al scope global (compatibilidad legacy) —
-if (typeof STP_MODE !== "undefined") window.STP_MODE = STP_MODE;
-if (typeof STP_COST !== "undefined") window.STP_COST = STP_COST;
+window.STP_MODE = STP_MODE;
+window.STP_COST = STP_COST;
+
+// — ES6 Export —
+export { STP_MODE, STP_COST };
+
+export function initSTP(simulator) {
+    const mgr = new STPManager(simulator);
+    window.stpManager = mgr;
+    if (typeof ServiceRegistry !== 'undefined') ServiceRegistry.register('stp', mgr);
+    if (typeof EventBus !== 'undefined') EventBus.emit('SERVICE_READY', { name: 'stp', service: mgr });
+
+    // Auto-run cuando cambia la topología
+    const _origDraw = simulator.draw?.bind(simulator);
+    let _stpDrawing = false;  // guard: evita recursion infinita
+    if (_origDraw) {
+        simulator.draw = function(...args) {
+            _origDraw(...args);
+            if (window.stpManager?.enabled && !_stpDrawing) {
+                _stpDrawing = true;
+                try { window.stpManager.run(); }
+                finally { _stpDrawing = false; }
+            }
+        };
+    }
+
+    // CLI hooks
+    window._stpSummary = () => {
+        for (const eng of mgr.engines.values()) {
+            window.networkConsole?.writeToConsole(eng.summary());
+        }
+    };
+
+    window._stpSetPriority = (switchName, priority) => {
+        const dev = simulator.devices.find(d => d.name === switchName);
+        if (!dev) return `Switch '${switchName}' no encontrado`;
+        const eng = mgr.engines.get(dev.id);
+        if (!eng) return `${switchName} no tiene STP engine`;
+        const p = eng.setPriority(priority);
+        mgr.run();
+        return `STP priority de ${switchName} → ${p}`;
+    };
+
+    window._stpEdgePort = (switchName, portName, isEdge) => {
+        const dev = simulator.devices.find(d => d.name === switchName);
+        if (!dev) return;
+        const eng = mgr.engines.get(dev.id);
+        eng?.setEdgePort(portName, isEdge);
+        mgr.run();
+    };
+
+    console.log('[STP] STPManager inicializado (RSTP)');
+    return mgr;
+}

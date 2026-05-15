@@ -6,6 +6,8 @@
 // Se integra sin modificar arp.js ni network.js.
 'use strict';
 
+import { eventBus, EVENTS } from '../core/event-bus.js';
+
 /* ══════════════════════════════════════════════════════════════════
    CONSTANTES
 ══════════════════════════════════════════════════════════════════ */
@@ -73,7 +75,122 @@ class ARPVisualizer {
         this._buildPanel();
         this._injectTab();
         this._hookRenderer();
-        this._hookNetworkEngine();
+        this._setupEventListeners();
+    }
+
+    /* ── Event Listeners ──────────────────────────────────────────── */
+
+    _setupEventListeners() {
+        // Escuchar eventos ARP del EventBus
+        eventBus.on(EVENTS.ARP_REQUEST, (data) => this._onARPRequest(data));
+        eventBus.on(EVENTS.ARP_REPLY, (data) => this._onARPReply(data));
+        eventBus.on(EVENTS.PACKET_DELIVERED, (data) => this._onPacketDelivered(data));
+    }
+
+    /* ── Manejadores de Eventos ───────────────────────────────────── */
+
+    _onARPRequest(data) {
+        const { srcDevice, targetIP } = data;
+        const srcIP = srcDevice.ipConfig?.ipAddress || '?';
+
+        // PASO 1: Request enviado
+        this._activateStep('discover');
+        this._renderExchange({
+            type    : 'request',
+            icon    : '📡',
+            src     : srcDevice.name,
+            dst     : 'Broadcast',
+            srcIP,
+            targetIP,
+            step    : 1,
+        });
+        this._addEvent({
+            icon : '📡',
+            msg  : `ARP REQ: ${srcDevice.name} (${srcIP}) → ¿Quién tiene ${targetIP}?`,
+            color: '#facc15',
+        });
+
+        // Crear flash visual desde srcDevice hacia broadcast (todos los dispositivos)
+        this._createARPFlash(srcDevice, null, '#facc15');
+    }
+
+    _onARPReply(data) {
+        const { srcDevice, ip, mac } = data;
+
+        // PASO 2: Reply enviado
+        this._activateStep('offer');
+        this._renderExchange({
+            type : 'reply',
+            icon : '📬',
+            src  : srcDevice.name,
+            dst  : 'Requester',
+            srcIP: ip,
+            mac,
+            step : 2,
+        });
+        this._addEvent({
+            icon : '📬',
+            msg  : `ARP REP: ${srcDevice.name} → Yo tengo ${ip} (MAC: ${mac})`,
+            color: '#10b981',
+        });
+
+        // Flash visual desde srcDevice (no sabemos el destino aún)
+        this._createARPFlash(srcDevice, null, '#10b981');
+    }
+
+    _onPacketDelivered(data) {
+        const { packet, device } = data;
+
+        // Solo procesar paquetes ARP reply entregados
+        if (packet?.tipo !== 'arp-reply' || packet?.status !== 'delivered') return;
+
+        // PASO 3: Reply recibido - actualizar caché
+        this._activateStep('learn');
+        this._renderExchange({
+            type : 'learn',
+            icon : '📚',
+            src  : packet.origen?.name || '?',
+            dst  : device.name,
+            step : 3,
+        });
+
+        // PASO 4: Datos pueden fluir
+        setTimeout(() => {
+            this._activateStep('send');
+            this._renderExchange({
+                type : 'send',
+                icon : '🚀',
+                src  : device.name,
+                dst  : packet.origen?.name || '?',
+                step : 4,
+            });
+        }, 500);
+
+        this._addEvent({
+            icon : '✅',
+            msg  : `ARP completado: ${device.name} aprendió MAC de ${packet.origen?.name || '?'} (${packet.payload?.srcMAC || '?'})`,
+            color: '#3b82f6',
+        });
+
+        // Flash final entre los dos dispositivos
+        this._createARPFlash(device, packet.origen, '#3b82f6');
+    }
+
+    _createARPFlash(srcDevice, dstDevice, color) {
+        if (!srcDevice) return;
+
+        if (dstDevice) {
+            // Flash directo entre dos dispositivos
+            this._addFlash(srcDevice, dstDevice, color);
+        } else {
+            // Flash broadcast: desde srcDevice hacia el centro del canvas
+            const canvas = this.sim.canvas || this.sim.renderer?.canvas;
+            if (canvas) {
+                const centerX = canvas.width / 2;
+                const centerY = canvas.height / 2;
+                this._flashes.push(new ARPFlash(srcDevice.x, srcDevice.y, centerX, centerY, color));
+            }
+        }
     }
 
     /* ── Panel flotante ──────────────────────────────────────────── */
@@ -550,121 +667,11 @@ class ARPVisualizer {
 
     /* ── Hook al motor de red para interceptar paquetes ARP ──────── */
 
-    _hookNetworkEngine() {
-        const sim  = this.sim;
-        const self = this;
-
-        // Interceptamos _launchPacket para detectar paquetes ARP nuevos
-        const orig = sim._launchPacket.bind(sim);
-        sim._launchPacket = function(src, dst, ruta, type, ttl, opts) {
-            const pkt = orig(src, dst, ruta, type, ttl, opts);
-            if (pkt && (type === 'arp' || type === 'arp-reply')) {
-                self._onARPPacket(pkt, src, dst, type);
-            }
-            return pkt;
-        };
-
-        // Interceptamos onDelivered del packetAnimator si existe,
-        // o parcheamos _updatePackets para saber cuando llega el ARP reply
-        const origUpdate = sim._updatePackets.bind(sim);
-        sim._updatePackets = function() {
-            // Snapshot de paquetes ARP antes
-            const arpBefore = new Set(
-                (sim.packets || [])
-                    .filter(p => p.tipo === 'arp-reply' && p.status === 'sending')
-                    .map(p => p.id)
-            );
-
-            origUpdate.call(sim);
-
-            // Detectar ARP replies que se entregaron en este tick
-            (sim.packets || [])
-                .filter(p => p.tipo === 'arp-reply' && p.status === 'delivered' && arpBefore.has(p.id))
-                .forEach(p => self._onARPReplyDelivered(p));
-        };
-    }
-
     /* ── Eventos ARP ─────────────────────────────────────────────── */
 
-    _onARPPacket(pkt, src, dst, type) {
-        const payload  = pkt.payload || {};
-        const srcIP    = payload.srcIP  || src.ipConfig?.ipAddress  || '?';
-        const targetIP = payload.targetIP || dst.ipConfig?.ipAddress || '?';
-
-        if (type === 'arp') {
-            // PASO 1: Request enviado
-            this._activateStep('discover');
-            this._renderExchange({
-                type   : 'request',
-                icon   : '📡',
-                src    : src.name,
-                dst    : dst.name,
-                srcIP,
-                targetIP,
-                step   : 1,
-            });
-            this._addEvent({
-                icon : '📡',
-                msg  : `ARP REQ: ${src.name} (${srcIP}) → ¿Quién tiene ${targetIP}?`,
-                color: '#facc15',
-            });
-
-            // Flash amarillo en canvas entre src y dst
-            this._addFlash(src, dst, '#facc15');
-
-        } else if (type === 'arp-reply') {
-            // PASO 2: Reply enviado
-            this._activateStep('offer');
-            const mac = pkt.payload?.srcMAC || dst.interfaces[0]?.mac || '??:??:??:??:??:??';
-            this._renderExchange({
-                type   : 'reply',
-                icon   : '📬',
-                src    : src.name,
-                dst    : dst.name,
-                srcIP  : src.ipConfig?.ipAddress || '?',
-                targetIP,
-                mac,
-                step   : 2,
-            });
-            this._addEvent({
-                icon : '📬',
-                msg  : `ARP RPL: ${src.name} → ${dst.name} — MAC ${mac}`,
-                color: '#fb923c',
-            });
-
-            // Flash naranja
-            this._addFlash(src, dst, '#fb923c');
-        }
-    }
-
-    _onARPReplyDelivered(pkt) {
-        // PASO 3: Cache actualizada
-        this._activateStep('learn');
-        const mac = pkt.payload?.srcMAC || pkt.origen?.interfaces[0]?.mac || '??';
-        this._addEvent({
-            icon : '📚',
-            msg  : `Cache ARP actualizada: ${pkt.destino?.name} aprendió ${pkt.origen?.ipConfig?.ipAddress} → ${mac}`,
-            color: '#4ade80',
-        });
-
-        // Pequeña pausa y luego paso 4
-        setTimeout(() => {
-            this._activateStep('send');
-            this._addEvent({
-                icon : '🚀',
-                msg  : `Datos pueden fluir: ${pkt.destino?.name} → ${pkt.origen?.name} (L2 resuelto)`,
-                color: '#38bdf8',
-            });
-            // Limpiar pasos activos después de un momento
-            setTimeout(() => this._clearSteps(), 2500);
-        }, 600);
-
-        // Actualizar tab ARP/MAC si el dispositivo destino está seleccionado
-        const sel = this.sim.selectedDevice;
-        if (sel && (sel.id === pkt.destino?.id || sel.id === pkt.origen?.id)) {
-            setTimeout(() => this.updateARPTab(sel), 100);
-        }
-    }
+    /* ── Funciones obsoletas eliminadas ───────────────────────────── */
+    // _onARPPacket() y _onARPReplyDelivered() eliminadas
+    // Reemplazadas por event listeners del EventBus
 
     /* ── Helpers de UI ───────────────────────────────────────────── */
 
@@ -783,7 +790,7 @@ class ARPVisualizer {
    INICIALIZACIÓN AUTOMÁTICA
 ══════════════════════════════════════════════════════════════════ */
 
-window._arpVizInit = function(sim) {
+function initARPVisualizer(sim) {
     if (window.arpVisualizer) {
         const old = document.getElementById('arp-panel');
         if (old) old.remove();
@@ -796,4 +803,9 @@ window._arpVizInit = function(sim) {
     window.arpVisualizer._startAutoRefresh();
     console.log('[ARPVisualizer] ✅ Inicializado');
     return window.arpVisualizer;
-};
+}
+
+// ── Export para compatibilidad ───────────────────────────────────
+export { ARPVisualizer, initARPVisualizer };
+
+// ── Compatibilidad legacy ────────────────────────────────────────

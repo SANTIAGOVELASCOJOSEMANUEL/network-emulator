@@ -10,6 +10,8 @@
 //   • PacketInspector : panel visual tipo Wireshark
 'use strict';
 
+import { eventBus, EVENTS } from '../core/event-bus.js';
+
 /* ══════════════════════════════════════════════════════════════════
    L2 — ETHERNET HEADER
 ══════════════════════════════════════════════════════════════════ */
@@ -374,9 +376,9 @@ class TTLController {
    TTL decrement en tiempo real, y log de expirados.
 ══════════════════════════════════════════════════════════════════ */
 class PacketInspector {
-    constructor(sim, ttlController) {
+    constructor(sim) {
         this.sim     = sim;
-        this.ttl     = ttlController;
+        this.ttl     = new TTLController(sim);
         this._sel    = null;   // paquete seleccionado (id)
         this._live   = [];     // últimos 50 paquetes capturados
         this._maxLive= 50;
@@ -386,6 +388,8 @@ class PacketInspector {
         this._interval = null;
         this._captureActive = true;
         this._build();
+        this._bindUI();
+        this._bindEventBus();
     }
 
     /* ── Captura ────────────────────────────────────────────────── */
@@ -656,6 +660,51 @@ class PacketInspector {
         );
 
         this._makeDraggable(panel, panel.querySelector('#pi-hdr'));
+    }
+
+    _bindUI() {
+        // Bind DOM event listeners
+        const panel = this._panel;
+        if (!panel) return;
+
+        // Traffic dots
+        panel.querySelector('.pi-traffic-dot.red')?.addEventListener('click', () => this.hide());
+        panel.querySelector('.pi-traffic-dot.yellow')?.addEventListener('click', () => {
+            this._captureActive = !this._captureActive;
+        });
+        panel.querySelector('.pi-traffic-dot.green')?.addEventListener('click', () => {
+            this._live.splice(0);
+            this._renderCapture();
+        });
+
+        // Toggle capture button
+        panel.querySelector('#pi-cap-toggle')?.addEventListener('click', (e) => {
+            this.toggleCapture(e.target);
+        });
+
+        // Clear button
+        panel.querySelectorAll('#pi-hbtns button')[1]?.addEventListener('click', () => {
+            this._live.splice(0);
+            this._renderCapture();
+        });
+
+        // Close button
+        panel.querySelectorAll('#pi-hbtns button')[2]?.addEventListener('click', () => this.hide());
+    }
+
+    _bindEventBus() {
+        // Bind EventBus listeners
+        eventBus.on(EVENTS.PACKET_DELIVERED, ({ packet }) => {
+            this.capture(packet);
+        });
+
+        eventBus.on(EVENTS.PACKET_DROPPED, ({ packet }) => {
+            this.capture(packet);
+        });
+
+        eventBus.on(EVENTS.PACKET_FORWARDED, ({ packet }) => {
+            this.capture(packet);
+        });
     }
 
     /* ── API pública ─────────────────────────────────────────────── */
@@ -981,12 +1030,7 @@ class PacketInspector {
 ══════════════════════════════════════════════════════════════════ */
 
 function initPacketInspector(sim) {
-    if (window._packetInspector) return window._packetInspector;
-
-    const ttlCtrl  = new TTLController(sim);
-    const inspector= new PacketInspector(sim, ttlCtrl);
-    window._ttlController   = ttlCtrl;
-    window._packetInspector = inspector;
+    const inspector = new PacketInspector(sim);
 
     // ── Hookar _launchPacket para capturar paquetes al nacer ─────
     const origLaunch = sim._launchPacket?.bind(sim);
@@ -1015,7 +1059,7 @@ function initPacketInspector(sim) {
             // Registrar expiración en el TTLController
             const mockPkt = { tipo:'?', srcIP: routerIP, dstIP: origin?.ipConfig?.ipAddress,
                                hopName: router?.name, hops: 0 };
-            ttlCtrl._expire(mockPkt, router);
+            inspector.ttl._expire(mockPkt, router);
             return origICMP(router, origin, routerIP);
         };
     }
@@ -1058,3 +1102,6 @@ if (typeof window !== 'undefined') {
     window.PacketInspector   = PacketInspector;
     window.initPacketInspector = initPacketInspector;
 }
+
+// Export for ES modules
+export { PacketFrame, TTLController, PacketInspector, initPacketInspector };

@@ -122,21 +122,33 @@ class DHCPEngine {
 
     // Asigna IP desde un pool de DHCP — garantiza unicidad global
     _assignIP(pool, clientId) {
-        // Si este cliente ya tiene lease, reusar solo si pertenece a la misma red del pool
+        // Helpers para convertir IP↔entero (soporta cualquier prefixLen)
+        const ipToInt = ip => ip.split('.').reduce((a, o) => (a << 8) + parseInt(o, 10), 0) >>> 0;
+        const intToIp = n  => [(n>>>24)&255,(n>>>16)&255,(n>>>8)&255,n&255].join('.');
+
+        // Si este cliente ya tiene lease, reusar si sigue perteneciendo a la misma red del pool
         if (this.leases[clientId]) {
             const cachedIP = this.leases[clientId];
-            const poolBase = (pool.network || '0.0.0.0/0').split('/')[0].split('.').slice(0,3).join('.');
-            const cachedBase = cachedIP.split('.').slice(0,3).join('.');
-            if (poolBase === cachedBase) return cachedIP;
+            const [netStr, cidrStr] = (pool.network || '192.168.1.0/24').split('/');
+            const plen = cidrStr ? parseInt(cidrStr, 10) : 24;
+            const mask = plen === 0 ? 0 : (0xFFFFFFFF << (32 - plen)) >>> 0;
+            const netInt = ipToInt(netStr) & mask;
+            if ((ipToInt(cachedIP) & mask) === netInt) return cachedIP;
             // Red diferente (cambió de VLAN/puerto) → borrar lease viejo y reasignar
             delete this.leases[clientId];
         }
 
-        const base    = (pool.network||'192.168.1.0/24').split('/')[0].split('.');
-        const start   = pool.range?.start || `${base[0]}.${base[1]}.${base[2]}.10`;
-        const end     = pool.range?.end   || `${base[0]}.${base[1]}.${base[2]}.200`;
-        const startN  = parseInt(start.split('.')[3]);
-        const endN    = parseInt(end.split('.')[3]);
+        // Parsear red del pool con soporte para cualquier prefixLen (/8, /16, /24, /25, etc.)
+        const [netStr, cidrStr] = (pool.network || '192.168.1.0/24').split('/');
+        const plen    = cidrStr ? parseInt(cidrStr, 10) : 24;
+        const mask    = plen === 0 ? 0 : (0xFFFFFFFF << (32 - plen)) >>> 0;
+        const netBase = ipToInt(netStr) & mask;
+        const hostMax = (~mask) >>> 0; // número de hosts posibles (ej: /24 → 255)
+
+        // Rango usable por defecto: host .10 → broadcast-1
+        // Si el pool define range.start/end explícitamente, usarlos
+        const startInt = pool.range?.start ? ipToInt(pool.range.start) : (netBase | 10) >>> 0;
+        const endInt   = pool.range?.end   ? ipToInt(pool.range.end)   : (netBase | Math.max(10, hostMax - 1)) >>> 0;
 
         // Construir conjunto de IPs ya en uso:
         // 1) leases registrados en el pool
@@ -154,13 +166,11 @@ class DHCPEngine {
             });
         }
         if (pool.excluded) pool.excluded.forEach(e=>excl.add(e));
-        if (pool.gateway) excl.add(pool.gateway);
+        if (pool.gateway)  excl.add(pool.gateway);
 
-        for (let h=startN; h<=endN; h++) {
-            const candidate = `${base[0]}.${base[1]}.${base[2]}.${h}`;
-            if (!excl.has(candidate)) {
-                return candidate;
-            }
+        for (let ipInt = startInt; ipInt <= endInt; ipInt++) {
+            const candidate = intToIp(ipInt);
+            if (!excl.has(candidate)) return candidate;
         }
         return null; // Pool exhausted
     }
@@ -180,6 +190,10 @@ class DHCPEngine {
         // ─── STEP 1: DISCOVER ──────────────────────────────────────────
         step(1, `[1/4] DISCOVER  ${client.name} → 255.255.255.255  (broadcast)`, 'dhcp-discover', 0, () => {
             this.sim.sendPacket(client, client, 'dhcp-discover', 64, { unicast: false, label: 'DISCOVER' });
+            if (window.EventBus) {
+                const eventName = (window.EVENTS?.DHCP_REQUEST) || 'DHCP_REQUEST';
+                window.EventBus.emit(eventName, { device: client });
+            }
         });
 
         if (!server) {
@@ -240,6 +254,12 @@ class DHCPEngine {
             this.leases[client.id] = ip;
 
             this.sim.sendPacket(server, client, 'dhcp-ack', 64, { label: 'ACK' });
+
+            // Emitir evento DHCP_ACK al bus de eventos (UNIFICADO)
+            if (window.EventBus) {
+                const eventName = (window.EVENTS?.DHCP_ACK) || 'DHCP_ACK';
+                window.EventBus.emit(eventName, { device: client, ip, lease: pool });
+            }
 
             write(`[DHCP] ✅ Asignada ${ip} / ${mask}  GW:${gw}  DNS:${dns[0]}`, 'dhcp-ok');
             write(`[DHCP]    Servidor: ${server.name}  Lease: ${Math.round((pool.lease||86400)/3600)}h`, 'dhcp-dim');

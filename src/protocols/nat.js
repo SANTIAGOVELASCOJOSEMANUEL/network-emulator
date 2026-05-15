@@ -125,6 +125,12 @@ class NATEngineClass {
                 natType    : 'static',
             });
             session.touch(size);
+            // Emitir evento NAT al bus
+            const _natEmit = (src, pub, dst) => {
+                if (window.EventBus) window.EventBus.emit('LOG_EVENT', { level: 'info', message: `NAT static: ${src} → ${pub} → ${dst}` });
+                if (window.eventBus) window.eventBus.emit('nat:translated', { src, dst: pub });
+            };
+            _natEmit(srcIP, publicIP, dstIP);
             return { translated: true, publicIP, publicPort: srcPort, natType: 'static' };
         }
 
@@ -145,6 +151,10 @@ class NATEngineClass {
             natType    : 'PAT',
         });
         session.touch(size);
+
+        // Emitir evento NAT al bus
+        if (window.EventBus) window.EventBus.emit('LOG_EVENT', { level: 'info', message: `NAT PAT: ${srcIP}:${session.publicPort} → ${dstIP}` });
+        if (window.eventBus) window.eventBus.emit('nat:translated', { src: `${srcIP}:${srcPort}`, dst: `${publicIP}:${session.publicPort}` });
 
         return {
             translated: true,

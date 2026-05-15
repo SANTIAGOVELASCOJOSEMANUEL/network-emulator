@@ -782,6 +782,8 @@ class BGPManager {
 window._bgpInit = function(simulator) {
     const mgr = new BGPManager(simulator);
     window.bgpManager = mgr;
+    if (typeof ServiceRegistry !== 'undefined') ServiceRegistry.register('bgp', mgr);
+    if (typeof EventBus !== 'undefined') EventBus.emit('SERVICE_READY', { name: 'bgp', service: mgr });
 
     window._bgpSummary  = (devName) => {
         const dev = simulator.devices.find(d => d.name === devName);
@@ -806,6 +808,31 @@ window.BGPPath    = BGPPath;
 window.BGP_STATE  = BGP_STATE;
 window.BGP_COMMUNITY = BGP_COMMUNITY;
 // — Exponer al scope global (compatibilidad legacy) —
-if (typeof BGPRIBEntry !== "undefined") window.BGPRIBEntry = BGPRIBEntry;
-if (typeof BGP_MSG_TYPE !== "undefined") window.BGP_MSG_TYPE = BGP_MSG_TYPE;
-if (typeof BGP_ORIGIN !== "undefined") window.BGP_ORIGIN = BGP_ORIGIN;
+window.BGPRIBEntry = BGPRIBEntry;
+window.BGP_MSG_TYPE = BGP_MSG_TYPE;
+window.BGP_ORIGIN = BGP_ORIGIN;
+
+// — ES6 Export —
+export { BGPSpeaker, BGPManager, BGPPeer, BGPPath, BGPRIBEntry, BGP_STATE, BGP_COMMUNITY, BGP_MSG_TYPE, BGP_ORIGIN };
+
+export function initBGP(simulator) {
+    const mgr = new BGPManager(simulator);
+    window.bgpManager = mgr;
+    if (typeof ServiceRegistry !== 'undefined') ServiceRegistry.register('bgp', mgr);
+    if (typeof EventBus !== 'undefined') EventBus.emit('SERVICE_READY', { name: 'bgp', service: mgr });
+
+    window._bgpSummary  = (devName) => {
+        const dev = simulator.devices.find(d => d.name === devName);
+        const sp  = dev ? mgr.getSpeaker(dev) : null;
+        return sp ? sp.showBGPSummary() : `${devName} no tiene BGP habilitado`;
+    };
+
+    window._bgpTable = (devName) => {
+        const dev = simulator.devices.find(d => d.name === devName);
+        const sp  = dev ? mgr.getSpeaker(dev) : null;
+        return sp ? sp.showBGPTable() : `${devName} no tiene BGP habilitado`;
+    };
+
+    console.log('[BGP] BGPManager inicializado');
+    return mgr;
+}

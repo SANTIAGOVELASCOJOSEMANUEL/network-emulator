@@ -261,6 +261,7 @@ class AccessPoint extends NetworkDevice {
         super(id,name,'AP',x,y);
         this.ssid=`AP-${name}`;this.band='2.4/5GHz';this.security='WPA2';
         this.wirelessEnabled=true;this.connectedClients=[];
+        this.clientIsolation=false; // Cuando true: los clientes inalámbricos no se ven entre sí
         // ── Mesh / Malla WiFi ──
         this.meshEnabled=false;
         this.meshId=`Mesh-${name}`;
@@ -552,14 +553,152 @@ class Printer extends NetworkDevice {
 class SDWAN extends NetworkDevice {
     constructor(id,name,x,y){
         super(id,name,'SDWAN',x,y);
-        this.nodes=[];this.policies=[];this.loadBalancing=true;this.encryption='AES-256';
-        this.underlay=['MPLS','Internet','LTE'];
-        for(let i=0;i<4;i++)this.addInterface(`WAN${i}`,'WAN','∞','wireless');
-        for(let i=0;i<4;i++)this.addInterface(`LAN${i}`,'LAN','∞','wireless');
-        this.ipConfig={ipAddress:'10.0.0.1',subnetMask:'255.255.255.0',gateway:'',public:true};
+        this.nodes = []; // Redes remotas conectadas
+        this.policies = []; // Políticas de SD-WAN
+        this.loadBalancing = true;
+        this.encryption = 'AES-256';
+        this.underlay = ['MPLS','Internet','LTE'];
+        this.wanLinks = []; // Estado de enlaces WAN
+        this.failoverEnabled = true;
+        this.applicationAwareness = true;
+        this.zeroTouchProvisioning = false;
+
+        // Interfaces WAN múltiples
+        for(let i=0;i<4;i++) {
+            this.addInterface(`WAN${i}`,'WAN','∞','wireless');
+            this.wanLinks.push({
+                id: i,
+                name: `WAN${i}`,
+                status: 'up',
+                bandwidth: 100, // Mbps
+                latency: 10, // ms
+                jitter: 2, // ms
+                packetLoss: 0, // %
+                cost: 1, // Costo relativo
+                provider: ['MPLS','Internet','LTE'][i % 3],
+                lastHealthCheck: Date.now(),
+                healthScore: 100 // 0-100
+            });
+        }
+
+        // Interfaces LAN
+        for(let i=0;i<4;i++) this.addInterface(`LAN${i}`,'LAN','∞','wireless');
+
+        this.ipConfig = {ipAddress:'10.0.0.1',subnetMask:'255.255.255.0',gateway:'',public:true};
     }
-    addNode(net){this.nodes.push({network:net,status:'up'});}
-    addPolicy(name,priority,action){this.policies.push({name,priority,action});}
+
+    addNode(net) {
+        this.nodes.push({
+            network: net,
+            status: 'up',
+            lastSeen: Date.now(),
+            bandwidth: 0,
+            latency: 0
+        });
+    }
+
+    addPolicy(name, priority, action, conditions = {}) {
+        this.policies.push({
+            name,
+            priority,
+            action, // 'route_via', 'block', 'qos', etc.
+            conditions, // { application: 'VoIP', bandwidth: 'min 10Mbps', etc. }
+            active: true
+        });
+        this.policies.sort((a,b) => b.priority - a.priority); // Ordenar por prioridad
+    }
+
+    // Método para seleccionar mejor enlace WAN basado en políticas
+    selectBestWANLink(packet, destination) {
+        if (!this.loadBalancing) return this.wanLinks[0];
+
+        const activeLinks = this.wanLinks.filter(link => link.status === 'up' && link.healthScore > 50);
+
+        if (activeLinks.length === 0) return null;
+
+        // Aplicar políticas
+        for (const policy of this.policies) {
+            if (this.matchesPolicy(packet, destination, policy)) {
+                const targetLink = activeLinks.find(link => link.name === policy.action.targetLink);
+                if (targetLink) return targetLink;
+            }
+        }
+
+        // Load balancing por defecto (round-robin simple)
+        const bestLink = activeLinks.reduce((best, current) =>
+            current.healthScore > best.healthScore ? current : best
+        );
+
+        return bestLink;
+    }
+
+    matchesPolicy(packet, destination, policy) {
+        // Lógica simplificada de matching de políticas
+        if (policy.conditions.application) {
+            // Simular detección de aplicación por puerto
+            const port = packet?.destPort || packet?.srcPort;
+            if (policy.conditions.application === 'VoIP' && [5060, 5061].includes(port)) return true;
+            if (policy.conditions.application === 'HTTP' && [80, 443].includes(port)) return true;
+        }
+        return false;
+    }
+
+    // Monitoreo de enlaces
+    updateLinkHealth(linkId, metrics) {
+        const link = this.wanLinks.find(l => l.id === linkId);
+        if (link) {
+            Object.assign(link, metrics);
+            link.lastHealthCheck = Date.now();
+            link.healthScore = this.calculateHealthScore(link);
+        }
+    }
+
+    calculateHealthScore(link) {
+        // Puntaje basado en latencia, jitter, pérdida
+        let score = 100;
+        score -= link.latency * 0.5; // Penalizar latencia alta
+        score -= link.jitter * 2; // Penalizar jitter
+        score -= link.packetLoss * 10; // Penalizar pérdida
+        return Math.max(0, Math.min(100, score));
+    }
+
+    // Failover automático
+    handleLinkFailure(linkId) {
+        if (!this.failoverEnabled) return;
+
+        const failedLink = this.wanLinks.find(l => l.id === linkId);
+        if (failedLink) {
+            failedLink.status = 'down';
+            // Rebalancear tráfico a otros enlaces
+            this.redistributeTraffic();
+        }
+    }
+
+    redistributeTraffic() {
+        // Lógica para redistribuir tráfico
+        const activeLinks = this.wanLinks.filter(l => l.status === 'up');
+        if (activeLinks.length > 0) {
+            // Notificar al sistema de ruteo
+            if (window.EventBus) {
+                window.EventBus.emit('SDWAN_FAILOVER', {
+                    device: this,
+                    activeLinks: activeLinks.length
+                });
+            }
+        }
+    }
+
+    // Método para obtener métricas del SD-WAN
+    getMetrics() {
+        return {
+            totalWANLinks: this.wanLinks.length,
+            activeWANLinks: this.wanLinks.filter(l => l.status === 'up').length,
+            totalBandwidth: this.wanLinks.reduce((sum, l) => sum + (l.status === 'up' ? l.bandwidth : 0), 0),
+            averageLatency: this.wanLinks.reduce((sum, l) => sum + l.latency, 0) / this.wanLinks.length,
+            policiesActive: this.policies.filter(p => p.active).length,
+            nodesConnected: this.nodes.length
+        };
+    }
 }
 class OLT extends NetworkDevice {
     constructor(id,name,x,y,ponPorts=16){

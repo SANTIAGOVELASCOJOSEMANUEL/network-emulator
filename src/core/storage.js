@@ -45,7 +45,7 @@ function _migrateData(data) {
 const NetworkPersistence = {
 
     /** Serializa el estado completo del simulador a un objeto plano */
-    _serialize(sim) {
+    _serialize(sim, managers = {}) {
         // Helper para serializar claves DSCP
         const DSCP_KEY_MAP = (() => {
             try { return Object.fromEntries(Object.entries(window.DSCP ?? {}).map(([k,v])=>[k,v])); } catch(e) { return {}; }
@@ -111,6 +111,15 @@ const NetworkPersistence = {
             if (d.armed      !== undefined) obj.armed      = d.armed;
             // ── IPv6 config ────────────────────────────────────────────
             if (d.ipv6Config !== undefined) obj.ipv6Config = d.ipv6Config ? { ...d.ipv6Config } : null;
+            // ── OSPF / Routing Protocol ───────────────────────────────
+            if (d.ospfNetworks       !== undefined) obj.ospfNetworks       = d.ospfNetworks ? JSON.parse(JSON.stringify(d.ospfNetworks)) : null;
+            if (d.routingProtocol    !== undefined) obj.routingProtocol    = d.routingProtocol;
+            if (d.routerId           !== undefined) obj.routerId           = d.routerId;
+            if (d.passiveInterfaces  !== undefined) obj.passiveInterfaces  = d.passiveInterfaces ? [...d.passiveInterfaces] : [];
+            // ── NAT Rules ────────────────────────────────────────────
+            if (d.natRules !== undefined && d.natRules !== null) {
+                try { obj.natRules = JSON.parse(JSON.stringify(d.natRules)); } catch(e) {}
+            }
             // Guardar rutas estáticas IPv6
             if (d.routingTableV6?.entries) {
                 try {
@@ -154,8 +163,8 @@ const NetworkPersistence = {
 
         // ── MPLS LSPs ─────────────────────────────────────────────────
         const mplsLSPs = [];
-        if (window.mplsManager) {
-            for (const lsp of window.mplsManager.lsps.values()) {
+        if (managers.mplsManager) {
+            for (const lsp of managers.mplsManager.lsps.values()) {
                 try {
                     mplsLSPs.push({
                         id        : lsp.id,
@@ -172,8 +181,8 @@ const NetworkPersistence = {
 
         // ── VPN Tunnels ───────────────────────────────────────────────
         const vpnTunnels = [];
-        if (window.vpnManager) {
-            for (const t of window.vpnManager.tunnels.values()) {
+        if (managers.vpnManager) {
+            for (const t of managers.vpnManager.tunnels.values()) {
                 try {
                     vpnTunnels.push({
                         id          : t.id,
@@ -223,7 +232,7 @@ const NetworkPersistence = {
     },
 
     /** Reconstruye el simulador desde un objeto serializado */
-    _deserialize(sim, data) {
+    _deserialize(sim, data, managers = {}) {
         sim.clear();
         if (!data || !data.devices) return;
 
@@ -255,6 +264,19 @@ const NetworkPersistence = {
             if (sd.panel      !== undefined) dev.panel      = sd.panel;
             if (sd.armed      !== undefined) dev.armed      = sd.armed;
             if (sd.ipv6Config !== undefined) dev.ipv6Config = sd.ipv6Config ? { ...sd.ipv6Config } : null;
+            // ── OSPF / Routing Protocol ───────────────────────────────
+            if (sd.ospfNetworks      !== undefined) dev.ospfNetworks      = sd.ospfNetworks ? JSON.parse(JSON.stringify(sd.ospfNetworks)) : null;
+            if (sd.routingProtocol   !== undefined) dev.routingProtocol   = sd.routingProtocol;
+            if (sd.routerId          !== undefined) dev.routerId          = sd.routerId;
+            if (sd.passiveInterfaces !== undefined) dev.passiveInterfaces = sd.passiveInterfaces ? [...sd.passiveInterfaces] : [];
+            // ── NAT Rules ────────────────────────────────────────────
+            if (sd.natRules !== undefined && sd.natRules !== null) {
+                try {
+                    dev.natRules = JSON.parse(JSON.stringify(sd.natRules));
+                    // Reaplicar al NATEngine si está disponible
+                    if (managers.NATEngine) managers.NATEngine.applyRules(dev);
+                } catch(e) {}
+            }
 
             // Restaurar estado de interfaces
             sd.interfaces.forEach((si, idx) => {
@@ -363,26 +385,26 @@ const NetworkPersistence = {
         // Reconstruir dhcpEngine.leases global desde los ipConfig restaurados
         // Esto evita que _assignIP() reasigne IPs ya ocupadas
         setTimeout(() => {
-            if (!window.dhcpEngine) return;
+            if (!managers.dhcpEngine) return;
             // Limpiar tabla global y reconstruir desde los dispositivos
-            window.dhcpEngine.leases = {};
+            managers.dhcpEngine.leases = {};
             sim.devices.forEach(dev => {
                 const ip = dev.ipConfig?.ipAddress;
                 if (ip && ip !== '0.0.0.0' && dev.ipConfig?.dhcpEnabled) {
-                    window.dhcpEngine.leases[dev.id] = ip;
+                    managers.dhcpEngine.leases[dev.id] = ip;
                 }
             });
         }, 700); // después de que dhcpEngine ya esté inicializado
 
         // ── Restaurar BGP Speakers ────────────────────────────────────
         setTimeout(() => {
-            if (!window.bgpManager) return;
+            if (!managers.bgpManager) return;
             const devMap2 = new Map(sim.devices.map(d => [d.id, d]));
             sim.devices.forEach(dev => {
                 const sd = data.devices.find(x => x.id === dev.id);
                 if (!sd?._bgp) return;
                 try {
-                    const sp = window.bgpManager.addSpeaker(dev, sd._bgp.asn);
+                    const sp = managers.bgpManager.addSpeaker(dev, sd._bgp.asn);
                     (sd._bgp.networks || []).forEach(pfx => sp.advertiseNetwork(pfx));
                     (sd._bgp.peers || []).forEach(p => {
                         const remDev = devMap2.get(p.remoteDevId);
@@ -395,17 +417,17 @@ const NetworkPersistence = {
                     });
                 } catch(e) { console.warn('BGP restore err:', e); }
             });
-            window.bgpManager.startAll();
+            managers.bgpManager.startAll();
         }, 800);
 
         // ── Restaurar QoS Engines ─────────────────────────────────────
         setTimeout(() => {
-            if (!window.qosManager) return;
+            if (!managers.qosManager) return;
             sim.devices.forEach(dev => {
                 const sd = data.devices.find(x => x.id === dev.id);
                 if (!sd?._qos?.policies?.length) return;
                 try {
-                    const eng = window.qosManager._getOrCreate(dev);
+                    const eng = managers.qosManager._getOrCreate(dev);
                     eng.enabled = sd._qos.enabled ?? true;
                     sd._qos.policies.forEach(p => eng.addPolicy({ ...p }));
                 } catch(e) { console.warn('QoS restore err:', e); }
@@ -414,7 +436,7 @@ const NetworkPersistence = {
 
         // ── Restaurar MPLS LSPs ───────────────────────────────────────
         setTimeout(() => {
-            if (!window.mplsManager || !data.mplsLSPs?.length) return;
+            if (!managers.mplsManager || !data.mplsLSPs?.length) return;
             const devMap3 = new Map(sim.devices.map(d => [d.id, d]));
             data.mplsLSPs.forEach(sl => {
                 try {
@@ -422,7 +444,7 @@ const NetworkPersistence = {
                     const egress  = devMap3.get(sl.egressId);
                     const path    = (sl.pathIds || []).map(id => devMap3.get(id)).filter(Boolean);
                     if (!ingress || !egress) return;
-                    window.mplsManager.buildLSP({
+                    managers.mplsManager.buildLSP({
                         id: sl.id, fec: sl.fec,
                         ingress, egress, path,
                         type: sl.type, bandwidth: sl.bandwidth,
@@ -433,14 +455,14 @@ const NetworkPersistence = {
 
         // ── Restaurar VPN Tunnels ─────────────────────────────────────
         setTimeout(() => {
-            if (!window.vpnManager || !data.vpnTunnels?.length) return;
+            if (!managers.vpnManager || !data.vpnTunnels?.length) return;
             const devMap4 = new Map(sim.devices.map(d => [d.id, d]));
             data.vpnTunnels.forEach(st => {
                 try {
                     const localDev  = devMap4.get(st.localDevId);
                     const remoteDev = devMap4.get(st.remoteDevId);
                     if (!localDev || !remoteDev) return;
-                    const t = window.vpnManager.addTunnel({
+                    const t = managers.vpnManager.addTunnel({
                         id          : st.id,
                         type        : st.type,
                         localDevice : localDev,
@@ -462,17 +484,17 @@ const NetworkPersistence = {
         sim.draw();
     },
 
-    save(sim)           { return saveNetwork(sim); },
-    load(sim)           { return loadNetwork(sim); },
+    save(sim, managers = {}) { return saveNetwork(sim, managers); },
+    load(sim, managers = {}) { return loadNetwork(sim, managers); },
     download(sim)       { downloadNetwork(sim); },
     importFile(sim, f)  { return importNetwork(sim, f); },
 };
 
 // ── Autoguardado ─────────────────────────────────────────────────────
-function startAutoSave(sim, intervalMs = 30000) {
+function startAutoSave(sim, managers = {}, intervalMs = 30000) {
     return setInterval(() => {
         if (sim.devices.length > 0) {
-            saveNetwork(sim);
+            saveNetwork(sim, managers);
             console.debug('[AutoSave] Red guardada');
         }
     }, intervalMs);
@@ -480,12 +502,13 @@ function startAutoSave(sim, intervalMs = 30000) {
 
 /**
  * Guarda la red serializada en localStorage.
- * @param {object} sim  — instancia de NetworkSimulator
+ * @param {object} sim      — instancia de NetworkSimulator
+ * @param {object} managers — objeto con todos los managers { mpls, vpn, nat, dhcp, bgp, qos }
  * @returns {boolean}
  */
-function saveNetwork(sim) {
+function saveNetwork(sim, managers = {}) {
     try {
-        const data = NetworkPersistence._serialize(sim);
+        const data = NetworkPersistence._serialize(sim, managers);
         localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
         return true;
     } catch (e) {
@@ -496,16 +519,17 @@ function saveNetwork(sim) {
 
 /**
  * Carga la red desde localStorage.
- * @param {object} sim  — instancia de NetworkSimulator
+ * @param {object} sim      — instancia de NetworkSimulator
+ * @param {object} managers — objeto con todos los managers { mpls, vpn, nat, dhcp, bgp, qos }
  * @returns {boolean}
  */
-function loadNetwork(sim) {
+function loadNetwork(sim, managers = {}) {
     try {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (!raw) return false;
         // Migrar formato antes de deserializar para compatibilidad con datos viejos
         const data = _migrateData(JSON.parse(raw));
-        NetworkPersistence._deserialize(sim, data);
+        NetworkPersistence._deserialize(sim, data, managers);
         return true;
     } catch (e) {
         handleError(e, true);

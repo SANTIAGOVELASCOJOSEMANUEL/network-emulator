@@ -655,7 +655,7 @@ class PacketAnimator {
 ══════════════════════════════════════════════════════════════════ */
 
 // Se inicializa cuando el simulador esté listo
-window._paInit = function(sim) {
+function initPacketAnimator(sim) {
     if (window.packetAnimator) {
         // Re-inicializar si ya existe (para hot-reload o reinicio)
         const old = document.getElementById('pa-panel');
@@ -677,4 +677,6 @@ window._paInit = function(sim) {
 
     console.log('[PacketAnimator] ✅ Inicializado');
     return window.packetAnimator;
-};
+}
+
+export { PacketAnimator, initPacketAnimator };

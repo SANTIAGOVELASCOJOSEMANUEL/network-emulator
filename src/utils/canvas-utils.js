@@ -266,3 +266,6 @@ window.drawGrid    = drawGrid;
 window.clearCanvas = clearCanvas;
 window.drawLabel   = drawLabel;
 window.drawArrow   = drawArrow;
+
+// — ES6 Export —
+export { drawLegend, drawGrid, clearCanvas, drawLabel, drawArrow };

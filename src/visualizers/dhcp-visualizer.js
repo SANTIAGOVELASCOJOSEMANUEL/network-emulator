@@ -2,8 +2,11 @@
 // Animación de 4 pasos, tabla de leases, renovación visual
 'use strict';
 
+import { eventBus, EVENTS } from '../core/event-bus.js';
+
 class DHCPVisualizer {
-    constructor() {
+    constructor(sim) {
+        this.sim = sim;
         this.panel = null;
         this.animationState = null;
         this.updateInterval = null;
@@ -23,7 +26,7 @@ class DHCPVisualizer {
                     </svg>
                     <span>DHCP Process Viewer</span>
                 </div>
-                <button class="dhcp-close" onclick="window.dhcpViz.hide()">
+                <button class="dhcp-close" data-action="hide">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M18 6L6 18M6 6l12 12"/>
                     </svg>
@@ -92,7 +95,7 @@ class DHCPVisualizer {
                 <div class="dhcp-leases" id="dhcpLeases">
                     <div class="leases-header">
                         <h3>Tabla de Leases Activos</h3>
-                        <button class="refresh-btn" onclick="window.dhcpViz.refreshLeases()">
+                        <button class="refresh-btn" data-action="refresh">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M21 12a9 9 0 11-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/>
                                 <path d="M21 3v5h-5"/>
@@ -103,13 +106,13 @@ class DHCPVisualizer {
                 </div>
             </div>
             <div class="dhcp-footer">
-                <button class="dhcp-action-btn" onclick="window.dhcpViz.runDemo()">
+                <button class="dhcp-action-btn" data-action="demo">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <polygon points="5 3 19 12 5 21 5 3"/>
                     </svg>
                     Ejecutar Demo
                 </button>
-                <button class="dhcp-action-btn secondary" onclick="window.dhcpViz.resetAnimation()">
+                <button class="dhcp-action-btn secondary" data-action="reset">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M3 12a9 9 0 019-9 9.75 9.75 0 016.74 2.74L21 8"/>
                         <path d="M21 3v5h-5M21 12a9 9 0 01-9 9 9.75 9.75 0 01-6.74-2.74L3 16"/>
@@ -120,6 +123,38 @@ class DHCPVisualizer {
             </div>
         `;
         document.body.appendChild(this.panel);
+        this._bindUI();
+        this._bindEventBus();
+    }
+
+    _bindUI() {
+        const closeBtn = this.panel.querySelector('[data-action="hide"]');
+        const refreshBtn = this.panel.querySelector('[data-action="refresh"]');
+        const demoBtn = this.panel.querySelector('[data-action="demo"]');
+        const resetBtn = this.panel.querySelector('[data-action="reset"]');
+
+        closeBtn?.addEventListener('click', () => this.hide());
+        refreshBtn?.addEventListener('click', () => this.refreshLeases());
+        demoBtn?.addEventListener('click', () => this.runDemo());
+        resetBtn?.addEventListener('click', () => this.resetAnimation());
+    }
+
+    _bindEventBus() {
+        eventBus.on(EVENTS.DHCP_REQUEST, ({ device }) => {
+            if (device?.name) {
+                this.showMessage(`📡 DHCP DISCOVER enviado desde ${device.name}`, 'dhcp-discover');
+            }
+        });
+
+        eventBus.on(EVENTS.DHCP_ACK, ({ device, ip }) => {
+            this.refreshLeases();
+            this.showMessage(`✅ DHCP ACK: ${device?.name || 'Cliente'} recibió ${ip}`, 'dhcp-ok');
+        });
+
+        eventBus.on(EVENTS.DHCP_RELEASE, () => {
+            this.refreshLeases();
+            this.showMessage('🔄 DHCP RELEASE recibido', 'dhcp-release');
+        });
     }
 
     show() {
@@ -243,12 +278,12 @@ class DHCPVisualizer {
     refreshLeases() {
         const table = document.getElementById('leasesTable');
         
-        if (!window.networkSim || !window.dhcpEngine) {
+        if (!this.sim || !window.dhcpEngine) {
             table.innerHTML = '<div class="table-empty">Motor DHCP no disponible</div>';
             return;
         }
 
-        const servers = window.networkSim.devices.filter(d => d.dhcpServer);
+        const servers = this.sim.devices.filter(d => d.dhcpServer);
         
         if (servers.length === 0) {
             table.innerHTML = '<div class="table-empty">Sin servidores DHCP configurados</div>';
@@ -335,12 +370,15 @@ class DHCPVisualizer {
 // Instancia global
 window.dhcpViz = null;
 
-document.addEventListener('DOMContentLoaded', () => {
-    window.dhcpViz = new DHCPVisualizer();
-    console.log('[DHCP Visualizer] Inicializado ✅');
-});
+export function initDHCPVisualizer(sim) {
+    if (!window.dhcpViz) {
+        window.dhcpViz = new DHCPVisualizer(sim);
+        console.log('[DHCP Visualizer] Inicializado ✅');
+    }
+    return window.dhcpViz;
+}
 
-// Estilos CSS
+// Export for ES modules
 const style = document.createElement('style');
 style.textContent = `
 .dhcp-panel {

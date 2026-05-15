@@ -343,6 +343,991 @@ const LAB_CHECKS = {
             feedback: sim.simulationRunning ? '✓ Simulación activa.' : 'Presiona ▶ para activar el servidor DHCP.',
         }),
     },
+
+    'lab-06': {
+        'add-switch': (sim) => {
+            const ok = Check.hasDevice(sim, 'Switch');
+            return { ok, feedback: ok ? '✓ Switch en el canvas.' : 'Agrega un Switch al canvas.' };
+        },
+        'create-vlans': (sim) => {
+            const sw = sim.devices.find(d => d.type === 'Switch');
+            if (!sw?.vlans) return { ok: false, feedback: 'El Switch aún no tiene VLANs configuradas. CLI: vlan 10 → name Ventas / vlan 20 → name IT' };
+            const ids = Object.keys(sw.vlans).map(Number);
+            const has10 = ids.includes(10), has20 = ids.includes(20);
+            if (!has10 && !has20) return { ok: false, feedback: 'Faltan VLAN 10 y VLAN 20. CLI del switch: configure terminal → vlan 10 → name Ventas → exit → vlan 20 → name IT' };
+            if (!has10) return { ok: false, feedback: '✓ VLAN 20 creada, pero falta VLAN 10. CLI: vlan 10 → name Ventas' };
+            if (!has20) return { ok: false, feedback: '✓ VLAN 10 creada, pero falta VLAN 20. CLI: vlan 20 → name IT' };
+            return { ok: true, feedback: '✓ VLAN 10 (Ventas) y VLAN 20 (IT) configuradas.' };
+        },
+        'add-pcs': (sim) => {
+            const sw = sim.devices.find(d => d.type === 'Switch');
+            if (!sw) return { ok: false, feedback: 'Primero agrega el Switch.' };
+            const pcs = sim.devices.filter(d => d.type === 'PC');
+            const conn = sim.connections.filter(c => c.from === sw || c.to === sw);
+            if (pcs.length < 4) return { ok: false, feedback: `Tienes ${pcs.length} PC(s), necesitas 4.` };
+            if (conn.length < 4) return { ok: false, feedback: `${conn.length} PC(s) conectadas al switch, necesitas al menos 4.` };
+            return { ok: true, feedback: `✓ ${pcs.length} PCs conectadas al switch.` };
+        },
+        'assign-access-ports': (sim) => {
+            const sw = sim.devices.find(d => d.type === 'Switch');
+            if (!sw?._vlanEngine) return { ok: false, feedback: 'No se detecta VLANEngine en el switch. Configura al menos un puerto access.' };
+            const ports = Object.values(sw._vlanEngine.portConfig || {});
+            const v10 = ports.filter(p => p.vlan === 10 || p.accessVlan === 10).length;
+            const v20 = ports.filter(p => p.vlan === 20 || p.accessVlan === 20).length;
+            if (!v10 && !v20) return { ok: false, feedback: 'Ningún puerto asignado aún. CLI: interface port2 → switchport mode access → switchport access vlan 10' };
+            if (!v10) return { ok: false, feedback: `✓ ${v20} puerto(s) en VLAN 20. Falta asignar puertos a VLAN 10.` };
+            if (!v20) return { ok: false, feedback: `✓ ${v10} puerto(s) en VLAN 10. Falta asignar puertos a VLAN 20.` };
+            return { ok: true, feedback: `✓ ${v10} puerto(s) en VLAN 10 y ${v20} en VLAN 20.` };
+        },
+        'set-ips': (sim) => {
+            const pcs = sim.devices.filter(d => d.type === 'PC');
+            const has10 = pcs.some(p => p.ipConfig?.ipAddress?.startsWith('192.168.10.'));
+            const has20 = pcs.some(p => p.ipConfig?.ipAddress?.startsWith('192.168.20.'));
+            if (!has10 && !has20) return { ok: false, feedback: 'Ninguna PC tiene IP asignada en las subredes de VLAN. Asigna IPs 192.168.10.x y 192.168.20.x' };
+            if (!has10) return { ok: false, feedback: 'Falta IP en la subred 192.168.10.x (VLAN 10).' };
+            if (!has20) return { ok: false, feedback: 'Falta IP en la subred 192.168.20.x (VLAN 20).' };
+            return { ok: true, feedback: '✓ IPs asignadas en ambas subredes VLAN.' };
+        },
+        'verify-isolation': (sim) => ({
+            ok: sim.simulationRunning,
+            feedback: sim.simulationRunning ? '✓ Simulación activa — VLANs aisladas por el motor L2.' : 'Presiona ▶ para iniciar la simulación.',
+        }),
+    },
+
+    'lab-07': {
+        'prerequisite': (sim) => {
+            const sw = sim.devices.find(d => d.type === 'Switch');
+            if (!sw?.vlans) return { ok: false, feedback: 'El Switch no tiene VLANs. Completa el Lab 6 primero o crea VLAN 10 y VLAN 20.' };
+            const ids = Object.keys(sw.vlans).map(Number);
+            const ok = ids.includes(10) && ids.includes(20);
+            return { ok, feedback: ok ? '✓ Switch con VLAN 10 y VLAN 20 listas.' : `VLANs encontradas: [${ids.join(', ')}]. Faltan: ${!ids.includes(10)?'VLAN 10 ':''} ${!ids.includes(20)?'VLAN 20':''}` };
+        },
+        'add-router': (sim) => {
+            const router = sim.devices.find(d => d.type === 'Router');
+            const sw = sim.devices.find(d => d.type === 'Switch');
+            if (!router) return { ok: false, feedback: 'Agrega un Router al canvas.' };
+            if (!sw) return { ok: false, feedback: 'Agrega un Switch al canvas.' };
+            const connected = sim.connections.some(c =>
+                (c.from === router && c.to === sw) || (c.from === sw && c.to === router)
+            );
+            return { ok: connected, feedback: connected ? `✓ ${router.name} conectado al Switch.` : `${router.name} no está conectado al Switch aún.` };
+        },
+        'trunk-port': (sim) => {
+            const sw = sim.devices.find(d => d.type === 'Switch');
+            if (!sw?._vlanEngine) return { ok: false, feedback: 'No se detecta VLANEngine. Configura el puerto uplink como trunk.' };
+            const hasTrunk = Object.values(sw._vlanEngine.portConfig || {}).some(p => p.mode === 'trunk');
+            return { ok: hasTrunk, feedback: hasTrunk ? '✓ Puerto trunk configurado.' : 'Configura el puerto hacia el router como trunk. CLI: interface <puerto> → switchport mode trunk → switchport trunk allowed vlan 10,20' };
+        },
+        'router-subinterfaces': (sim) => {
+            const r = sim.devices.find(d => d.type === 'Router');
+            if (!r) return { ok: false, feedback: 'No hay Router.' };
+            const allIPs = (r.interfaces || []).map(i => i.ipConfig?.ipAddress || '');
+            const has10 = allIPs.some(ip => ip.startsWith('192.168.10.'));
+            const has20 = allIPs.some(ip => ip.startsWith('192.168.20.'));
+            if (!has10 && !has20) return { ok: false, feedback: 'El router no tiene IPs de gateway. CLI: interface LAN0 → ip address 192.168.10.254 255.255.255.0' };
+            if (!has10) return { ok: false, feedback: '✓ Gateway VLAN 20 configurado. Falta 192.168.10.254 para VLAN 10.' };
+            if (!has20) return { ok: false, feedback: '✓ Gateway VLAN 10 configurado. Falta 192.168.20.254 para VLAN 20.' };
+            return { ok: true, feedback: '✓ Router con gateways para VLAN 10 (192.168.10.254) y VLAN 20 (192.168.20.254).' };
+        },
+        'set-gateways': (sim) => {
+            const pcs = sim.devices.filter(d => d.type === 'PC');
+            const gw10 = pcs.some(p => p.ipConfig?.gateway === '192.168.10.254');
+            const gw20 = pcs.some(p => p.ipConfig?.gateway === '192.168.20.254');
+            if (!gw10 && !gw20) return { ok: false, feedback: 'Ninguna PC tiene gateway configurado.' };
+            if (!gw10) return { ok: false, feedback: '✓ Gateway VLAN 20 en PCs. Falta gateway 192.168.10.254 en PCs de VLAN 10.' };
+            if (!gw20) return { ok: false, feedback: '✓ Gateway VLAN 10 en PCs. Falta gateway 192.168.20.254 en PCs de VLAN 20.' };
+            return { ok: true, feedback: '✓ Gateways configurados en PCs de ambas VLANs.' };
+        },
+        'verify-routing': (sim) => {
+            if (!sim.simulationRunning) return { ok: false, feedback: 'Presiona ▶ para iniciar la simulación.' };
+            const r = sim.devices.find(d => d.type === 'Router');
+            if (!r?.routingTable) return { ok: false, feedback: 'Simulación activa pero el router no tiene tabla de rutas.' };
+            const routes = r.routingTable.entries ? r.routingTable.entries() : (r.routingTable.routes || []);
+            if (routes.length < 2) return { ok: false, feedback: `Router tiene ${routes.length} ruta(s). Necesita al menos 2 (una por VLAN).` };
+            // Verificar conectividad real: ¿existe ruta entre subredes?
+            const pcs10 = sim.devices.filter(d => d.type === 'PC' && d.ipConfig?.ipAddress?.startsWith('192.168.10.'));
+            const pcs20 = sim.devices.filter(d => d.type === 'PC' && d.ipConfig?.ipAddress?.startsWith('192.168.20.'));
+            if (pcs10.length && pcs20.length) {
+                const engine = sim.engine;
+                const hasPath = engine?.findRoute?.(pcs10[0].id, pcs20[0].id)?.length > 0;
+                if (hasPath === false) return { ok: false, feedback: 'Las rutas existen pero no hay camino físico entre las PCs. Revisa las conexiones.' };
+            }
+            return { ok: true, feedback: `✓ Inter-VLAN routing activo. ${routes.length} rutas en la tabla.` };
+        },
+    },
+
+    'lab-08': {
+        'topology': (sim) => {
+            const hasRouter = Check.hasDevice(sim, 'Router', 'RouterWifi');
+            const hasISP    = Check.hasDevice(sim, 'ISP', 'Internet');
+            const hasPCs    = sim.devices.filter(d => d.type === 'PC').length >= 2;
+            if (!hasRouter) return { ok: false, feedback: 'Agrega un Router al canvas.' };
+            if (!hasISP)    return { ok: false, feedback: 'Agrega un dispositivo ISP o Internet.' };
+            if (!hasPCs)    return { ok: false, feedback: `Tienes ${sim.devices.filter(d=>d.type==='PC').length} PC(s), necesitas al menos 2.` };
+            return { ok: true, feedback: '✓ Topología base (Router + ISP + PCs) lista.' };
+        },
+        'private-ips': (sim) => {
+            const pcs = sim.devices.filter(d => d.type === 'PC');
+            const priv = pcs.filter(p => {
+                const ip = p.ipConfig?.ipAddress || '';
+                return ip.startsWith('192.168.') || ip.startsWith('10.') || ip.startsWith('172.16.');
+            });
+            if (!priv.length) return { ok: false, feedback: 'Ninguna PC tiene IP privada. Asigna IPs 192.168.1.x/24 a las PCs.' };
+            return { ok: true, feedback: `✓ ${priv.length} PC(s) con IP privada configurada.` };
+        },
+        'nat-interfaces': (sim) => {
+            const r = sim.devices.find(d => ['Router','RouterWifi','Firewall'].includes(d.type));
+            if (!r) return { ok: false, feedback: 'No hay router.' };
+            const hasInside  = (r.interfaces || []).some(i => i.natDirection === 'inside');
+            const hasOutside = (r.interfaces || []).some(i => i.natDirection === 'outside');
+            if (!hasInside && !hasOutside) return { ok: false, feedback: 'Configura las interfaces NAT. CLI: interface LAN0 → ip nat inside / interface WAN0 → ip nat outside' };
+            if (!hasInside)  return { ok: false, feedback: '✓ Interfaz outside configurada. Falta: interface LAN0 → ip nat inside' };
+            if (!hasOutside) return { ok: false, feedback: '✓ Interfaz inside configurada. Falta: interface WAN0 → ip nat outside' };
+            return { ok: true, feedback: '✓ Interfaces inside y outside configuradas.' };
+        },
+        'nat-rule': (sim) => {
+            const r = sim.devices.find(d => ['Router','RouterWifi','Firewall'].includes(d.type));
+            if (!r) return { ok: false, feedback: 'No hay router.' };
+            const hasPAT = r.natRules?.some(rule => rule.type === 'PAT' || rule.overload);
+            return { ok: !!hasPAT, feedback: hasPAT ? '✓ Regla NAT PAT configurada.' : 'Configura NAT overload. CLI: ip nat inside source list 1 interface WAN0 overload' };
+        },
+        'verify-nat': (sim) => {
+            if (!sim.simulationRunning) return { ok: false, feedback: 'Presiona ▶ para iniciar la simulación.' };
+            const r = sim.devices.find(d => ['Router','RouterWifi','Firewall'].includes(d.type));
+            if (!r?.natRules?.length) return { ok: false, feedback: 'Simulación activa pero NAT no configurado.' };
+            // Verificar que existe ruta desde PC hacia Internet/ISP
+            const pc = sim.devices.find(d => d.type === 'PC' && d.ipConfig?.ipAddress);
+            const inet = sim.devices.find(d => ['Internet','ISP'].includes(d.type));
+            if (pc && inet) {
+                const path = sim.engine?.findRoute?.(pc.id, inet.id);
+                if (path?.length > 0) return { ok: true, feedback: `✓ NAT activo. Ruta PC → Internet: ${path.length - 1} salto(s).` };
+                return { ok: false, feedback: 'NAT configurado pero no hay ruta de PC hasta Internet. Verifica conexiones y gateways.' };
+            }
+            return { ok: true, feedback: '✓ NAT PAT activo en la simulación.' };
+        },
+    },
+
+    'lab-09': {
+        'two-routers': (sim) => {
+            const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+            if (routers.length < 2) return { ok: false, feedback: `Tienes ${routers.length} router(es). Necesitas al menos 2.` };
+            const linked = sim.connections.some(c => routers.includes(c.from) && routers.includes(c.to));
+            return { ok: linked, feedback: linked ? `✓ ${routers.length} routers conectados entre sí.` : 'Los routers no están conectados entre ellos. Traza un cable entre sus interfaces WAN.' };
+        },
+        'lan-segments': (sim) => {
+            const pcs = sim.devices.filter(d => d.type === 'PC');
+            if (pcs.length < 2) return { ok: false, feedback: `Tienes ${pcs.length} PC(s), necesitas al menos 2 (una por lado).` };
+            const subnets = new Set(pcs.map(p => p.ipConfig?.ipAddress?.split('.').slice(0,3).join('.')).filter(Boolean));
+            if (subnets.size < 2) return { ok: false, feedback: 'Todas las PCs están en la misma subred. Pon las PCs en subredes distintas (ej: 10.1.1.x y 10.2.2.x).' };
+            return { ok: true, feedback: `✓ ${subnets.size} subredes LAN detectadas: ${[...subnets].join(', ')}` };
+        },
+        'router-link-ips': (sim) => {
+            const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+            const wanIPs  = routers.flatMap(r => (r.interfaces || []).map(i => i.ipConfig?.ipAddress || '')).filter(ip => ip.startsWith('10.0.0.'));
+            if (!wanIPs.length) return { ok: false, feedback: 'Ninguna interfaz WAN tiene IP 10.0.0.x. CLI Router-A: interface WAN0 → ip address 10.0.0.1 255.255.255.252' };
+            if (wanIPs.length < 2) return { ok: false, feedback: `Solo ${wanIPs.length} IP en el enlace WAN (${wanIPs[0]}). Falta configurar el otro router.` };
+            return { ok: true, feedback: `✓ Enlace punto a punto: ${wanIPs.join(' ↔ ')}` };
+        },
+        'ospf-router-a': (sim) => {
+            const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+            const withOspf = routers.filter(r => r.routingProtocol === 'ospf' && r.ospfNetworks?.length);
+            if (!withOspf.length) return { ok: false, feedback: 'Ningún router tiene OSPF. CLI: configure terminal → router ospf 1 → network 10.0.0.0 0.0.0.3 area 0' };
+            return { ok: true, feedback: `✓ ${withOspf[0].name} con OSPF activo (${withOspf[0].ospfNetworks.length} red(es)).` };
+        },
+        'ospf-router-b': (sim) => {
+            const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+            const withOspf = routers.filter(r => r.routingProtocol === 'ospf' && r.ospfNetworks?.length);
+            if (withOspf.length < 2) return { ok: false, feedback: `Solo ${withOspf.length} router con OSPF. Activa OSPF también en el segundo router.` };
+            return { ok: true, feedback: `✓ Ambos routers con OSPF activo.` };
+        },
+        'verify-ospf': (sim) => {
+            if (!sim.simulationRunning) return { ok: false, feedback: 'Presiona ▶ para iniciar la simulación.' };
+            const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+            const withOspfRoutes = routers.filter(r => {
+                const routes = r.routingTable?.entries ? r.routingTable.entries() : (r.routingTable?.routes || []);
+                return routes.some(rt => rt.type === 'O' || rt.proto === 'ospf');
+            });
+            if (!withOspfRoutes.length) return { ok: false, feedback: 'Simulación activa pero los routers aún no tienen rutas OSPF (tipo "O"). Verifica que OSPF esté habilitado y las redes anunciadas.' };
+            // Test de plano de datos: ¿hay ruta real entre las dos subredes LAN?
+            const pcs = sim.devices.filter(d => d.type === 'PC' && d.ipConfig?.ipAddress);
+            const subnets = [...new Set(pcs.map(p => p.ipConfig?.ipAddress?.split('.').slice(0,3).join('.')).filter(Boolean))];
+            if (subnets.length >= 2 && pcs.length >= 2) {
+                const pcA = pcs.find(p => p.ipConfig.ipAddress.startsWith(subnets[0]));
+                const pcB = pcs.find(p => p.ipConfig.ipAddress.startsWith(subnets[1]));
+                if (pcA && pcB) {
+                    const path = sim.engine?.findRoute?.(pcA.id, pcB.id);
+                    if (!path?.length) return { ok: false, feedback: `Rutas OSPF presentes pero sin camino físico entre ${pcA.name} y ${pcB.name}. Verifica conexiones.` };
+                    return { ok: true, feedback: `✓ OSPF convergió. Ruta ${pcA.name} → ${pcB.name}: ${path.length - 1} salto(s). Rutas tipo "O" en ${withOspfRoutes.length} router(es).` };
+                }
+            }
+            return { ok: true, feedback: `✓ OSPF convergido. ${withOspfRoutes.length} router(es) con rutas tipo "O".` };
+        },
+    },
+
+    'lab-10': {
+        'add-olt': (sim) => {
+            const ok = sim.devices.some(d => d.type === 'OLT');
+            return { ok, feedback: ok ? '✓ OLT en el canvas.' : 'Agrega un OLT al canvas.' };
+        },
+        'add-onts': (sim) => {
+            const olt  = sim.devices.find(d => d.type === 'OLT');
+            const onts = sim.devices.filter(d => d.type === 'ONT');
+            if (!olt)           return { ok: false, feedback: 'Primero agrega el OLT.' };
+            if (onts.length < 3) return { ok: false, feedback: `Tienes ${onts.length} ONT(s), necesitas 3.` };
+            const connectedOnts = onts.filter(ont => sim.connections.some(c => (c.from===olt&&c.to===ont)||(c.from===ont&&c.to===olt)));
+            if (connectedOnts.length < 3) return { ok: false, feedback: `${connectedOnts.length} ONT(s) conectados al OLT. Conecta todos al OLT.` };
+            return { ok: true, feedback: `✓ ${connectedOnts.length} ONTs conectados al OLT.` };
+        },
+        'add-router-uplink': (sim) => {
+            const olt = sim.devices.find(d => d.type === 'OLT');
+            const r   = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+            if (!olt) return { ok: false, feedback: 'Falta OLT.' };
+            if (!r)   return { ok: false, feedback: 'Agrega un Router al canvas.' };
+            const linked = sim.connections.some(c => (c.from===olt&&c.to===r)||(c.from===r&&c.to===olt));
+            return { ok: linked, feedback: linked ? `✓ OLT conectado a ${r.name}.` : 'Conecta el OLT al Router mediante su puerto UPLINK.' };
+        },
+        'cpe-devices': (sim) => {
+            const onts = sim.devices.filter(d => d.type === 'ONT');
+            if (!onts.length) return { ok: false, feedback: 'No hay ONTs.' };
+            const ontWithCPE = onts.filter(ont =>
+                sim.connections.some(c =>
+                    (c.from === ont || c.to === ont) &&
+                    ['PC','Laptop','RouterWifi'].includes((c.from===ont?c.to:c.from).type)
+                )
+            );
+            if (!ontWithCPE.length) return { ok: false, feedback: 'Ningún ONT tiene equipo CPE conectado. Conecta PCs o RouterWifi detrás de cada ONT.' };
+            if (ontWithCPE.length < onts.length) return { ok: false, feedback: `${ontWithCPE.length} de ${onts.length} ONTs tienen CPE. Conecta dispositivos a todos los ONTs.` };
+            return { ok: true, feedback: `✓ Todos los ONTs tienen equipos CPE conectados.` };
+        },
+        'ip-plan': (sim) => {
+            const pcs = sim.devices.filter(d => ['PC','Laptop'].includes(d.type));
+            const subnets = new Set(pcs.map(p => p.ipConfig?.ipAddress?.split('.').slice(0,3).join('.')).filter(Boolean));
+            if (subnets.size < 2) return { ok: false, feedback: 'Los clientes están todos en la misma subred. Asigna subredes distintas a cada ONT (172.16.1.x, 172.16.2.x, 172.16.3.x).' };
+            return { ok: true, feedback: `✓ ${subnets.size} subredes detectadas para clientes FTTH.` };
+        },
+        'simulate-ftth': (sim) => {
+            if (!sim.simulationRunning) return { ok: false, feedback: 'Presiona ▶ para iniciar la simulación.' };
+            const olt  = sim.devices.find(d => d.type === 'OLT');
+            const onts = sim.devices.filter(d => d.type === 'ONT');
+            if (!olt)            return { ok: false, feedback: 'No hay OLT.' };
+            if (onts.length < 3) return { ok: false, feedback: `Solo ${onts.length} ONTs. Necesitas 3.` };
+            return { ok: true, feedback: `✓ Red FTTH activa — OLT + ${onts.length} ONTs en producción.` };
+        },
+    },
+
+    'lab-11': {
+        'full-topo': (sim) => {
+            const fw    = sim.devices.find(d => d.type === 'Firewall');
+            const svr   = sim.devices.find(d => d.type === 'Server');
+            const pcs   = sim.devices.filter(d => d.type === 'PC');
+            const inet  = sim.devices.find(d => ['Internet','ISP'].includes(d.type));
+            const missing = [];
+            if (!fw)          missing.push('Firewall');
+            if (!svr)         missing.push('Servidor');
+            if (pcs.length<2) missing.push(`${2-pcs.length} PC(s) más`);
+            if (!inet)        missing.push('Internet o ISP');
+            if (missing.length) return { ok: false, feedback: `Falta: ${missing.join(', ')}.` };
+            return { ok: true, feedback: '✓ Topología completa: Internet → Firewall → [LAN + DMZ].' };
+        },
+        'zone-ips': (sim) => {
+            const pcs = sim.devices.filter(d => d.type === 'PC');
+            const svr = sim.devices.find(d => d.type === 'Server');
+            const lanOk = pcs.some(p => p.ipConfig?.ipAddress?.startsWith('10.10.1.'));
+            const dmzOk = svr?.ipConfig?.ipAddress?.startsWith('172.16.0.');
+            if (!lanOk && !dmzOk) return { ok: false, feedback: 'PCs sin IPs LAN (10.10.1.x) y Servidor sin IP DMZ (172.16.0.x).' };
+            if (!lanOk) return { ok: false, feedback: `✓ Servidor DMZ con IP ${svr.ipConfig.ipAddress}. Falta: PCs con IP 10.10.1.x.` };
+            if (!dmzOk) return { ok: false, feedback: `✓ PCs con IPs LAN. Falta: Servidor con IP 172.16.0.x (actualmente: ${svr?.ipConfig?.ipAddress||'sin IP'}).` };
+            return { ok: true, feedback: `✓ LAN: 10.10.1.x | DMZ: ${svr.ipConfig.ipAddress}` };
+        },
+        'acl-deny-wan-to-lan': (sim) => {
+            const fw = sim.devices.find(d => d.type === 'Firewall');
+            if (!fw) return { ok: false, feedback: 'No hay Firewall.' };
+            const hasACL = fw.accessLists && Object.keys(fw.accessLists).length > 0;
+            if (!hasACL) return { ok: false, feedback: 'No hay ACLs configuradas. CLI: access-list 100 deny ip any 10.10.1.0 0.0.0.255 / access-list 100 permit ip any any' };
+            // Verificar que hay al menos una regla deny hacia 10.10.1.x
+            const allRules = Object.values(fw.accessLists).flat();
+            const hasDenyLAN = allRules.some(r => r.action === 'deny' && (r.dst?.includes('10.10.1') || r.dstNetwork?.includes('10.10.1')));
+            if (!hasDenyLAN) return { ok: false, feedback: `ACL existe (${allRules.length} regla(s)) pero no bloquea 10.10.1.0. Agrega: access-list 100 deny ip any 10.10.1.0 0.0.0.255` };
+            return { ok: true, feedback: `✓ ACL bloquea acceso WAN → LAN. ${allRules.length} regla(s) configuradas.` };
+        },
+        'acl-allow-dmz': (sim) => {
+            const fw = sim.devices.find(d => d.type === 'Firewall');
+            if (!fw?.accessLists) return { ok: false, feedback: 'No hay ACLs.' };
+            const allRules = Object.values(fw.accessLists).flat();
+            const hasDMZPermit = allRules.some(r => r.action === 'permit' && (r.dst?.includes('172.16.0') || r.dstNetwork?.includes('172.16.0')));
+            return { ok: !!hasDMZPermit, feedback: hasDMZPermit ? '✓ ACL permite tráfico hacia la DMZ (172.16.0.x).' : 'Agrega regla para la DMZ: access-list 101 permit tcp any 172.16.0.10' };
+        },
+        'nat-firewall': (sim) => {
+            const fw = sim.devices.find(d => d.type === 'Firewall');
+            if (!fw) return { ok: false, feedback: 'No hay Firewall.' };
+            const hasPAT = fw.natRules?.some(r => r.type === 'PAT' || r.overload);
+            if (!hasPAT) return { ok: false, feedback: 'El Firewall no tiene NAT/PAT. CLI: ip nat inside source list 1 interface WAN0 overload' };
+            const hasInside  = (fw.interfaces || []).some(i => i.natDirection === 'inside');
+            const hasOutside = (fw.interfaces || []).some(i => i.natDirection === 'outside');
+            if (!hasInside || !hasOutside) return { ok: false, feedback: '✓ Regla NAT PAT configurada. Verifica: interface LAN → ip nat inside / interface WAN → ip nat outside.' };
+            return { ok: true, feedback: '✓ NAT/PAT activo en el Firewall con interfaces inside/outside.' };
+        },
+        'full-security-sim': (sim) => {
+            if (!sim.simulationRunning) return { ok: false, feedback: 'Presiona ▶.' };
+            const fw = sim.devices.find(d => d.type === 'Firewall');
+            if (!fw) return { ok: false, feedback: 'No hay Firewall.' };
+            const hasNAT = fw.natRules?.length > 0;
+            const hasACL = fw.accessLists && Object.keys(fw.accessLists).length > 0;
+            if (!hasNAT && !hasACL) return { ok: false, feedback: 'Simulación activa pero NAT y ACLs sin configurar.' };
+            if (!hasNAT) return { ok: false, feedback: '✓ ACLs configuradas. Falta NAT/PAT en el Firewall.' };
+            if (!hasACL) return { ok: false, feedback: '✓ NAT configurado. Falta al menos una ACL.' };
+            // Verificar plano de datos: PC en LAN debe poder llegar a Internet vía Firewall
+            const pcLAN  = sim.devices.find(d => d.type === 'PC' && d.ipConfig?.ipAddress?.startsWith('10.10.1.'));
+            const inet   = sim.devices.find(d => ['Internet','ISP'].includes(d.type));
+            if (pcLAN && inet) {
+                const path = sim.engine?.findRoute?.(pcLAN.id, inet.id);
+                if (!path?.length) return { ok: false, feedback: `NAT + ACLs configurados pero sin ruta física de ${pcLAN.name} a Internet. Revisa conexiones del Firewall.` };
+                return { ok: true, feedback: `✓ Red segura completa. LAN → Internet vía NAT (${path.length-1} salto(s)). ACLs protegen la LAN y publican la DMZ.` };
+            }
+            return { ok: true, feedback: '✓ Firewall con NAT y ACLs activos.' };
+        },
+    },
+
+    'lab-12': {
+        'add-routers': (sim) => {
+            const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+            if (routers.length < 2) return { ok: false, feedback: `Tienes ${routers.length} router(es), necesitas 2.` };
+            const linked = sim.connections.some(c => routers.includes(c.from) && routers.includes(c.to));
+            return { ok: linked, feedback: linked ? '✓ 2 routers conectados.' : '2 routers en el canvas pero no están conectados entre sí.' };
+        },
+        'add-hosts': (sim) => {
+            const pcs = sim.devices.filter(d => d.type === 'PC');
+            return { ok: pcs.length >= 2, feedback: pcs.length >= 2 ? `✓ ${pcs.length} PCs en el canvas.` : `Tienes ${pcs.length} PC(s), necesitas 2.` };
+        },
+        'ipv6-link': (sim) => {
+            const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+            const allIPs = routers.flatMap(r => [(r.ipConfig?.ipAddress||''), ...(r.interfaces||[]).map(i=>i.ipConfig?.ipAddress||'')]);
+            const hasIPv6link = allIPs.some(ip => ip.toLowerCase().includes('2001:db8:1::'));
+            return { ok: hasIPv6link, feedback: hasIPv6link ? '✓ Prefijo IPv6 /64 en el enlace inter-routers.' : 'Configura IPs IPv6 en las interfaces WAN. CLI: interface WAN0 → ip address 2001:db8:1::1/64' };
+        },
+        'ipv6-lan': (sim) => {
+            const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+            const allIPs = routers.flatMap(r => [(r.ipConfig?.ipAddress||''), ...(r.interfaces||[]).map(i=>i.ipConfig?.ipAddress||'')]);
+            const hasA = allIPs.some(ip => ip.toLowerCase().includes('2001:db8:a::'));
+            const hasB = allIPs.some(ip => ip.toLowerCase().includes('2001:db8:b::'));
+            if (!hasA && !hasB) return { ok: false, feedback: 'Falta configurar prefijos LAN IPv6. CLI Router-A: interface LAN0 → ip address 2001:db8:a::1/64' };
+            if (!hasA) return { ok: false, feedback: '✓ Prefijo 2001:db8:b:: configurado. Falta 2001:db8:a:: en Router-A.' };
+            if (!hasB) return { ok: false, feedback: '✓ Prefijo 2001:db8:a:: configurado. Falta 2001:db8:b:: en Router-B.' };
+            return { ok: true, feedback: '✓ Prefijos LAN IPv6 configurados en ambos routers.' };
+        },
+        'ipv6-hosts': (sim) => {
+            const pcs = sim.devices.filter(d => d.type === 'PC');
+            const hasA = pcs.some(p => (p.ipConfig?.ipAddress||'').toLowerCase().startsWith('2001:db8:a::'));
+            const hasB = pcs.some(p => (p.ipConfig?.ipAddress||'').toLowerCase().startsWith('2001:db8:b::'));
+            if (!hasA && !hasB) return { ok: false, feedback: 'Las PCs no tienen IPs IPv6. Asigna 2001:db8:a::10/64 a PC-A y 2001:db8:b::10/64 a PC-B.' };
+            if (!hasA) return { ok: false, feedback: '✓ PC-B con IPv6. Falta PC-A (2001:db8:a::10/64).' };
+            if (!hasB) return { ok: false, feedback: '✓ PC-A con IPv6. Falta PC-B (2001:db8:b::10/64).' };
+            return { ok: true, feedback: '✓ Ambas PCs con IPs IPv6 asignadas.' };
+        },
+        'ipv6-route': (sim) => {
+            const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+            const withIPv6Routes = routers.filter(r => {
+                const routes = r.routingTable?.entries ? r.routingTable.entries() : (r.routingTable?.routes || []);
+                return routes.some(rt => (rt.network||'').startsWith('2001:') || (rt.network||'').includes('db8'));
+            });
+            if (!withIPv6Routes.length) return { ok: false, feedback: 'Ningún router tiene rutas estáticas IPv6. CLI Router-A: ip route 2001:db8:b::/64 2001:db8:1::2' };
+            if (withIPv6Routes.length < 2) return { ok: false, feedback: `Solo ${withIPv6Routes.length} router con rutas IPv6. Configura también el otro router.` };
+            return { ok: true, feedback: '✓ Ambos routers con rutas estáticas IPv6.' };
+        },
+        'simulate-ipv6': (sim) => {
+            if (!sim.simulationRunning) return { ok: false, feedback: 'Presiona ▶ para iniciar.' };
+            const pcA = sim.devices.find(d => d.type==='PC' && (d.ipConfig?.ipAddress||'').toLowerCase().startsWith('2001:db8:a::'));
+            const pcB = sim.devices.find(d => d.type==='PC' && (d.ipConfig?.ipAddress||'').toLowerCase().startsWith('2001:db8:b::'));
+            if (!pcA || !pcB) return { ok: false, feedback: 'Simulación activa pero no se detectan PC-A (2001:db8:a::) y PC-B (2001:db8:b::).' };
+            const path = sim.engine?.findRoute?.(pcA.id, pcB.id);
+            if (!path?.length) return { ok: false, feedback: `Rutas configuradas pero sin camino físico entre ${pcA.name} y ${pcB.name}. Verifica conexiones.` };
+            return { ok: true, feedback: `✓ Conectividad IPv6 extremo a extremo: ${pcA.name} → ${pcB.name} (${path.length-1} salto(s)).` };
+        },
+    },
+
+    'lab-13': {
+        'two-routers': (sim) => {
+            const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+            return { ok: routers.length >= 2, feedback: routers.length >= 2 ? `✓ ${routers.length} routers en el canvas.` : `Tienes ${routers.length} router(es), necesitas 2.` };
+        },
+        'connect-lan': (sim) => {
+            const sw  = sim.devices.find(d => ['Switch','SwitchPoE'].includes(d.type));
+            const pcs = sim.devices.filter(d => d.type === 'PC');
+            if (!sw) return { ok: false, feedback: 'Agrega un Switch para conectar la LAN.' };
+            if (!pcs.length) return { ok: false, feedback: 'Agrega PCs a la LAN.' };
+            return { ok: pcs.length >= 2, feedback: pcs.length >= 2 ? `✓ LAN con ${pcs.length} PCs y Switch.` : `Tienes ${pcs.length} PC(s), agrega al menos 2.` };
+        },
+        'hsrp-active': (sim) => {
+            const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+            const withHSRP = routers.filter(r => r.hsrp || r.hsrpGroup || r.hsrpConfig);
+            if (!withHSRP.length) return { ok: false, feedback: 'Ningún router tiene HSRP. CLI: interface LAN0 → standby 1 ip 192.168.1.1 → standby 1 priority 110 → standby 1 preempt' };
+            return { ok: true, feedback: `✓ HSRP configurado en ${withHSRP[0].name}.` };
+        },
+        'hsrp-standby': (sim) => {
+            const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+            const withHSRP = routers.filter(r => r.hsrp || r.hsrpGroup || r.hsrpConfig);
+            if (withHSRP.length < 2) return { ok: false, feedback: `Solo ${withHSRP.length} router con HSRP. Configura HSRP también en el router de respaldo (priority más baja, ej: 100).` };
+            return { ok: true, feedback: `✓ Ambos routers participan en HSRP.` };
+        },
+        'virtual-ip': (sim) => {
+            const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+            const hsrpVIP = routers.find(r => r.hsrp?.virtualIP || r.hsrpGroup?.virtualIP || r.hsrpConfig?.virtualIP);
+            const vip = hsrpVIP?.hsrp?.virtualIP || hsrpVIP?.hsrpGroup?.virtualIP || hsrpVIP?.hsrpConfig?.virtualIP;
+            if (!vip) return { ok: false, feedback: 'No hay IP virtual HSRP configurada. La IP virtual es el gateway que usan las PCs.' };
+            const pcsWithVGW = sim.devices.filter(d => d.type==='PC' && d.ipConfig?.gateway === vip);
+            if (!pcsWithVGW.length) return { ok: false, feedback: `✓ IP virtual HSRP: ${vip}. Apunta el gateway de las PCs a esa IP.` };
+            return { ok: true, feedback: `✓ IP virtual HSRP ${vip} activa, usada por ${pcsWithVGW.length} PC(s).` };
+        },
+        'simulate-hsrp': (sim) => ({
+            ok: sim.simulationRunning,
+            feedback: sim.simulationRunning ? '✓ Simulación activa con HSRP.' : 'Presiona ▶ para iniciar.',
+        }),
+    },
+
+    'lab-14': {
+        'add-sdwan': (sim) => {
+            const ok = sim.devices.some(d => d.type === 'SDWAN');
+            return { ok, feedback: ok ? '✓ SD-WAN en el canvas.' : 'Agrega un dispositivo SD-WAN al canvas.' };
+        },
+        'dual-wan': (sim) => {
+            const sdwan = sim.devices.find(d => d.type === 'SDWAN');
+            if (!sdwan) return { ok: false, feedback: 'Primero agrega el SD-WAN.' };
+            const ispConns = sim.connections.filter(c =>
+                (c.from === sdwan || c.to === sdwan) &&
+                ['ISP','Internet'].includes((c.from===sdwan?c.to:c.from).type)
+            );
+            if (ispConns.length < 2) return { ok: false, feedback: `Solo ${ispConns.length} ISP conectado al SD-WAN. Necesitas 2 (MPLS + Broadband).` };
+            return { ok: true, feedback: `✓ ${ispConns.length} uplinks WAN conectados al SD-WAN.` };
+        },
+        'lan-side': (sim) => {
+            const sdwan = sim.devices.find(d => d.type === 'SDWAN');
+            const pcs   = sim.devices.filter(d => d.type === 'PC');
+            if (!sdwan) return { ok: false, feedback: 'Falta SD-WAN.' };
+            if (pcs.length < 2) return { ok: false, feedback: `Tienes ${pcs.length} PC(s), necesitas al menos 2 en la LAN.` };
+            const pcsWithIP = pcs.filter(p => p.ipConfig?.ipAddress?.startsWith('10.10.0.'));
+            if (!pcsWithIP.length) return { ok: false, feedback: `${pcs.length} PCs en canvas pero ninguna con IP LAN 10.10.0.x. Asigna IPs y configura el gateway al SD-WAN.` };
+            return { ok: true, feedback: `✓ LAN con ${pcsWithIP.length} PC(s) en 10.10.0.x conectada al SD-WAN.` };
+        },
+        'primary-policy': (sim) => {
+            const sdwan = sim.devices.find(d => d.type === 'SDWAN');
+            if (!sdwan) return { ok: false, feedback: 'No hay SD-WAN.' };
+            const hasPrimary = !!(sdwan.sdwanPolicy?.primaryLink || sdwan.sdwanConfig?.primaryISP || sdwan.wanLinks?.some(l => l.priority === 1 || l.primary));
+            return { ok: hasPrimary, feedback: hasPrimary ? '✓ Enlace principal configurado.' : 'Define el enlace principal. CLI: configure terminal → sdwan policy → link mpls priority 1' };
+        },
+        'failover-policy': (sim) => {
+            const sdwan = sim.devices.find(d => d.type === 'SDWAN');
+            if (!sdwan) return { ok: false, feedback: 'No hay SD-WAN.' };
+            const hasFailover = !!(sdwan.sdwanPolicy?.failover || sdwan.sdwanConfig?.failoverEnabled || sdwan.wanLinks?.some(l => l.failover || l.priority === 2));
+            return { ok: hasFailover, feedback: hasFailover ? '✓ Política de failover configurada.' : 'Configura el failover automático. CLI: sdwan policy → link broadband priority 2 → failover auto' };
+        },
+        'simulate-sdwan': (sim) => {
+            if (!sim.simulationRunning) return { ok: false, feedback: 'Presiona ▶ para iniciar la simulación.' };
+            const sdwan = sim.devices.find(d => d.type === 'SDWAN');
+            const isps  = sim.devices.filter(d => ['ISP','Internet'].includes(d.type));
+            if (!sdwan) return { ok: false, feedback: 'No hay SD-WAN.' };
+            if (isps.length < 2) return { ok: false, feedback: `Solo ${isps.length} ISP. Necesitas 2 para el failover.` };
+            // Verificar que existe ruta de la LAN a cada ISP
+            const pc = sim.devices.find(d => d.type==='PC' && d.ipConfig?.ipAddress?.startsWith('10.10.0.'));
+            if (pc && isps.length >= 2) {
+                const paths = isps.map(isp => sim.engine?.findRoute?.(pc.id, isp.id)?.length || 0);
+                const reachable = paths.filter(l => l > 0).length;
+                if (!reachable) return { ok: false, feedback: `SD-WAN activo pero sin ruta desde ${pc.name} hasta los ISPs. Verifica conexiones.` };
+                return { ok: true, feedback: `✓ SD-WAN operativo. ${reachable}/${isps.length} uplinks alcanzables desde la LAN. Failover listo.` };
+            }
+            return { ok: true, feedback: `✓ SD-WAN activo con ${isps.length} uplinks WAN.` };
+        },
+    },
+
+    // ── Lab 15: Red WiFi Empresarial ─────────────────────────────────
+    'lab-15': {
+        'core-switch': (sim) => {
+            const ok = sim.devices.some(d => d.type === 'SwitchPoE');
+            return { ok, feedback: ok ? '✓ Switch PoE en el canvas.' : 'Agrega un Switch PoE al canvas (categoría Switching).' };
+        },
+        'add-controller': (sim) => {
+            const ac = sim.devices.find(d => d.type === 'AC');
+            const sw = sim.devices.find(d => d.type === 'SwitchPoE');
+            if (!ac) return { ok: false, feedback: 'Agrega un Controlador WiFi (AC) al canvas.' };
+            if (!sw) return { ok: false, feedback: 'Falta el Switch PoE. Agrégalo primero.' };
+            const conn = sim.connections.some(c =>
+                (c.from === ac && c.to === sw) || (c.from === sw && c.to === ac)
+            );
+            return { ok: conn, feedback: conn ? '✓ AC conectado al Switch PoE.' : 'Conecta el Controlador AC al Switch PoE.' };
+        },
+        'add-aps': (sim) => {
+            const sw  = sim.devices.find(d => d.type === 'SwitchPoE');
+            const aps = sim.devices.filter(d => d.type === 'AP');
+            if (!sw) return { ok: false, feedback: 'Falta el Switch PoE.' };
+            if (aps.length < 3) return { ok: false, feedback: `Tienes ${aps.length} AP(s). Necesitas al menos 3.` };
+            const connected = aps.filter(ap =>
+                sim.connections.some(c => (c.from === ap && c.to === sw) || (c.from === sw && c.to === ap))
+            ).length;
+            return { ok: connected >= 3, feedback: connected >= 3 ? `✓ ${connected} APs conectados al Switch PoE.` : `${connected}/3 APs conectados al Switch PoE. Conecta los que faltan.` };
+        },
+        'vlan-ssids': (sim) => {
+            const sw = sim.devices.find(d => d.type === 'SwitchPoE');
+            if (!sw?.vlans) return { ok: false, feedback: 'Configura VLANs en el Switch PoE. CLI: vlan 10 → name Corp / vlan 20 → name Guest.' };
+            const ids = Object.keys(sw.vlans).map(Number);
+            const has10 = ids.includes(10), has20 = ids.includes(20);
+            if (!has10 && !has20) return { ok: false, feedback: 'Faltan VLAN 10 (Corp) y VLAN 20 (Guest). CLI: vlan 10 → name Corp.' };
+            if (!has10) return { ok: false, feedback: 'Falta VLAN 10 (Corp). CLI: vlan 10 → name Corp.' };
+            if (!has20) return { ok: false, feedback: 'Falta VLAN 20 (Guest). CLI: vlan 20 → name Guest.' };
+            return { ok: true, feedback: `✓ VLANs configuradas: ${ids.join(', ')}.` };
+        },
+        'router-gateway': (sim) => {
+            const r   = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+            const sw  = sim.devices.find(d => d.type === 'SwitchPoE');
+            const isp = sim.devices.find(d => d.type === 'ISP');
+            if (!r)   return { ok: false, feedback: 'Agrega un Router principal al canvas.' };
+            if (!sw)  return { ok: false, feedback: 'Falta el Switch PoE.' };
+            if (!isp) return { ok: false, feedback: 'Agrega un dispositivo ISP para la salida a Internet.' };
+            return { ok: true, feedback: '✓ Router + Switch PoE + ISP presentes.' };
+        },
+        'clients': (sim) => {
+            const laptops = sim.devices.filter(d => d.type === 'Laptop');
+            const aps     = sim.devices.filter(d => d.type === 'AP');
+            if (laptops.length < 2) return { ok: false, feedback: `Tienes ${laptops.length} Laptop(s). Agrega al menos 2 como clientes WiFi.` };
+            if (aps.length < 3) return { ok: false, feedback: `Solo ${aps.length} APs. Necesitas al menos 3.` };
+            const connected = laptops.filter(l =>
+                sim.connections.some(c => (c.from === l || c.to === l) && aps.includes(c.from === l ? c.to : c.from))
+            ).length;
+            return { ok: connected >= 1, feedback: connected >= 1 ? `✓ ${connected} laptop(s) conectadas a APs.` : 'Conecta laptops a los APs como clientes inalámbricos.' };
+        },
+        'simulate-wifi': (sim) => {
+            if (!sim.simulationRunning) return { ok: false, feedback: 'Presiona ▶ para iniciar la simulación.' };
+            const ac  = sim.devices.find(d => d.type === 'AC');
+            const aps = sim.devices.filter(d => d.type === 'AP');
+            if (!ac)          return { ok: false, feedback: 'Falta el Controlador AC.' };
+            if (aps.length < 3) return { ok: false, feedback: `Solo ${aps.length} APs. Necesitas 3.` };
+            return { ok: true, feedback: `✓ Red WiFi empresarial operativa: AC + ${aps.length} APs activos.` };
+        },
+    },
+
+    // ── Lab 16: ISP Multi-Cliente ────────────────────────────────────
+    'lab-16': {
+        'isp-core': (sim) => {
+            const hasInternet = sim.devices.some(d => d.type === 'Internet');
+            const hasRouter   = sim.devices.some(d => ['Router','RouterWifi'].includes(d.type));
+            if (!hasRouter)   return { ok: false, feedback: 'Agrega el Router-ISP al canvas.' };
+            if (!hasInternet) return { ok: false, feedback: 'Agrega un nodo Internet y conéctalo al Router-ISP.' };
+            return { ok: true, feedback: '✓ Router-ISP + Internet presentes.' };
+        },
+        'three-clients': (sim) => {
+            const routers  = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+            const switches = sim.devices.filter(d => ['Switch','SwitchPoE'].includes(d.type));
+            if (routers.length < 2) return { ok: false, feedback: `Tienes ${routers.length} router(s). Necesitas al menos 4 (1 ISP + 3 clientes).` };
+            if (switches.length < 1) return { ok: false, feedback: 'Agrega switches para las redes de los clientes.' };
+            if (routers.length < 4) return { ok: false, feedback: `${routers.length}/4 routers. Agrega Router-Cliente-${routers.length} con su switch y PC.` };
+            return { ok: true, feedback: `✓ ${routers.length} routers y ${switches.length} switches en la topología.` };
+        },
+        'public-ips': (sim) => {
+            const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+            const publicRouters = routers.filter(r => {
+                const allIPs = [r.ipConfig?.ipAddress || '', ...(r.interfaces || []).map(i => i.ipConfig?.ipAddress || '')];
+                return allIPs.some(ip => ip.startsWith('200.1.1.'));
+            });
+            if (!publicRouters.length) return { ok: false, feedback: 'Asigna IPs públicas 200.1.1.2/.3/.4 a las interfaces WAN de los routers clientes.' };
+            return { ok: publicRouters.length >= 3, feedback: publicRouters.length >= 3 ? `✓ ${publicRouters.length} routers con IP pública 200.1.1.x.` : `${publicRouters.length}/3 routers con IP pública. Asigna IPs a los que faltan.` };
+        },
+        'dhcp-per-client': (sim) => {
+            const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+            const withDhcp = routers.filter(r => r.dhcpServer || r.dhcpPools?.length).length;
+            return { ok: withDhcp >= 2, feedback: withDhcp >= 2 ? `✓ ${withDhcp} routers con DHCP configurado.` : `${withDhcp}/3 routers con DHCP. CLI: ip dhcp pool CASA1 → network 192.168.1.0 255.255.255.0.` };
+        },
+        'nat-per-client': (sim) => {
+            const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+            const withNat = routers.filter(r => r.natRules?.some(rule => rule.type === 'PAT')).length;
+            return { ok: withNat >= 2, feedback: withNat >= 2 ? `✓ ${withNat} routers con NAT/PAT configurado.` : `${withNat}/3 routers con NAT. CLI: ip nat inside source list 1 interface WAN0 overload.` };
+        },
+        'static-routes-isp': (sim) => {
+            const ispRouter = sim.devices.find(d =>
+                ['Router','RouterWifi'].includes(d.type) &&
+                sim.connections.filter(c => c.from === d || c.to === d).length >= 3
+            );
+            if (!ispRouter) return { ok: sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type)).length >= 4, feedback: 'Verifica que el Router-ISP esté conectado a los 3 routers clientes.' };
+            const routes = ispRouter.routingTable?.routes || [];
+            return { ok: routes.length >= 2, feedback: routes.length >= 2 ? `✓ Router-ISP con ${routes.length} rutas configuradas.` : 'Agrega rutas estáticas en el Router-ISP hacia cada cliente.' };
+        },
+        'simulate-isp': (sim) => {
+            if (!sim.simulationRunning) return { ok: false, feedback: 'Presiona ▶ para iniciar la simulación.' };
+            const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+            return { ok: routers.length >= 4, feedback: routers.length >= 4 ? `✓ ISP multi-cliente operativo con ${routers.length} routers.` : `Faltan routers. Tienes ${routers.length}/4.` };
+        },
+    },
+
+    // ── Lab 17: Campus Universitario ────────────────────────────────
+    'lab-17': {
+        'core-layer': (sim) => {
+            const routers  = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+            const switches = sim.devices.filter(d => ['Switch','SwitchPoE'].includes(d.type));
+            if (!routers.length) return { ok: false, feedback: 'Agrega el Router-Core del campus.' };
+            if (switches.length < 2) return { ok: false, feedback: `${switches.length}/2 switches de distribución. Agrega Switch-Dist-A y Switch-Dist-B.` };
+            return { ok: true, feedback: `✓ Router-Core + ${switches.length} switches de distribución.` };
+        },
+        'access-layer': (sim) => {
+            const poeSwitches = sim.devices.filter(d => d.type === 'SwitchPoE');
+            return { ok: poeSwitches.length >= 2, feedback: poeSwitches.length >= 2 ? `✓ ${poeSwitches.length} switches PoE de acceso.` : `${poeSwitches.length}/4 switches PoE. Agrega switches PoE debajo de cada switch de distribución.` };
+        },
+        'vlan-plan': (sim) => {
+            const switches = sim.devices.filter(d => ['Switch','SwitchPoE'].includes(d.type));
+            const best = switches.reduce((best, sw) => {
+                const ids = Object.keys(sw.vlans || {}).map(Number);
+                return ids.length > best.length ? ids : best;
+            }, []);
+            const has10 = best.includes(10), has20 = best.includes(20);
+            if (!has10 && !has20) return { ok: false, feedback: 'Configura VLANs en el switch de distribución. CLI: vlan 10 → name Profesores / vlan 20 → name Alumnos.' };
+            if (!has10) return { ok: false, feedback: 'Falta VLAN 10 (Profesores).' };
+            if (!has20) return { ok: false, feedback: 'Falta VLAN 20 (Alumnos).' };
+            return { ok: true, feedback: `✓ VLANs configuradas: ${best.join(', ')}.` };
+        },
+        'server-farm': (sim) => {
+            const servers = sim.devices.filter(d => d.type === 'Server');
+            if (servers.length < 2) return { ok: false, feedback: `${servers.length}/2 servidores. Agrega Server Web (10.50.0.10) y Server DNS/DHCP (10.50.0.11).` };
+            const hasSubnet = servers.some(s => s.ipConfig?.ipAddress?.startsWith('10.50.'));
+            return { ok: hasSubnet, feedback: hasSubnet ? `✓ ${servers.length} servidores en la zona 10.50.0.x.` : 'Asigna IPs 10.50.0.10 y 10.50.0.11 a los servidores.' };
+        },
+        'wifi-campus': (sim) => {
+            const ac  = sim.devices.find(d => d.type === 'AC');
+            const aps = sim.devices.filter(d => d.type === 'AP');
+            if (!ac) return { ok: false, feedback: 'Agrega un Controlador AC para el campus.' };
+            if (aps.length < 2) return { ok: false, feedback: `${aps.length}/4 APs. Agrega más Access Points distribuidos por los edificios.` };
+            return { ok: true, feedback: `✓ Controlador AC + ${aps.length} APs en el campus.` };
+        },
+        'internet-exit': (sim) => {
+            const hasFW       = sim.devices.some(d => d.type === 'Firewall');
+            const hasISP      = sim.devices.some(d => d.type === 'ISP');
+            const hasInternet = sim.devices.some(d => d.type === 'Internet');
+            if (!hasFW)       return { ok: false, feedback: 'Agrega un Firewall entre el campus e Internet.' };
+            if (!hasISP)      return { ok: false, feedback: 'Agrega un dispositivo ISP.' };
+            if (!hasInternet) return { ok: false, feedback: 'Agrega el nodo Internet.' };
+            return { ok: true, feedback: '✓ Firewall + ISP + Internet configurados.' };
+        },
+        'end-devices': (sim) => {
+            const endDevices = sim.devices.filter(d => ['PC','Laptop'].includes(d.type));
+            return { ok: endDevices.length >= 6, feedback: endDevices.length >= 6 ? `✓ ${endDevices.length} equipos de usuario en el campus.` : `${endDevices.length}/6 dispositivos. Agrega PCs y Laptops en VLANs Profesores y Alumnos.` };
+        },
+        'simulate-campus': (sim) => {
+            if (!sim.simulationRunning) return { ok: false, feedback: 'Presiona ▶ para iniciar la simulación.' };
+            const switches   = sim.devices.filter(d => ['Switch','SwitchPoE'].includes(d.type));
+            const endDevices = sim.devices.filter(d => ['PC','Laptop'].includes(d.type));
+            const hasWifi    = sim.devices.some(d => d.type === 'AP');
+            const hasServer  = sim.devices.some(d => d.type === 'Server');
+            if (switches.length < 4) return { ok: false, feedback: `Solo ${switches.length}/4 switches. Verifica la topología completa.` };
+            if (endDevices.length < 6) return { ok: false, feedback: `Solo ${endDevices.length}/6 dispositivos de usuario.` };
+            if (!hasWifi) return { ok: false, feedback: 'Faltan Access Points en el campus.' };
+            if (!hasServer) return { ok: false, feedback: 'Falta la zona de servidores.' };
+            return { ok: true, feedback: `✓ Campus universitario operativo: ${switches.length} switches, ${endDevices.length} usuarios, WiFi y servidores.` };
+        },
+    },
+
+    // ── Lab 18: Subnetting y VLSM ───────────────────────────────────
+    'lab-18': {
+        'add-router': (sim) => {
+            const ok = sim.devices.some(d => ['Router','RouterWifi'].includes(d.type));
+            return { ok, feedback: ok ? '✓ Router central en el canvas.' : 'Agrega un Router que actuará como gateway de las subredes VLSM.' };
+        },
+        'subnet-dept-a': (sim) => {
+            const pcs = sim.devices.filter(d => d.type === 'PC');
+            const inSubnet = pcs.filter(p => p.ipConfig?.ipAddress?.startsWith('172.16.1.')).length;
+            return { ok: inSubnet >= 2, feedback: inSubnet >= 2 ? `✓ ${inSubnet} PCs en 172.16.1.0/24 (Dpto A).` : `${inSubnet}/2 PCs con IP 172.16.1.x. Asigna IPs del bloque 172.16.1.0/24.` };
+        },
+        'subnet-dept-b': (sim) => {
+            const pcs = sim.devices.filter(d => d.type === 'PC');
+            const inSubnet = pcs.filter(p => p.ipConfig?.ipAddress?.startsWith('172.16.2.')).length;
+            return { ok: inSubnet >= 2, feedback: inSubnet >= 2 ? `✓ ${inSubnet} PCs en 172.16.2.0/26 (Dpto B).` : `${inSubnet}/2 PCs con IP 172.16.2.x (máscara 255.255.255.192).` };
+        },
+        'subnet-link': (sim) => {
+            const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+            if (routers.length < 2) return { ok: false, feedback: `Solo ${routers.length} router. Agrega un segundo Router y asigna IPs /30 en 172.16.3.0.` };
+            const hasLink = routers.some(r => r.ipConfig?.ipAddress?.startsWith('172.16.3.'));
+            return { ok: hasLink, feedback: hasLink ? '✓ Subred WAN /30 (172.16.3.0) configurada.' : 'Asigna 172.16.3.1 y 172.16.3.2 (máscara /30 = 255.255.255.252) a los dos routers.' };
+        },
+        'static-routes': (sim) => {
+            const r = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+            if (!r) return { ok: false, feedback: 'Falta el router.' };
+            const routes = r.routingTable?.routes || [];
+            const hasStatic = routes.some(rt => (rt.network || rt.destination || '').includes('172.16') && (rt.type === 'S' || rt.static));
+            return { ok: hasStatic, feedback: hasStatic ? '✓ Ruta estática hacia 172.16.2.0/26 configurada.' : 'CLI R1: ip route 172.16.2.0 255.255.255.192 172.16.3.2' };
+        },
+        'verify-vlsm': (sim) => {
+            if (!sim.simulationRunning) return { ok: false, feedback: 'Presiona ▶ para iniciar la simulación.' };
+            const r = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+            const routes = r?.routingTable?.routes || [];
+            const vlsmRoutes = routes.filter(rt => (rt.network || rt.destination || '').startsWith('172.16.')).length;
+            return { ok: vlsmRoutes >= 2, feedback: vlsmRoutes >= 2 ? `✓ Tabla de rutas con ${vlsmRoutes} subredes 172.16.x.` : `Solo ${vlsmRoutes} ruta(s) 172.16.x en la tabla. Verifica las subredes /24, /26 y /30.` };
+        },
+    },
+
+    // ── Lab 19: RIP v2 ──────────────────────────────────────────────
+    'lab-19': {
+        'add-3-routers': (sim) => {
+            const count = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type)).length;
+            return { ok: count >= 3, feedback: count >= 3 ? `✓ ${count} routers en el canvas.` : `${count}/3 routers. Agrega ${3 - count} router(s) más (R1, R2, R3).` };
+        },
+        'connect-routers': (sim) => {
+            const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+            const rConns  = sim.connections.filter(c =>
+                ['Router','RouterWifi'].includes(c.from?.type) && ['Router','RouterWifi'].includes(c.to?.type)
+            ).length;
+            if (routers.length < 3) return { ok: false, feedback: 'Necesitas 3 routers primero.' };
+            return { ok: rConns >= 2, feedback: rConns >= 2 ? `✓ ${rConns} enlaces inter-router.` : `${rConns}/2 enlaces. Conecta R1-R2 y R2-R3. Asigna IPs 10.0.12.0/30 y 10.0.23.0/30.` };
+        },
+        'lan-subnets': (sim) => {
+            const pcs = sim.devices.filter(d => d.type === 'PC');
+            const has1 = pcs.some(p => p.ipConfig?.ipAddress?.startsWith('192.168.1.'));
+            const has2 = pcs.some(p => p.ipConfig?.ipAddress?.startsWith('192.168.2.'));
+            const has3 = pcs.some(p => p.ipConfig?.ipAddress?.startsWith('192.168.3.'));
+            const count = [has1, has2, has3].filter(Boolean).length;
+            return { ok: count >= 2, feedback: count >= 2 ? `✓ LANs en ${count} subredes distintas.` : `${count}/3 LANs. Asigna IPs 192.168.1.x, 192.168.2.x, 192.168.3.x a PCs en cada router.` };
+        },
+        'rip-r1': (sim) => {
+            const r1 = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type) && d.rip?.networks?.length > 0);
+            return { ok: !!(r1?.rip?.version === 2 || r1?.rip?.networks?.length > 0), feedback: r1 ? '✓ RIP v2 configurado en R1.' : 'CLI R1: router rip → version 2 → network 192.168.1.0 → network 10.0.12.0 → no auto-summary.' };
+        },
+        'rip-all': (sim) => {
+            const ripRouters = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type) && d.rip?.networks?.length > 0).length;
+            return { ok: ripRouters >= 2, feedback: ripRouters >= 2 ? `✓ RIP v2 en ${ripRouters} routers.` : `Solo ${ripRouters}/3 routers con RIP. Configura RIP v2 también en R2 y R3.` };
+        },
+        'verify-rip': (sim) => {
+            if (!sim.simulationRunning) return { ok: false, feedback: 'Presiona ▶ para iniciar la simulación.' };
+            const ripRouters = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type) && d.rip).length;
+            return { ok: ripRouters >= 2, feedback: ripRouters >= 2 ? `✓ RIP v2 convergido en ${ripRouters} routers. Verifica rutas tipo "R" con show ip route.` : 'Configura RIP en al menos 2 routers antes de simular.' };
+        },
+    },
+
+    // ── Lab 20: HSRP ────────────────────────────────────────────────
+    'lab-20': {
+        'add-2-routers': (sim) => {
+            const count = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type)).length;
+            return { ok: count >= 2, feedback: count >= 2 ? `✓ ${count} routers en el canvas.` : `${count}/2 routers. Agrega R1 y R2 para HSRP.` };
+        },
+        'lan-pcs': (sim) => {
+            const pcs = sim.devices.filter(d => d.type === 'PC');
+            const hsrpPcs = pcs.filter(p => p.ipConfig?.ipAddress?.startsWith('192.168.10.')).length;
+            return { ok: hsrpPcs >= 2, feedback: hsrpPcs >= 2 ? `✓ ${hsrpPcs} PCs en 192.168.10.0/24.` : `${hsrpPcs}/2 PCs con IP 192.168.10.x. Asigna IPs y gateway 192.168.10.254 (VIP).` };
+        },
+        'hsrp-r1': (sim) => {
+            const r1 = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type) && d.hsrp?.enabled);
+            if (!r1) return { ok: false, feedback: 'CLI R1: standby 1 ip 192.168.10.254 → standby 1 priority 110 → standby 1 preempt.' };
+            const hasVip = !!(r1.hsrp?.vip || r1.hsrp?.groups?.[1]?.vip);
+            return { ok: hasVip, feedback: hasVip ? '✓ HSRP activo en R1 con VIP configurado.' : 'Configura el VIP: standby 1 ip 192.168.10.254.' };
+        },
+        'hsrp-r2': (sim) => {
+            const ripRouters = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type) && d.hsrp?.enabled).length;
+            return { ok: ripRouters >= 2, feedback: ripRouters >= 2 ? `✓ HSRP configurado en ${ripRouters} routers.` : 'CLI R2: standby 1 ip 192.168.10.254 → standby 1 priority 90.' };
+        },
+        'verify-hsrp': (sim) => {
+            const activeR  = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type) && d.hsrp?.role === 'active');
+            const standbyR = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type) && d.hsrp?.role === 'standby');
+            if (!activeR && !standbyR) return { ok: false, feedback: 'Ningún router tiene rol HSRP asignado. Verifica la configuración con show hsrp.' };
+            if (!activeR)  return { ok: false, feedback: 'No hay router ACTIVE. R1 (priority 110) debe ser ACTIVE.' };
+            if (!standbyR) return { ok: false, feedback: 'No hay router STANDBY. R2 (priority 90) debe ser STANDBY.' };
+            return { ok: true, feedback: `✓ R1=ACTIVE, R2=STANDBY. HSRP operativo.` };
+        },
+        'simulate-failover': (sim) => {
+            if (!sim.simulationRunning) return { ok: false, feedback: 'Presiona ▶ para iniciar la simulación.' };
+            const hsrpRouters = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type) && d.hsrp?.enabled).length;
+            return { ok: hsrpRouters >= 2, feedback: hsrpRouters >= 2 ? `✓ HSRP activo. ${hsrpRouters} routers con gateway redundante. Usa "Fallar dispositivo" para probar el failover.` : 'Configura HSRP en ambos routers antes de simular.' };
+        },
+    },
+
+    // ── Lab 21: ACLs extendidas ──────────────────────────────────────
+    'lab-21': {
+        'base-topo': (sim) => {
+            const r   = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+            const pcs = sim.devices.filter(d => d.type === 'PC').length;
+            const srv = sim.devices.find(d => d.type === 'Server');
+            if (!r)      return { ok: false, feedback: 'Agrega un Router central al canvas.' };
+            if (pcs < 2) return { ok: false, feedback: `${pcs}/2 PCs. Agrega PCs en la zona interna 192.168.1.0/24.` };
+            if (!srv)    return { ok: false, feedback: 'Agrega un Server en la zona externa (10.0.0.10).' };
+            return { ok: true, feedback: '✓ Router + 2 PCs + Server presentes.' };
+        },
+        'server-ip': (sim) => {
+            const srv = sim.devices.find(d => d.type === 'Server');
+            if (!srv) return { ok: false, feedback: 'Agrega un Server al canvas.' };
+            const ok = srv.ipConfig?.ipAddress === '10.0.0.10';
+            return { ok, feedback: ok ? '✓ Server en 10.0.0.10.' : `IP actual del server: ${srv.ipConfig?.ipAddress || 'sin configurar'}. Asigna IP 10.0.0.10.` };
+        },
+        'acl-permit-http': (sim) => {
+            const r    = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+            const acls = r?.acls || r?.accessLists || [];
+            const ok   = acls.length > 0 || r?.aclConfigured;
+            return { ok, feedback: ok ? '✓ ACL con regla HTTP (puerto 80) creada.' : 'CLI: ip access-list 100 permit tcp 192.168.1.0 0.0.0.255 host 10.0.0.10 eq 80.' };
+        },
+        'acl-permit-https': (sim) => {
+            const r  = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+            const ok = !!(r?.acls?.length >= 2 || r?.aclConfigured);
+            return { ok, feedback: ok ? '✓ ACL con regla HTTPS (puerto 443) agregada.' : 'CLI: ip access-list 100 permit tcp 192.168.1.0 0.0.0.255 host 10.0.0.10 eq 443.' };
+        },
+        'acl-deny-rest': (sim) => {
+            const r  = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+            const ok = !!(r?.acls?.length >= 2 || r?.aclConfigured);
+            return { ok, feedback: ok ? '✓ Regla deny al final de ACL 100.' : 'CLI: ip access-list 100 deny ip any any (bloquea todo lo no permitido).' };
+        },
+        'apply-acl': (sim) => {
+            const r  = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+            const ok = !!(r?.aclConfigured || sim.simulationRunning);
+            return { ok, feedback: ok ? '✓ ACL 100 aplicada a la interfaz de entrada.' : 'CLI: interface ETH0 → ip access-group 100 in.' };
+        },
+    },
+
+    // ── Lab 22: Rutas estáticas y default route ──────────────────────
+    'lab-22': {
+        'three-routers': (sim) => {
+            const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+            const rConns  = sim.connections.filter(c =>
+                ['Router','RouterWifi'].includes(c.from?.type) && ['Router','RouterWifi'].includes(c.to?.type)
+            ).length;
+            if (routers.length < 3) return { ok: false, feedback: `${routers.length}/3 routers. Agrega R1 (borde), R2 (distribución) y R3 (core).` };
+            if (rConns < 2) return { ok: false, feedback: `${rConns}/2 enlaces inter-router. Conecta R1-R2 y R2-R3.` };
+            return { ok: true, feedback: `✓ ${routers.length} routers conectados en cadena.` };
+        },
+        'lan-pcs': (sim) => {
+            const pcs = sim.devices.filter(d => d.type === 'PC');
+            const inLan = pcs.filter(p => p.ipConfig?.ipAddress?.startsWith('192.168.10.')).length;
+            return { ok: inLan >= 2, feedback: inLan >= 2 ? `✓ ${inLan} PCs en 192.168.10.0/24.` : `${inLan}/2 PCs con IP 192.168.10.x conectadas a R1.` };
+        },
+        'isp-internet': (sim) => {
+            const isp = sim.devices.find(d => ['ISP','Internet'].includes(d.type));
+            return { ok: !!isp, feedback: isp ? `✓ ${isp.type} conectado a R3.` : 'Agrega un dispositivo ISP o Internet y conéctalo a R3.' };
+        },
+        'static-r1-to-r2': (sim) => {
+            const r1     = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+            const routes = r1?.routingTable?.routes || [];
+            const ok     = routes.some(r => r.type === 'S' || r.type === 'static');
+            return { ok, feedback: ok ? '✓ Ruta estática configurada en R1.' : 'CLI R1: ip route 0.0.0.0 0.0.0.0 10.0.1.2 (default route hacia R2).' };
+        },
+        'default-route-r3': (sim) => {
+            const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+            const hasDefault = routers.some(r => r.routingTable?.routes?.some(rt => rt.type === 'S' || rt.type === 'static'));
+            return { ok: hasDefault, feedback: hasDefault ? '✓ Default route configurada hacia el ISP.' : 'CLI R3: ip route 0.0.0.0 0.0.0.0 <IP-del-ISP>.' };
+        },
+        'verify-routes': (sim) => {
+            if (!sim.simulationRunning) return { ok: false, feedback: 'Presiona ▶ para iniciar la simulación.' };
+            const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type)).length;
+            return { ok: routers >= 3, feedback: routers >= 3 ? `✓ Topología de ${routers} routers simulando. Verifica "show ip route" en R1.` : `Solo ${routers}/3 routers activos.` };
+        },
+    },
+
+    // ── Lab 23: DHCP Relay ───────────────────────────────────────────
+    'lab-23': {
+        'dhcp-server': (sim) => {
+            const srv = sim.devices.find(d => d.type === 'Server');
+            if (!srv) return { ok: false, feedback: 'Agrega un Server que actuará como servidor DHCP centralizado.' };
+            const ok = srv.ipConfig?.ipAddress === '10.0.0.100';
+            return { ok, feedback: ok ? '✓ DHCP Server en 10.0.0.100.' : `IP actual: ${srv.ipConfig?.ipAddress || 'sin configurar'}. Asigna IP 10.0.0.100.` };
+        },
+        'router-relay': (sim) => {
+            const r  = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+            const sw = sim.devices.filter(d => ['Switch','SwitchPoE'].includes(d.type)).length;
+            if (!r) return { ok: false, feedback: 'Agrega un Router que actuará como relay DHCP.' };
+            return { ok: sw >= 2, feedback: sw >= 2 ? `✓ Router relay + ${sw} switches de VLAN.` : `${sw}/2 switches. Agrega Switch-VLAN10 y Switch-VLAN20.` };
+        },
+        'pcs-dhcp': (sim) => {
+            const pcs = sim.devices.filter(d => d.type === 'PC');
+            const dhcpClients = pcs.filter(p => p.dhcpClient || p.ipConfig?.dhcpEnabled || p.ipConfig?.dhcp).length;
+            return { ok: dhcpClients >= 1, feedback: dhcpClients >= 1 ? `✓ ${dhcpClients} PC(s) en modo DHCP Client.` : 'Activa DHCP en las PCs: panel IP Config → "DHCP Client" o CLI: ip address dhcp.' };
+        },
+        'helper-vlan10': (sim) => {
+            const r      = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+            const ifaces = Object.values(r?.interfaces || {});
+            const ok     = ifaces.some(i => i.helperAddress || i.helper) || r?.dhcpRelay || r?.helperAddress;
+            return { ok, feedback: ok ? '✓ ip helper-address configurado en VLAN 10.' : 'CLI router: interface ETH1 → ip helper-address 10.0.0.100.' };
+        },
+        'helper-vlan20': (sim) => {
+            const r  = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+            const ok = !!(r?.dhcpRelay || r?.helperAddress || sim.simulationRunning);
+            return { ok, feedback: ok ? '✓ ip helper-address configurado en VLAN 20.' : 'CLI router: interface ETH2 → ip helper-address 10.0.0.100.' };
+        },
+        'verify-relay': (sim) => {
+            if (!sim.simulationRunning) return { ok: false, feedback: 'Presiona ▶ para iniciar la simulación.' };
+            const srv = sim.devices.find(d => d.type === 'Server');
+            return { ok: true, feedback: srv?.dhcpServer ? '✓ Servidor DHCP activo. Las PCs reciben IPs de las VLANs correctas.' : '✓ Simulación activa. Verifica que las PCs reciben IPs del servidor centralizado.' };
+        },
+    },
+
+    // ── Lab 24: SSH seguro ───────────────────────────────────────────
+    'lab-24': {
+        'add-router': (sim) => {
+            const ok = sim.devices.some(d => ['Router','RouterWifi'].includes(d.type));
+            return { ok, feedback: ok ? '✓ Router en el canvas.' : 'Agrega un Router al canvas para configurar SSH.' };
+        },
+        'hostname-domain': (sim) => {
+            const r = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+            if (!r) return { ok: false, feedback: 'Primero agrega un Router.' };
+            const ok = !!(r.hostname || r.domainName || r.sshEnabled || r.ssh?.enabled);
+            return { ok, feedback: ok ? `✓ Hostname/dominio configurado: ${r.hostname || 'configurado'}.` : 'CLI: hostname Router → ip domain-name empresa.local (necesario para generar keys RSA).' };
+        },
+        'rsa-keys': (sim) => {
+            const r  = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+            const ok = !!(r?.sshEnabled || r?.ssh?.enabled || r?.rsaKeys);
+            return { ok, feedback: ok ? '✓ Claves RSA generadas.' : 'CLI: crypto key generate rsa modulus 2048.' };
+        },
+        'local-users': (sim) => {
+            const r = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+            if (!r) return { ok: false, feedback: 'Falta el router.' };
+            const hasUsers = r.localUsers && (
+                Array.isArray(r.localUsers) ? r.localUsers.length > 0 : Object.keys(r.localUsers).length > 0
+            );
+            const ok = !!(hasUsers || r?.sshEnabled || r?.users?.length > 0);
+            return { ok, feedback: ok ? '✓ Usuario local configurado.' : 'CLI: username admin privilege 15 secret Admin123.' };
+        },
+        'configure-vty': (sim) => {
+            const r   = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+            const vty = r?.vtyConfig;
+            const ok  = !!(r?.sshEnabled || vty?.transportInput === 'ssh' || vty?.transport === 'ssh' || vty?.loginLocal || r?.ssh?.enabled);
+            return { ok, feedback: ok ? '✓ Líneas VTY configuradas para SSH.' : 'CLI: line vty 0 4 → transport input ssh → login local.' };
+        },
+        'set-ssh-version': (sim) => {
+            const r  = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+            const ok = !!(r?.sshVersion === 2 || r?.sshEnabled || r?.ssh?.version === 2 || r?.ssh?.enabled);
+            return { ok, feedback: ok ? '✓ SSHv2 forzado.' : 'CLI: ip ssh version 2.' };
+        },
+        'test-ssh': (sim) => {
+            if (!sim.simulationRunning) return { ok: false, feedback: 'Presiona ▶ para iniciar la simulación.' };
+            const r   = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+            const pcs = sim.devices.filter(d => d.type === 'PC').length;
+            const ok  = pcs >= 1 && (r?.sshEnabled || r?.ssh?.enabled);
+            return { ok, feedback: ok ? `✓ SSH funcional. PC conectada al router. Prueba: ssh admin@${r?.ipConfig?.ipAddress || '<IP-router>'} desde la CLI de la PC.` : 'Agrega una PC, conéctala al router, y asegúrate que SSH esté habilitado.' };
+        },
+    },
+
+    // ── Lab 25: IPv6 con SLAAC y EUI-64 ─────────────────────────────
+    'lab-25': {
+        'add-router-v6': (sim) => {
+            const ok = sim.devices.some(d => ['Router','RouterWifi'].includes(d.type));
+            return { ok, feedback: ok ? '✓ Router IPv6 en el canvas.' : 'Agrega un Router y habilita IPv6. CLI: ipv6 unicast-routing.' };
+        },
+        'ipv6-interface': (sim) => {
+            const r  = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+            if (!r) return { ok: false, feedback: 'Primero agrega un Router.' };
+            const ok = !!(r.ipv6Address || r.ipv6Config?.address || r.interfaces?.find?.(i => i.ipv6Config?.address));
+            return { ok, feedback: ok ? '✓ Prefijo IPv6 configurado en la interfaz LAN.' : 'CLI: interface ETH0 → ipv6 address 2001:db8:acad:1::1/64 → no shutdown.' };
+        },
+        'slaac-pcs': (sim) => {
+            const pcs = sim.devices.filter(d => d.type === 'PC');
+            if (pcs.length < 3) return { ok: false, feedback: `${pcs.length}/3 PCs. Agrega más PCs y activa IPv6 en ellas.` };
+            const ipv6Pcs = pcs.filter(p => p.ipv6Address || p.ipv6Config || p.ipv6Enabled || p.interfaces?.some(i => i.ipv6Config?.address || i.ipv6LinkLocal)).length;
+            return { ok: ipv6Pcs >= 1, feedback: ipv6Pcs >= 1 ? `✓ ${ipv6Pcs} PC(s) con IPv6 habilitado (SLAAC).` : 'Activa IPv6 en las PCs: CLI: interface ETH0 → ipv6 enable → ipv6 address autoconfig.' };
+        },
+        'eui64': (sim) => {
+            const pcs = sim.devices.filter(d => d.type === 'PC');
+            const hasEui = pcs.some(p => p.ipv6Address?.includes(':') || p.ipv6Config?.address || p.interfaces?.some(i => i.ipv6Config?.address || i.ipv6LinkLocal));
+            return { ok: hasEui, feedback: hasEui ? '✓ PCs con dirección IPv6 EUI-64 generada.' : 'Las PCs deben generar su IPv6 usando EUI-64. Verifica con: ipv6 interface brief.' };
+        },
+        'link-local': (sim) => {
+            const r  = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+            const ok = !!(r?.ipv6Address || r?.ipv6Config || r?.interfaces?.ETH0?.ipv6Address || sim.simulationRunning);
+            return { ok, feedback: ok ? '✓ Direcciones link-local FE80:: activas.' : 'Las link-local se generan automáticamente. Verifica con: show ipv6 interface ETH0.' };
+        },
+        'ping6-verify': (sim) => {
+            if (!sim.simulationRunning) return { ok: false, feedback: 'Presiona ▶ para iniciar la simulación.' };
+            const r   = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+            const pcs = sim.devices.filter(d => d.type === 'PC').length;
+            const ok  = r && pcs >= 3 && (r.ipv6Address || r.ipv6Config || r.ipv6Enabled || r.interfaces?.some?.(i => i.ipv6Config?.address));
+            return { ok, feedback: ok ? `✓ Red IPv6 operativa. Prueba: ping6 2001:db8:acad:1::1 desde una PC.` : 'Verifica que el router tenga IPv6 configurado y haya al menos 3 PCs.' };
+        },
+    },
 };
 
 // Checker genérico para labs sin check específico (usa solo validate original)

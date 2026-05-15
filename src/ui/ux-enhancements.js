@@ -40,19 +40,32 @@
 
 
 /* ════════════════════════════════════════════════════════
-   2. WELCOME OVERLAY
+   2. WELCOME OVERLAY — Enhanced Onboarding
    ════════════════════════════════════════════════════════ */
 document.addEventListener('DOMContentLoaded', () => {
-    const overlay = document.getElementById('welcome-overlay');
+    const overlay   = document.getElementById('welcome-overlay');
     const wcDismiss = document.getElementById('wc-dismiss');
     const wcExample = document.getElementById('wc-load-example');
+    const wcLab     = document.getElementById('wc-open-lab');
+    const wcNoShow  = document.getElementById('wc-no-show');
     if (!overlay) return;
+
+    // Check "never show again" preference
+    try {
+        if (localStorage.getItem('netops-welcome-seen') === 'never') {
+            overlay.style.display = 'none';
+            return;
+        }
+    } catch(e) {}
 
     function hideWelcome() {
         overlay.style.transition = 'opacity 0.3s';
         overlay.style.opacity = '0';
         setTimeout(() => { overlay.style.display = 'none'; }, 300);
-        try { localStorage.setItem('netops-welcome-seen', '1'); } catch(e) {}
+        try {
+            const pref = wcNoShow?.checked ? 'never' : '1';
+            localStorage.setItem('netops-welcome-seen', pref);
+        } catch(e) {}
     }
 
     // Si ya hay dispositivos cargados (auto-restore), ocultar de inmediato
@@ -82,6 +95,25 @@ document.addEventListener('DOMContentLoaded', () => {
             const exBtn = document.getElementById('exampleBtn');
             if (exBtn) exBtn.click();
         }, 320);
+    });
+
+    // Abrir Lab 1 directamente
+    wcLab?.addEventListener('click', () => {
+        hideWelcome();
+        setTimeout(() => {
+            // Open the lab panel
+            const labPanel = document.getElementById('lab-panel');
+            if (labPanel) labPanel.style.display = '';
+            // If labGuide is ready, start lab-01
+            if (window.labGuide) {
+                try {
+                    const lab01 = window._LABS ? window._LABS.find(l => l.id === 'lab-01') : null;
+                    if (lab01) window.labGuide._startLab(lab01);
+                } catch(e) {}
+            }
+            // Fallback: click the Lab button in the sidebar
+            document.getElementById('openLabBtn')?.click();
+        }, 350);
     });
 
     // Ocultar al añadir primer dispositivo

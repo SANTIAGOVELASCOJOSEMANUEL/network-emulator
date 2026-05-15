@@ -1141,16 +1141,37 @@ body {
 }
 .wc-step-text { font-size: 11px; color: var(--text); line-height: 1.5; font-family: var(--ui); }
 .wc-step-text b { color: var(--text-bright); font-weight: 600; }
-.wc-actions { display: flex; gap: 8px; }
+.wc-actions { display: flex; flex-direction: column; gap: 8px; }
 .wc-btn {
-    flex: 1; padding: 10px 12px; border-radius: var(--radius);
+    width: 100%; padding: 10px 12px; border-radius: var(--radius);
     font-family: var(--ui); font-size: 11px; font-weight: 600;
     cursor: pointer; border: none; transition: opacity 0.15s, transform 0.1s;
+    text-align: center;
 }
 .wc-btn:hover { opacity: 0.88; transform: translateY(-1px); }
 .wc-btn:active { transform: scale(0.97); }
-.wc-btn-primary { background: var(--accent); color: #020e07; }
+.wc-btn-primary   { background: var(--accent); color: #020e07; }
+.wc-btn-lab       { background: rgba(251,191,36,.15); border: 1px solid rgba(251,191,36,.35); color: #fbbf24; }
 .wc-btn-secondary { background: var(--bg-card); border: 1px solid var(--border-panel); color: var(--text); }
+
+/* Welcome features grid */
+.wc-features {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 6px; margin-bottom: 16px;
+}
+.wc-feat {
+    display: flex; align-items: center; gap: 6px;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 6px 8px;
+    font-size: 9.5px; color: var(--text); font-family: var(--ui);
+}
+.wc-feat span { color: var(--text-dim); }
+.wc-divider { height: 1px; background: var(--border); margin: 14px 0 10px; }
+.wc-steps-title { font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-bottom: 8px; font-family: var(--ui); }
+.wc-footer { margin-top: 12px; text-align: center; }
+
+/* Wider card for more content */
+.welcome-card { width: 420px !important; max-width: 96vw !important; }
 
 /* ── SHORTCUTS MODAL ── */
 #shortcuts-modal {
@@ -1884,3 +1905,162 @@ kbd {
 #qosPanel ::-webkit-scrollbar-thumb,
 #mplsPanel ::-webkit-scrollbar-thumb,
 #vpnPanel ::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+
+/* ══════════════════════════════════════════════════════════════
+   RESPONSIVE — Mobile & Tablet (≤768px)
+   Adaptación para pantallas pequeñas sin romper el simulador.
+══════════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+
+    /* ── Topbar: colapsar botones de texto, solo íconos ───────── */
+    .topbar-btn span.btn-label,
+    .btn-label { display: none !important; }
+
+    #topbar {
+        gap: 4px !important;
+        padding: 0 6px !important;
+    }
+
+    #topbar button, #topbar select {
+        padding: 4px 6px !important;
+        font-size: 10px !important;
+        min-width: unset !important;
+    }
+
+    /* ── Device sidebar: colapsar a iconos ───────────────────── */
+    #device-sidebar, .device-sidebar {
+        width: 46px !important;
+        overflow: hidden !important;
+    }
+
+    #device-sidebar .category-label,
+    .sidebar-label, .device-label {
+        display: none !important;
+    }
+
+    #device-sidebar .device-item {
+        justify-content: center !important;
+        padding: 6px 0 !important;
+    }
+
+    /* ── Tools rail derecho: más estrecho ────────────────────── */
+    .tools-rail, #tools-rail {
+        width: 36px !important;
+    }
+
+    .tools-rail .rail-cat span,
+    .tools-rail .rail-btn span,
+    #tools-rail .rp-label,
+    #tools-rail .rp-desc {
+        display: none !important;
+    }
+
+    /* ── Panel flotante de propiedades: ancho máximo ─────────── */
+    #rpanel, .right-panel, #config-panel {
+        width: min(260px, 90vw) !important;
+        font-size: 10px !important;
+    }
+
+    /* ── Lab panel: ancho responsivo ─────────────────────────── */
+    #lab-panel {
+        width: min(290px, 92vw) !important;
+        right: 4px !important;
+        top: 64px !important;
+    }
+
+    /* ── CLI panel: pantalla completa en mobile ──────────────── */
+    #cli-overlay, .cli-overlay {
+        width: 100vw !important;
+        height: 55vh !important;
+        left: 0 !important;
+        right: 0 !important;
+        bottom: 0 !important;
+        top: auto !important;
+        border-radius: 12px 12px 0 0 !important;
+    }
+
+    /* ── Canvas: touch events ─────────────────────────────────── */
+    #network-canvas, canvas {
+        touch-action: none !important;
+    }
+
+    /* ── Modales: pantalla completa ──────────────────────────── */
+    .modal, .modal-overlay > div {
+        width: 96vw !important;
+        max-width: 96vw !important;
+        margin: 0 auto !important;
+    }
+
+    /* ── TCP Visualizer: reducir tamaño ─────────────────────── */
+    #tcpVizPanel {
+        width: min(340px, 96vw) !important;
+        left: 2vw !important;
+        top: 60px !important;
+    }
+
+    /* ── Metrics dashboard ───────────────────────────────────── */
+    #metrics-dashboard, .metrics-panel {
+        width: min(300px, 96vw) !important;
+    }
+
+    /* ── IP config modal ─────────────────────────────────────── */
+    .ip-config-modal {
+        width: 96vw !important;
+        max-width: 96vw !important;
+    }
+
+    /* ── Troubleshoot panel ──────────────────────────────────── */
+    #troubleshoot-panel, .troubleshoot-panel {
+        width: min(290px, 92vw) !important;
+        right: 4px !important;
+    }
+
+    /* ── Status bar ──────────────────────────────────────────── */
+    .status-bar .status-group { gap: 4px !important; }
+    .status-item span { font-size: 9px !important; }
+
+    /* ── Floating panels: no exceed viewport ─────────────────── */
+    [style*="position:fixed"], [style*="position: fixed"] {
+        max-width: 98vw !important;
+    }
+}
+
+/* ── Tablet (769px – 1024px): ajustes intermedios ────────────── */
+@media (min-width: 769px) and (max-width: 1024px) {
+
+    #device-sidebar, .device-sidebar {
+        width: 58px !important;
+    }
+
+    #device-sidebar .device-label {
+        font-size: 7px !important;
+    }
+
+    .tools-rail, #tools-rail {
+        width: 44px !important;
+    }
+
+    .tools-rail .rail-cat span:not(.rail-cat-icon),
+    #tools-rail .rp-desc {
+        display: none !important;
+    }
+
+    #lab-panel { right: 6px !important; }
+}
+
+/* ── Touch: aumentar áreas de toque en botones ───────────────── */
+@media (pointer: coarse) {
+    button, .lab-btn, .rail-btn, .rail-cat {
+        min-height: 36px !important;
+    }
+    .device-item {
+        min-height: 44px !important;
+    }
+    input[type="text"], input[type="number"], select {
+        min-height: 34px !important;
+        font-size: 14px !important; /* Evita zoom en iOS */
+    }
+}
+
+

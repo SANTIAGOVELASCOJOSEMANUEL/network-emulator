@@ -435,3 +435,6 @@ if (typeof LinkState !== "undefined") window.LinkState = LinkState;
 if (typeof NetworkEngine !== "undefined") window.NetworkEngine = NetworkEngine;
 if (typeof processPacketV2 !== "undefined") window.processPacketV2 = processPacketV2;
 if (typeof NetUtils !== "undefined") window.NetUtils = NetUtils;
+
+// — ES6 Export —
+export { LinkState, NetworkEngine, processPacketV2, NetUtils };

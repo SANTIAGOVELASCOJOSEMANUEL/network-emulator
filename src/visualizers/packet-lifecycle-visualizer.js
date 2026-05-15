@@ -2,13 +2,18 @@
 // Muestra encapsulación L2→L3→L4 en cada salto con información real
 'use strict';
 
+import { eventBus, EVENTS } from '../core/event-bus.js';
+
 class PacketLifecycleVisualizer {
-    constructor() {
+    constructor(sim) {
+        this.sim = sim;
         this.panel = null;
         this.currentHops = [];
         this.currentHopIndex = 0;
         this.animationFrame = null;
         this.init();
+        this._bindUI();
+        this._bindEventBus();
     }
 
     init() {
@@ -24,7 +29,7 @@ class PacketLifecycleVisualizer {
                     </svg>
                     <span>Ciclo de Vida del Paquete</span>
                 </div>
-                <button class="lifecycle-close" onclick="window.packetLifecycleViz.hide()">
+                <button class="lifecycle-close">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M18 6L6 18M6 6l12 12"/>
                     </svg>
@@ -36,14 +41,14 @@ class PacketLifecycleVisualizer {
                 <div class="lifecycle-layers" id="lifecycleLayers"></div>
             </div>
             <div class="lifecycle-footer">
-                <button class="lifecycle-nav-btn" id="prevHopBtn" onclick="window.packetLifecycleViz.prevHop()">
+                <button class="lifecycle-nav-btn" id="prevHopBtn">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M15 18l-6-6 6-6"/>
                     </svg>
                     Anterior
                 </button>
                 <div class="lifecycle-hop-indicator" id="hopIndicator">Salto 1 de 1</div>
-                <button class="lifecycle-nav-btn" id="nextHopBtn" onclick="window.packetLifecycleViz.nextHop()">
+                <button class="lifecycle-nav-btn" id="nextHopBtn">
                     Siguiente
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M9 18l6-6-6-6"/>
@@ -52,6 +57,30 @@ class PacketLifecycleVisualizer {
             </div>
         `;
         document.body.appendChild(this.panel);
+    }
+
+    _bindUI() {
+        // Bind DOM event listeners
+        const panel = this.panel;
+        if (!panel) return;
+
+        // Close button
+        panel.querySelector('.lifecycle-close')?.addEventListener('click', () => this.hide());
+
+        // Navigation buttons
+        panel.querySelector('#prevHopBtn')?.addEventListener('click', () => this.prevHop());
+        panel.querySelector('#nextHopBtn')?.addEventListener('click', () => this.nextHop());
+    }
+
+    _bindEventBus() {
+        // Bind EventBus listeners
+        eventBus.on(EVENTS.PACKET_DELIVERED, ({ packet }) => {
+            this.show(packet);
+        });
+
+        eventBus.on(EVENTS.PACKET_DROPPED, ({ packet }) => {
+            this.show(packet);
+        });
     }
 
     show(packetTrace) {
@@ -364,11 +393,14 @@ class PacketLifecycleVisualizer {
     }
 }
 
-// Instancia global
-window.packetLifecycleViz = null;
+// Export for ES modules
+export function initPacketLifecycleVisualizer(sim) {
+    return new PacketLifecycleVisualizer(sim);
+}
 
+// Legacy global initialization for backward compatibility
 document.addEventListener('DOMContentLoaded', () => {
-    window.packetLifecycleViz = new PacketLifecycleVisualizer();
+    window.packetLifecycleViz = new PacketLifecycleVisualizer(window.simulator || window.networkSim);
     console.log('[PacketLifecycle] Visualizador inicializado ✅');
 });
 

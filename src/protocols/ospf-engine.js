@@ -105,3 +105,22 @@ class OSPFEngine {
 
 // Exponer globalmente
 window.OSPFEngine = OSPFEngine;
+
+// Hook de inicio manual — usado por app.js y por el CLI ("ospf start")
+window._ospfStart = function() {
+    const sim = window.networkSim || window.simulator;
+    if (!sim || !window.OSPFEngine) return;
+    if (window._ospfEngine) window._ospfEngine.destroy();
+    const engine = new window.OSPFEngine();
+    engine.routers = (sim.devices || []).filter(d =>
+        d.ospfNetworks?.length || d.routing === 'ospf' || d.ospf
+    );
+    if (engine.routers.length === 0) {
+        console.warn('[OSPF] No hay routers con ospfNetworks configurado');
+        return;
+    }
+    engine.initialize();
+    window._ospfEngine = engine;
+    console.log(`[OSPF] Motor reiniciado — ${engine.routers.length} router(s)`);
+    return engine;
+};

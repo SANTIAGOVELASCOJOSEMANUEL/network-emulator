@@ -831,7 +831,7 @@ class RoutingVisualizer {
    INICIALIZACIÓN
 ══════════════════════════════════════════════════════════════════ */
 
-window._rvInit = function(sim) {
+function initRoutingVisualizer(sim) {
     if (window.routingVisualizer) {
         ['rv-panel'].forEach(id => { const el = document.getElementById(id); if (el) el.remove(); });
         ['routes'].forEach(tab => {
@@ -846,3 +846,5 @@ window._rvInit = function(sim) {
     console.log('[RoutingVisualizer] ✅ Inicializado');
     return window.routingVisualizer;
 };
+
+export { RoutingVisualizer, initRoutingVisualizer };

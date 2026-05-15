@@ -295,3 +295,6 @@ if (typeof window !== 'undefined') window.PacketFactory = PacketFactory;
 // — Exponer al scope global (compatibilidad legacy) —
 if (typeof Packet !== "undefined") window.Packet = Packet;
 if (typeof createPacket !== "undefined") window.createPacket = createPacket;
+
+// — ES6 Export —
+export { Packet, PacketFactory, createPacket };

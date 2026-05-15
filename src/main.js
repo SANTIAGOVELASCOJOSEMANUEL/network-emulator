@@ -16,6 +16,8 @@
 import './core/errorhandler.js';
 import './core/logger.js';
 import './core/storage.js';
+import './core/event-bus.js';       // pub/sub central — debe ir antes que cualquier emisor
+import './core/service-registry.js'; // registry de servicios opcionales
 
 // ── CORE — Primitivas de red ──────────────────────────────────────────
 // IPv6 DEBE ir primero: define IPv6Utils, RoutingTableIPv6 y NDCache
@@ -83,6 +85,9 @@ import './ui/routing-engine-ui.js';
 // ── VISUALIZERS — Inspectores de paquetes ────────────────────────────
 import './visualizers/packet-inspector.js';
 
+// ── VISUALIZERS — TCP educativo ───────────────────────────────────────
+import './visualizers/tcp-visualizer.js';
+
 // ── UTILS — Utilidades de canvas ──────────────────────────────────────
 import './utils/canvas-utils.js';
 
@@ -101,6 +106,16 @@ import './visualizers/packet-lifecycle-visualizer.js';
 
 // ── UI — Paleta de dispositivos (era el <script> inline en index.html) ─
 import './ui/device-palette.js';
+
+// ── UI — Modo Troubleshooting guiado ─────────────────────────────────
+import './ui/troubleshoot-mode.js';
+
+// ── UI — Registro de eventos y terminal de red ────────────────────────
+import './ui/event-log.js';
+import './ui/network-terminal.js';
+
+// ── UI — Inventario de red ────────────────────────────────────────────
+import './ui/inventory-page.js';
 
 // ── ENTRY POINT — Inicialización principal ────────────────────────────
 import './app.js';

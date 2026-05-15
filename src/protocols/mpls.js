@@ -699,6 +699,8 @@ class MPLSManager {
 window._mplsInit = function(simulator) {
     const mgr = new MPLSManager(simulator);
     window.mplsManager = mgr;
+    if (typeof ServiceRegistry !== 'undefined') ServiceRegistry.register('mpls', mgr);
+    if (typeof EventBus !== 'undefined') EventBus.emit('SERVICE_READY', { name: 'mpls', service: mgr });
 
     window._mplsShowLFIB = (devName) => {
         const dev = simulator.devices.find(d => d.name === devName);
@@ -752,3 +754,38 @@ if (typeof LDPEngine !== "undefined") window.LDPEngine = LDPEngine;
 if (typeof MPLS_RESERVED !== "undefined") window.MPLS_RESERVED = MPLS_RESERVED;
 if (typeof LABEL_MIN !== "undefined") window.LABEL_MIN = LABEL_MIN;
 if (typeof LABEL_MAX !== "undefined") window.LABEL_MAX = LABEL_MAX;
+
+// — ES6 Export —
+export { MPLSRouter, MPLSManager, LSP, LFIBEntry, MPLS_OP };
+
+export function initMPLS(simulator) {
+    const mgr = new MPLSManager(simulator);
+    window.mplsManager = mgr;
+    if (typeof ServiceRegistry !== 'undefined') ServiceRegistry.register('mpls', mgr);
+    if (typeof EventBus !== 'undefined') EventBus.emit('SERVICE_READY', { name: 'mpls', service: mgr });
+
+    window._mplsShowLFIB = (devName) => {
+        const dev = simulator.devices.find(d => d.name === devName);
+        if (!dev) return `Dispositivo '${devName}' no encontrado`;
+        const mr = mgr.routers.get(dev.id);
+        return mr ? mr.showLFIB() : `${devName} no tiene MPLS habilitado`;
+    };
+
+    window._mplsShowLDP = () => mgr.ldp.summaryStr();
+
+    window._mplsAutoLDP = () => {
+        const routerTypes = ['Router','RouterWifi','Firewall','SDWAN','Internet','ISP'];
+        const connections = simulator.connections ?? [];
+        for (const conn of connections) {
+            if (routerTypes.includes(conn.from.type) && routerTypes.includes(conn.to.type)) {
+                mgr.enableRouter(conn.from);
+                mgr.enableRouter(conn.to);
+                mgr.ldp.establish(conn.from, conn.to);
+            }
+        }
+        return 'Auto-LDP completado';
+    };
+
+    console.log('[MPLS] MPLSManager inicializado');
+    return mgr;
+}

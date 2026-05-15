@@ -239,7 +239,10 @@ document.addEventListener('DOMContentLoaded', () => {
     /* ── Open / Close ─────────────────────────────────────────── */
     const open  = () => { panel.classList.add('open');    openBtn?.classList.add('ptl-active'); };
     const close = () => { panel.classList.remove('open'); openBtn?.classList.remove('ptl-active'); };
-    openBtn?.addEventListener('click', () => panel.classList.contains('open') ? close() : open());
+    openBtn?.addEventListener('click', () => {
+        panel.classList.contains('open') ? close() : open();
+        if (typeof toggleAdvBtn === 'function') toggleAdvBtn('openTimelineBtn');
+    });
     closeBtn?.addEventListener('click', close);
     pauseBtn?.addEventListener('click', () => {
         paused = !paused;

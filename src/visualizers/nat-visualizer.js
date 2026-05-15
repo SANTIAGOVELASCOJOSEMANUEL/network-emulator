@@ -2,8 +2,11 @@
 // Muestra tabla de traducciones activas, SNAT/DNAT, y diagrama visual
 'use strict';
 
+import { eventBus, EVENTS } from '../core/event-bus.js';
+
 class NATVisualizer {
-    constructor() {
+    constructor(sim) {
+        this.sim = sim;
         this.panel = null;
         this.updateInterval = null;
         this.selectedRouter = null;
@@ -24,16 +27,16 @@ class NATVisualizer {
                     <span>NAT / PAT en Tiempo Real</span>
                 </div>
                 <div class="nat-controls">
-                    <select id="natRouterSelect" onchange="window.natViz.selectRouter(this.value)">
+                    <select id="natRouterSelect" data-action="select-router">
                         <option value="">Seleccionar router...</option>
                     </select>
-                    <button class="nat-btn" onclick="window.natViz.clearTranslations()">
+                    <button class="nat-btn" data-action="clear">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M3 6h18M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
                         </svg>
                         Limpiar
                     </button>
-                    <button class="nat-close" onclick="window.natViz.hide()">
+                    <button class="nat-close" data-action="hide">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M18 6L6 18M6 6l12 12"/>
                         </svg>
@@ -77,13 +80,35 @@ class NATVisualizer {
         `;
         document.body.appendChild(this.panel);
 
-        // Event listeners para filtros
-        this.panel.querySelectorAll('.filter-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                this.panel.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-                e.target.classList.add('active');
-                this.updateTranslationsTable(e.target.dataset.type);
-            });
+        this._bindUI();
+        this._bindEventBus();
+    }
+
+    _bindUI() {
+        const select = this.panel.querySelector('#natRouterSelect');
+        const clearBtn = this.panel.querySelector('[data-action="clear"]');
+        const hideBtn = this.panel.querySelector('[data-action="hide"]');
+
+        select?.addEventListener('change', (e) => this.selectRouter(e.target.value));
+        clearBtn?.addEventListener('click', () => this.clearTranslations());
+        hideBtn?.addEventListener('click', () => this.hide());
+    }
+
+    _bindEventBus() {
+        eventBus.on(EVENTS.NAT_TRANSLATION, ({ packet, originalIP, translatedIP, router }) => {
+            if (router?.id === this.selectedRouter?.id) {
+                this.updateDiagram();
+                this.updateStats();
+                this.updateTranslationsTable('all');
+            }
+        });
+
+        eventBus.on(EVENTS.PACKET_DELIVERED, ({ packet, device }) => {
+            if (device?.id === this.selectedRouter?.id) {
+                this.updateDiagram();
+                this.updateStats();
+                this.updateTranslationsTable('all');
+            }
         });
     }
 
@@ -102,9 +127,9 @@ class NATVisualizer {
         const select = document.getElementById('natRouterSelect');
         select.innerHTML = '<option value="">Seleccionar router...</option>';
 
-        if (!window.networkSim || !window.networkSim.devices) return;
+        if (!this.sim || !this.sim.devices) return;
 
-        const routers = window.networkSim.devices.filter(d => 
+        const routers = this.sim.devices.filter(d => 
             d.natRules && d.natRules.length > 0
         );
 
@@ -124,7 +149,7 @@ class NATVisualizer {
     selectRouter(routerId) {
         if (!routerId) return;
 
-        const router = window.networkSim.devices.find(d => d.id === routerId);
+        const router = this.sim.devices.find(d => d.id === routerId);
         if (!router) return;
 
         this.selectedRouter = router;
@@ -312,10 +337,13 @@ class NATVisualizer {
 // Instancia global
 window.natViz = null;
 
-document.addEventListener('DOMContentLoaded', () => {
-    window.natViz = new NATVisualizer();
-    console.log('[NAT Visualizer] Inicializado ✅');
-});
+export function initNATVisualizer(sim) {
+    if (!window.natViz) {
+        window.natViz = new NATVisualizer(sim);
+        console.log('[NAT Visualizer] Inicializado ✅');
+    }
+    return window.natViz;
+}
 
 // Estilos CSS
 const style = document.createElement('style');
@@ -690,5 +718,6 @@ style.textContent = `
 }
 `;
 document.head.appendChild(style);
+
 // — Exponer al scope global (compatibilidad legacy) —
 if (typeof NATVisualizer !== "undefined") window.NATVisualizer = NATVisualizer;

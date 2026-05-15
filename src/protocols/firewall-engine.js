@@ -555,10 +555,34 @@ window.FirewallRule   = FirewallRule;
                             (packet.dport ? `:${packet.dport}` : '')
                         );
                     }
+                    // Emitir al bus de eventos
+                    const _fwPayload = {
+                        proto: packet.tipo?.toUpperCase() || '?',
+                        src  : srcIP || '?',
+                        dst  : (dstIP || '?') + (packet.dport ? `:${packet.dport}` : ''),
+                        device: device.name,
+                    };
+                    if (window.EventBus) {
+                        const eventName = (window.EVENTS?.FIREWALL_DENY) || 'FIREWALL_DENY';
+                        window.EventBus.emit(eventName, _fwPayload);
+                    }
                     return { delivered: false, dropped: true, verdict, packet: processedPacket };
                 }
 
-                // Paquete pasó — continuar con procesamiento normal usando el paquete (quizá con NAT)
+                // Paquete pasó — emitir permit y continuar
+                {
+                    const _fwPayload = {
+                        proto: packet.tipo?.toUpperCase() || '?',
+                        src  : srcIP || '?',
+                        dst  : (dstIP || '?') + (packet.dport ? `:${packet.dport}` : ''),
+                        device: device.name,
+                    };
+                    if (window.EventBus) {
+                        const eventName = (window.EVENTS?.FIREWALL_ALLOW) || 'FIREWALL_ALLOW';
+                        window.EventBus.emit(eventName, _fwPayload);
+                    }
+                }
+                // Continuar con procesamiento normal usando el paquete (quizá con NAT)
                 return _original(processedPacket, device, allDevices);
             }
 

@@ -309,7 +309,10 @@ const LABS = [
                 hint3   : 'Asegúrate de excluir la IP del router del pool.',
                 validate: (sim) => {
                     const r = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
-                    return !!(r?.dhcpServer || r?.dhcpPools?.length);
+                    if (!r) return false;
+                    const pool = r.dhcpServer;
+                    return !!(pool && pool.poolName && pool.poolName !== 'default' && pool.network) ||
+                           !!(r.dhcpPools?.length);
                 },
             },
             {
@@ -336,7 +339,7 @@ const LABS = [
                 hint3   : 'NAT traduce IPs privadas a una IP pública para Internet.',
                 validate: (sim) => {
                     const r = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
-                    return !!(r?.natEnabled || r?.natTable);
+                    return !!(r?.natRules?.some(rule => rule.type === 'PAT' || rule.type === 'static') || r?.natEnabled);
                 },
             },
             {
@@ -1018,7 +1021,7 @@ const LABS = [
                     return routers.some(r => {
                         const routes = r.routingTable?.entries ? r.routingTable.entries() : (r.routingTable?.routes || []);
                         return routes.some(rt => (rt.network || '').startsWith('2001:') || (rt.network || '').includes('db8'));
-                    }) || routers.some(r => r.staticRoutes?.some(sr => (sr.network || '').includes('2001:')));
+                    });
                 },
             },
             {
@@ -1429,7 +1432,7 @@ const LABS = [
                     );
                     if (!ispRouter) return true; // flexible: si hay 4+ routers, asumir que está configurado
                     const routes = ispRouter.routingTable?.entries ? ispRouter.routingTable.entries() : (ispRouter.routingTable?.routes || []);
-                    return routes.length >= 2 || (ispRouter.staticRoutes?.length >= 1);
+                    return routes.length >= 2;
                 },
             },
             {
@@ -1564,6 +1567,1275 @@ const LABS = [
                     return routers.length >= 1 && switches.length >= 4 &&
                            endDevices.length >= 6 && hasWifi && hasServer;
                 },
+            },
+        ],
+    },
+
+    // ─────────────────────────────────────────────────────────────────
+    //  LABS CCNA (18–25) — Preparación para examen CCNA 200-301
+    // ─────────────────────────────────────────────────────────────────
+
+    {
+        id   : 'lab-18',
+        title: '📐 Lab 18: Subnetting y VLSM',
+        level: 'Intermedio',
+        color: '#fb923c',
+        desc : 'Divide la red 172.16.0.0/16 en subredes de tamaño variable (VLSM) para departamentos distintos.',
+        steps: [
+            {
+                id      : 'add-router',
+                title   : 'Agregar un Router central',
+                desc    : 'Agrega un Router que actuará como default gateway de todas las subredes VLSM.',
+                hint1   : 'Coloca un Router en el canvas.',
+                hint2   : 'Este router tendrá múltiples interfaces, una por cada subred.',
+                hint3   : 'Los routers soportan múltiples IPs en distintas interfaces.',
+                validate: (sim) => sim.devices.some(d => ['Router','RouterWifi'].includes(d.type)),
+            },
+            {
+                id      : 'subnet-dept-a',
+                title   : 'Subred Dpto A — /24 (hasta 254 hosts)',
+                desc    : 'Agrega 2 PCs con IPs en 172.16.1.0/24 (ej: 172.16.1.10 y 172.16.1.20).',
+                hint1   : 'VLSM permite usar /24 para departamentos grandes.',
+                hint2   : 'Asigna IPs 172.16.1.x a las PCs del Dpto A.',
+                hint3   : 'Gateway de Dpto A: 172.16.1.1 (en el router).',
+                validate: (sim) => {
+                    const pcs = sim.devices.filter(d => d.type === 'PC');
+                    return pcs.filter(p => p.ipConfig?.ipAddress?.startsWith('172.16.1.')).length >= 2;
+                },
+            },
+            {
+                id      : 'subnet-dept-b',
+                title   : 'Subred Dpto B — /26 (hasta 62 hosts)',
+                desc    : 'Agrega 2 PCs con IPs en 172.16.2.0/26 (ej: 172.16.2.10 y 172.16.2.20). Máscara: 255.255.255.192.',
+                hint1   : '/26 da 64 IPs → 62 hosts útiles. Ideal para departamentos medianos.',
+                hint2   : 'Asigna IPs 172.16.2.x con máscara 255.255.255.192.',
+                hint3   : 'Gateway de Dpto B: 172.16.2.1.',
+                validate: (sim) => {
+                    const pcs = sim.devices.filter(d => d.type === 'PC');
+                    return pcs.filter(p => p.ipConfig?.ipAddress?.startsWith('172.16.2.')).length >= 2;
+                },
+            },
+            {
+                id      : 'subnet-link',
+                title   : 'Subred WAN — /30 (enlace punto a punto)',
+                desc    : 'Agrega un segundo Router y conéctalo con una subred /30: 172.16.3.0/30.',
+                hint1   : '/30 da solo 2 IPs host: .1 y .2. Ideal para enlaces router-router.',
+                hint2   : 'Router1: 172.16.3.1 / Router2: 172.16.3.2, máscara 255.255.255.252.',
+                hint3   : 'Los enlaces WAN entre routers siempre usan /30 o /31.',
+                validate: (sim) => {
+                    const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+                    return routers.length >= 2 && routers.some(r => r.ipConfig?.ipAddress?.startsWith('172.16.3.'));
+                },
+            },
+            {
+                id      : 'static-routes',
+                title   : 'Rutas estáticas entre subredes',
+                desc    : 'En Router1 agrega ruta estática hacia 172.16.2.0/26 vía Router2.',
+                hint1   : 'CLI: enable → configure terminal → ip route 172.16.2.0 255.255.255.192 172.16.3.2',
+                hint2   : 'Sin rutas, los routers solo conocen sus redes directamente conectadas.',
+                hint3   : 'Verifica con: show ip route',
+                validate: (sim) => {
+                    const r = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+                    if (!r) return false;
+                    const routes = r.routingTable?.routes || [];
+                    return routes.some(rt =>
+                        (rt.network || rt.destination || '').includes('172.16') && (rt.type === 'S' || rt.static)
+                    );
+                },
+            },
+            {
+                id      : 'verify-vlsm',
+                title   : 'Verificar tabla de rutas completa',
+                desc    : 'Inicia la simulación. El router debe mostrar las 3 subredes /24, /26 y /30.',
+                hint1   : 'Presiona ▶ para iniciar la simulación.',
+                hint2   : 'Selecciona Router1 → tab Rutas.',
+                hint3   : 'Deben aparecer rutas C (conectadas) a 172.16.1.0, 172.16.2.0 y 172.16.3.0.',
+                validate: (sim) => {
+                    if (!sim.simulationRunning) return false;
+                    const r = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+                    const routes = r?.routingTable?.routes || [];
+                    return routes.filter(rt =>
+                        (rt.network || rt.destination || '').startsWith('172.16.')
+                    ).length >= 2;
+                },
+            },
+        ],
+    },
+
+    {
+        id   : 'lab-19',
+        title: '🔄 Lab 19: RIP v2 entre 3 routers',
+        level: 'Intermedio',
+        color: '#34d399',
+        desc : 'Configura RIP versión 2 en tres routers y verifica convergencia automática de rutas.',
+        steps: [
+            {
+                id      : 'add-3-routers',
+                title   : 'Agregar 3 Routers',
+                desc    : 'Coloca 3 Routers en el canvas (R1, R2, R3) en línea o triángulo.',
+                hint1   : 'Renombra los routers: doble clic sobre cada uno.',
+                hint2   : 'R1 — R2 — R3 o R1 — R2, R2 — R3, R1 — R3 (triángulo).',
+                hint3   : 'La topología más común para RIP es en cadena.',
+                validate: (sim) => sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type)).length >= 3,
+            },
+            {
+                id      : 'connect-routers',
+                title   : 'Conectar los routers entre sí',
+                desc    : 'Conecta R1-R2 y R2-R3 con cables. Asigna IPs en subredes punto a punto.',
+                hint1   : 'R1-R2: 10.0.12.1/30 y 10.0.12.2/30',
+                hint2   : 'R2-R3: 10.0.23.1/30 y 10.0.23.2/30',
+                hint3   : 'Usa el panel de IP config de cada router o su CLI.',
+                validate: (sim) => {
+                    const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+                    const routerConns = sim.connections.filter(c =>
+                        ['Router','RouterWifi'].includes(c.from?.type) && ['Router','RouterWifi'].includes(c.to?.type)
+                    );
+                    return routers.length >= 3 && routerConns.length >= 2;
+                },
+            },
+            {
+                id      : 'lan-subnets',
+                title   : 'Agregar LAN a cada router',
+                desc    : 'Conecta al menos una PC a cada router en subredes distintas (192.168.1.x, 192.168.2.x, 192.168.3.x).',
+                hint1   : 'Cada router debe tener su propia LAN de hosts.',
+                hint2   : 'PC en LAN-R1: 192.168.1.x | LAN-R2: 192.168.2.x | LAN-R3: 192.168.3.x',
+                hint3   : 'Configura el gateway de cada PC apuntando a su router local.',
+                validate: (sim) => {
+                    const pcs = sim.devices.filter(d => d.type === 'PC');
+                    const has1 = pcs.some(p => p.ipConfig?.ipAddress?.startsWith('192.168.1.'));
+                    const has2 = pcs.some(p => p.ipConfig?.ipAddress?.startsWith('192.168.2.'));
+                    const has3 = pcs.some(p => p.ipConfig?.ipAddress?.startsWith('192.168.3.'));
+                    return has1 && has2 && (has3 || pcs.length >= 3);
+                },
+            },
+            {
+                id      : 'rip-r1',
+                title   : 'Configurar RIP v2 en R1',
+                desc    : 'En la CLI de R1: activa RIP v2 y anuncia las redes conectadas.',
+                hint1   : 'CLI R1: enable → conf t → router rip → version 2 → network 192.168.1.0 → network 10.0.12.0',
+                hint2   : 'El comando "no auto-summary" es importante en RIP v2.',
+                hint3   : 'Verifica: show rip',
+                validate: (sim) => {
+                    const r1 = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type) && d.rip?.networks?.length > 0);
+                    return !!(r1?.rip?.version === 2 || r1?.rip?.networks?.length > 0);
+                },
+            },
+            {
+                id      : 'rip-all',
+                title   : 'Configurar RIP v2 en R2 y R3',
+                desc    : 'Repite la configuración RIP v2 en R2 (networks: 192.168.2.0, 10.0.12.0, 10.0.23.0) y R3.',
+                hint1   : 'R2 anuncia: 192.168.2.0, 10.0.12.0, 10.0.23.0',
+                hint2   : 'R3 anuncia: 192.168.3.0, 10.0.23.0',
+                hint3   : 'Todos los routers deben tener "router rip" configurado.',
+                validate: (sim) => {
+                    const ripRouters = sim.devices.filter(d =>
+                        ['Router','RouterWifi'].includes(d.type) && d.rip?.networks?.length > 0
+                    );
+                    return ripRouters.length >= 2;
+                },
+            },
+            {
+                id      : 'verify-rip',
+                title   : 'Verificar convergencia RIP',
+                desc    : 'Inicia simulación. Cada router debe ver rutas tipo "R" a las redes remotas.',
+                hint1   : 'Presiona ▶ para simular.',
+                hint2   : 'Selecciona R1 → show ip route. Deben aparecer rutas R 192.168.2.0 y R 192.168.3.0.',
+                hint3   : 'RIP v2 usa métrica de saltos (hop count). Máximo 15 saltos.',
+                validate: (sim) => {
+                    if (!sim.simulationRunning) return false;
+                    const ripRouters = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type) && d.rip);
+                    return ripRouters.length >= 2;
+                },
+            },
+        ],
+    },
+
+    {
+        id   : 'lab-20',
+        title: '🔁 Lab 20: HSRP — High Availability',
+        level: 'Avanzado',
+        color: '#f59e0b',
+        desc : 'Configura HSRP entre dos routers para que las PCs tengan gateway redundante automático.',
+        steps: [
+            {
+                id      : 'two-routers',
+                title   : 'Agregar 2 Routers (R1 activo, R2 standby)',
+                desc    : 'Coloca R1 y R2 en el canvas. Ambos se conectarán al mismo switch y servirán de gateway.',
+                hint1   : 'HSRP permite que dos routers compartan una IP virtual (VIP).',
+                hint2   : 'El router ACTIVE responde al VIP. Si falla, STANDBY toma el control.',
+                hint3   : 'Renombra los routers "R1" y "R2".',
+                validate: (sim) => sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type)).length >= 2,
+            },
+            {
+                id      : 'switch-pcs',
+                title   : 'Agregar Switch y 2 PCs',
+                desc    : 'Conecta R1, R2 y 2 PCs al mismo Switch. Subred: 192.168.10.0/24.',
+                hint1   : 'R1: 192.168.10.1 | R2: 192.168.10.2 | PC1: 192.168.10.10 | PC2: 192.168.10.11',
+                hint2   : 'Las PCs usarán el VIP (192.168.10.254) como gateway.',
+                hint3   : 'Agrega el switch entre los routers y las PCs.',
+                validate: (sim) => {
+                    const sw  = sim.devices.find(d => ['Switch','SwitchPoE'].includes(d.type));
+                    const pcs = sim.devices.filter(d => d.type === 'PC');
+                    return sw && pcs.length >= 2;
+                },
+            },
+            {
+                id      : 'hsrp-r1',
+                title   : 'Configurar HSRP en R1 (Activo)',
+                desc    : 'En CLI de R1: configura HSRP group 1 con VIP 192.168.10.254 y priority 110.',
+                hint1   : 'CLI R1: enable → conf t → interface ETH0 → standby 1 ip 192.168.10.254',
+                hint2   : 'Luego: standby 1 priority 110 → standby 1 preempt',
+                hint3   : 'Priority más alta = router ACTIVE. Default = 100.',
+                validate: (sim) => {
+                    const r1 = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type) && d.hsrp?.enabled);
+                    return !!(r1?.hsrp?.vip || r1?.hsrp?.groups?.[1]?.vip);
+                },
+            },
+            {
+                id      : 'hsrp-r2',
+                title   : 'Configurar HSRP en R2 (Standby)',
+                desc    : 'En CLI de R2: configura HSRP group 1 con VIP 192.168.10.254 y priority 90.',
+                hint1   : 'CLI R2: standby 1 ip 192.168.10.254 → standby 1 priority 90',
+                hint2   : 'R2 tendrá priority 90 < 110 de R1, por lo que será STANDBY.',
+                hint3   : 'Verifica roles: show hsrp en cada router.',
+                validate: (sim) => {
+                    const ripRouters = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type) && d.hsrp?.enabled);
+                    return ripRouters.length >= 2;
+                },
+            },
+            {
+                id      : 'verify-hsrp',
+                title   : 'Verificar roles HSRP',
+                desc    : 'Ejecuta "show hsrp" en R1 y R2. R1 debe ser ACTIVE, R2 debe ser STANDBY.',
+                hint1   : 'CLI: show hsrp (desde modo enable o config)',
+                hint2   : 'R1: Role ACTIVE 🟢 | R2: Role STANDBY 🟡',
+                hint3   : 'Las PCs deben tener gateway 192.168.10.254 (el VIP).',
+                validate: (sim) => {
+                    const activeR  = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type) && d.hsrp?.role === 'active');
+                    const standbyR = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type) && d.hsrp?.role === 'standby');
+                    return !!(activeR && standbyR);
+                },
+            },
+            {
+                id      : 'simulate-failover',
+                title   : 'Simular failover',
+                desc    : 'Inicia la simulación. Verifica que ambos routers están en la topología con el VIP compartido.',
+                hint1   : 'Presiona ▶. En producción, si R1 falla, R2 asume el rol ACTIVE automáticamente.',
+                hint2   : 'El preempt garantiza que R1 recupere el rol ACTIVE cuando vuelva.',
+                hint3   : 'Usa la herramienta "Fallar dispositivo" para simular una caída de R1.',
+                validate: (sim) => {
+                    if (!sim.simulationRunning) return false;
+                    const hsrpRouters = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type) && d.hsrp?.enabled);
+                    return hsrpRouters.length >= 2;
+                },
+            },
+        ],
+    },
+
+    {
+        id   : 'lab-21',
+        title: '🛡 Lab 21: ACLs extendidas TCP/UDP',
+        level: 'Avanzado',
+        color: '#ef4444',
+        desc : 'Crea ACLs extendidas para permitir solo tráfico HTTP/HTTPS y bloquear el resto.',
+        steps: [
+            {
+                id      : 'base-topo',
+                title   : 'Topología base: Router + 2 zonas',
+                desc    : 'Agrega un Router con dos PCs en la zona interna (192.168.1.x) y un Server en la zona externa (10.0.0.x).',
+                hint1   : 'Las ACLs extendidas filtran por IP origen/destino, protocolo y puerto.',
+                hint2   : 'Zona interna: 192.168.1.0/24 | Zona externa: 10.0.0.0/24',
+                hint3   : 'El server simulará un servidor web en 10.0.0.10.',
+                validate: (sim) => {
+                    const r = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+                    const pcs = sim.devices.filter(d => d.type === 'PC');
+                    const srv = sim.devices.find(d => d.type === 'Server');
+                    return r && pcs.length >= 2 && srv;
+                },
+            },
+            {
+                id      : 'server-ip',
+                title   : 'Configurar Server en 10.0.0.10',
+                desc    : 'Asigna IP 10.0.0.10 al Server con gateway en el router (10.0.0.1).',
+                hint1   : 'Selecciona el Server → panel IP Config → IP: 10.0.0.10, Mask: 255.255.255.0',
+                hint2   : 'Gateway del Server: 10.0.0.1 (IP del router en esa interfaz).',
+                hint3   : 'El servidor representará servicios web y DNS.',
+                validate: (sim) => {
+                    const srv = sim.devices.find(d => d.type === 'Server');
+                    return srv?.ipConfig?.ipAddress === '10.0.0.10';
+                },
+            },
+            {
+                id      : 'acl-permit-http',
+                title   : 'Crear ACL que permite HTTP (puerto 80)',
+                desc    : 'En la CLI del router: crea ACL 100 que permite tráfico TCP a 10.0.0.10 en puerto 80.',
+                hint1   : 'CLI: enable → conf t → ip access-list 100 permit tcp 192.168.1.0 0.0.0.255 host 10.0.0.10 eq 80',
+                hint2   : 'Las ACLs extendidas requieren especificar: protocolo, origen, destino y puerto.',
+                hint3   : 'Wildcard mask en ACLs: 0.0.0.255 = /24 (inverso de la máscara de subred).',
+                validate: (sim) => {
+                    const r = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+                    const acls = r?.acls || r?.accessLists || [];
+                    return acls.length > 0 || r?.aclConfigured;
+                },
+            },
+            {
+                id      : 'acl-permit-https',
+                title   : 'Agregar regla HTTPS (puerto 443)',
+                desc    : 'Agrega a ACL 100 una regla que permite TCP al servidor en puerto 443.',
+                hint1   : 'CLI: ip access-list 100 permit tcp 192.168.1.0 0.0.0.255 host 10.0.0.10 eq 443',
+                hint2   : 'Las ACLs se procesan en orden. La primera regla que coincide se aplica.',
+                hint3   : 'HTTPS usa TLS sobre TCP:443.',
+                validate: (sim) => {
+                    const r = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+                    return !!(r?.acls?.length >= 2 || r?.aclConfigured);
+                },
+            },
+            {
+                id      : 'acl-deny-rest',
+                title   : 'Denegar el resto del tráfico',
+                desc    : 'Agrega una regla "deny any any" al final de ACL 100 para bloquear todo lo demás.',
+                hint1   : 'CLI: ip access-list 100 deny ip any any',
+                hint2   : 'Existe una "deny any any" implícita al final de toda ACL, pero es buena práctica hacerla explícita.',
+                hint3   : 'Sin esta regla al final, el tráfico no especificado sería denegado de todos modos (implícito).',
+                validate: (sim) => {
+                    const r = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+                    return !!(r?.acls?.length >= 2 || r?.aclConfigured);
+                },
+            },
+            {
+                id      : 'apply-acl',
+                title   : 'Aplicar ACL a la interfaz de entrada',
+                desc    : 'Aplica ACL 100 en la interfaz LAN del router en dirección "in".',
+                hint1   : 'CLI: interface ETH0 → ip access-group 100 in',
+                hint2   : 'Las ACLs "in" filtran tráfico que entra al router desde esa interfaz.',
+                hint3   : 'Verifica: show ip access-lists en el router.',
+                validate: (sim) => {
+                    const r = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+                    return !!(r?.aclConfigured || sim.simulationRunning);
+                },
+            },
+        ],
+    },
+
+    {
+        id   : 'lab-22',
+        title: '🗺 Lab 22: Rutas estáticas y default route',
+        level: 'Básico',
+        color: '#a78bfa',
+        desc : 'Configura rutas estáticas y una ruta por defecto para salida a Internet.',
+        steps: [
+            {
+                id      : 'three-routers',
+                title   : 'Topología: 3 routers en cadena',
+                desc    : 'Agrega R1 (borde), R2 (distribución) y R3 (core). Conéctalos en cadena.',
+                hint1   : 'R1 — R2 — R3, cada enlace en una subred /30.',
+                hint2   : 'R1-R2: 10.0.1.0/30 | R2-R3: 10.0.2.0/30',
+                hint3   : 'Asigna IPs a las interfaces WAN de cada router.',
+                validate: (sim) => {
+                    const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+                    const rConns  = sim.connections.filter(c =>
+                        ['Router','RouterWifi'].includes(c.from?.type) && ['Router','RouterWifi'].includes(c.to?.type)
+                    );
+                    return routers.length >= 3 && rConns.length >= 2;
+                },
+            },
+            {
+                id      : 'lan-pcs',
+                title   : 'Agregar LAN en R1',
+                desc    : 'Conecta 2 PCs a R1 en la subred 192.168.10.0/24.',
+                hint1   : 'PC1: 192.168.10.10 | PC2: 192.168.10.20 | GW: 192.168.10.1',
+                hint2   : 'Esta es la red que necesitará rutas estáticas para llegar a destinos remotos.',
+                hint3   : 'Configura el gateway de las PCs apuntando a R1.',
+                validate: (sim) => {
+                    const pcs = sim.devices.filter(d => d.type === 'PC');
+                    return pcs.filter(p => p.ipConfig?.ipAddress?.startsWith('192.168.10.')).length >= 2;
+                },
+            },
+            {
+                id      : 'isp-internet',
+                title   : 'Conectar R3 al ISP',
+                desc    : 'Agrega un dispositivo ISP o Internet y conéctalo a R3.',
+                hint1   : 'El ISP representa la salida a Internet.',
+                hint2   : 'Busca "ISP" o "Internet" en el sidebar.',
+                hint3   : 'R3 necesitará una ruta por defecto hacia el ISP.',
+                validate: (sim) => {
+                    const isp = sim.devices.find(d => ['ISP','Internet'].includes(d.type));
+                    const r3  = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+                    return isp && r3.length >= 1;
+                },
+            },
+            {
+                id      : 'static-r1-to-r2',
+                title   : 'Ruta estática en R1 → R2',
+                desc    : 'En R1: agrega ruta estática a todas las redes remotas vía R2.',
+                hint1   : 'CLI R1: ip route 0.0.0.0 0.0.0.0 10.0.1.2  ← default route',
+                hint2   : 'O rutas específicas: ip route 10.0.2.0 255.255.255.252 10.0.1.2',
+                hint3   : 'La ruta 0.0.0.0/0 es la "default route" — captura todo el tráfico sin ruta.',
+                validate: (sim) => {
+                    const r1 = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+                    return !!(r1?.routingTable?.routes?.some(r => r.type === 'S' || r.type === 'static'));
+                },
+            },
+            {
+                id      : 'default-route-r3',
+                title   : 'Default route en R3 → ISP',
+                desc    : 'En R3: configura la ruta por defecto hacia el ISP.',
+                hint1   : 'CLI R3: ip route 0.0.0.0 0.0.0.0 <IP-del-ISP>',
+                hint2   : 'Esta ruta le dice a R3: "todo lo que no conozcas, mándalo al ISP".',
+                hint3   : 'La default route aparece en "show ip route" como S* 0.0.0.0/0.',
+                validate: (sim) => {
+                    const routers = sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type));
+                    return routers.some(r => r.routingTable?.routes?.some(rt => rt.type === 'S' || rt.type === 'static'));
+                },
+            },
+            {
+                id      : 'verify-routes',
+                title   : 'Verificar conectividad end-to-end',
+                desc    : 'Inicia simulación. Los routers deben tener tablas de rutas completas.',
+                hint1   : 'Presiona ▶ y verifica "show ip route" en cada router.',
+                hint2   : 'R1 debe tener ruta S* 0.0.0.0/0 (default route).',
+                hint3   : 'Abre la CLI de R1 y ejecuta: ping 10.0.2.1 para probar reachability.',
+                validate: (sim) => sim.simulationRunning && sim.devices.filter(d => ['Router','RouterWifi'].includes(d.type)).length >= 3,
+            },
+        ],
+    },
+
+    {
+        id   : 'lab-23',
+        title: '📡 Lab 23: DHCP Relay (ip helper-address)',
+        level: 'Avanzado',
+        color: '#22d3ee',
+        desc : 'Configura un servidor DHCP centralizado y usa ip helper-address para servir múltiples VLANs.',
+        steps: [
+            {
+                id      : 'dhcp-server',
+                title   : 'Agregar Server DHCP centralizado',
+                desc    : 'Agrega un Server con IP estática 10.0.0.100 que actuará como servidor DHCP.',
+                hint1   : 'El servidor DHCP centralizado evita tener un servidor por VLAN.',
+                hint2   : 'IP del servidor: 10.0.0.100 | Máscara: 255.255.255.0 | GW: 10.0.0.1',
+                hint3   : 'Este servidor responderá a peticiones DHCP de múltiples subredes.',
+                validate: (sim) => {
+                    const srv = sim.devices.find(d => d.type === 'Server');
+                    return srv?.ipConfig?.ipAddress === '10.0.0.100';
+                },
+            },
+            {
+                id      : 'router-relay',
+                title   : 'Agregar Router con múltiples interfaces',
+                desc    : 'Agrega un Router conectado al DHCP Server y a 2 switches (para 2 VLANs distintas).',
+                hint1   : 'El router actuará como relay agent entre las VLANs y el servidor DHCP.',
+                hint2   : 'R-ETH0: 10.0.0.1/24 (conectado al DHCP server)',
+                hint3   : 'R-ETH1: 192.168.10.1/24 (VLAN 10) | R-ETH2: 192.168.20.1/24 (VLAN 20)',
+                validate: (sim) => {
+                    const r  = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+                    const sw = sim.devices.filter(d => ['Switch','SwitchPoE'].includes(d.type));
+                    return r && sw.length >= 2;
+                },
+            },
+            {
+                id      : 'pcs-dhcp',
+                title   : 'PCs configuradas para DHCP',
+                desc    : 'Agrega 2 PCs en cada switch. Configúralas en modo "DHCP" (no IP estática).',
+                hint1   : 'Selecciona la PC → panel IP Config → activa "DHCP Client".',
+                hint2   : 'O en CLI de la PC: enable → conf t → interface ETH0 → ip address dhcp',
+                hint3   : 'Las PCs enviarán DHCP Discover. El router las reenviará al servidor.',
+                validate: (sim) => {
+                    const pcs = sim.devices.filter(d => d.type === 'PC');
+                    return pcs.some(p => p.dhcpClient || p.ipConfig?.dhcpEnabled || p.ipConfig?.dhcp);
+                },
+            },
+            {
+                id      : 'helper-vlan10',
+                title   : 'Configurar ip helper-address en interfaz VLAN 10',
+                desc    : 'En la interfaz del router hacia la VLAN 10, activa el relay hacia el servidor DHCP.',
+                hint1   : 'CLI: interface ETH1 → ip helper-address 10.0.0.100',
+                hint2   : 'ip helper-address convierte broadcasts DHCP en unicast al servidor.',
+                hint3   : 'Sin helper-address, los DHCP Discover no cruzan el router.',
+                validate: (sim) => {
+                    const r = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+                    const ifaces = Object.values(r?.interfaces || {});
+                    return ifaces.some(i => i.helperAddress || i.helper) ||
+                           r?.dhcpRelay || r?.helperAddress;
+                },
+            },
+            {
+                id      : 'helper-vlan20',
+                title   : 'Configurar ip helper-address en interfaz VLAN 20',
+                desc    : 'Repite ip helper-address en la interfaz hacia VLAN 20.',
+                hint1   : 'CLI: interface ETH2 → ip helper-address 10.0.0.100',
+                hint2   : 'Cada interfaz que da servicio a una VLAN necesita su propio helper.',
+                hint3   : 'El servidor DHCP necesita pools configurados para cada subred.',
+                validate: (sim) => {
+                    const r = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+                    return !!(r?.dhcpRelay || r?.helperAddress || sim.simulationRunning);
+                },
+            },
+            {
+                id      : 'verify-relay',
+                title   : 'Verificar asignación DHCP cross-VLAN',
+                desc    : 'Inicia simulación. Las PCs deben recibir IP del servidor DHCP centralizado.',
+                hint1   : 'Presiona ▶. El servidor DHCP asignará IPs a las PCs en ambas VLANs.',
+                hint2   : 'CLI del servidor: show ip dhcp (o panel DHCP del servidor).',
+                hint3   : 'Las PCs recibirán IPs de 192.168.10.x o 192.168.20.x según su VLAN.',
+                validate: (sim) => {
+                    if (!sim.simulationRunning) return false;
+                    const srv = sim.devices.find(d => d.type === 'Server');
+                    return !!(srv?.dhcpServer || sim.simulationRunning);
+                },
+            },
+        ],
+    },
+
+    {
+        id   : 'lab-24',
+        title: '🔐 Lab 24: SSH seguro en Routers',
+        level: 'Intermedio',
+        color: '#818cf8',
+        desc : 'Configura acceso SSH en un router y deshabilita Telnet para mayor seguridad.',
+        steps: [
+            {
+                id      : 'base-router',
+                title   : 'Router con hostname y dominio',
+                desc    : 'Agrega un Router. Configura hostname "CORE-R1" y domain-name "empresa.com".',
+                hint1   : 'CLI: enable → conf t → hostname CORE-R1',
+                hint2   : 'Luego: ip domain-name empresa.com',
+                hint3   : 'SSH requiere hostname y dominio para generar las claves RSA.',
+                validate: (sim) => {
+                    const r = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+                    return r?.hostname || r?.name !== 'Router';
+                },
+            },
+            {
+                id      : 'generate-rsa',
+                title   : 'Generar claves RSA (crypto key)',
+                desc    : 'Genera el par de claves RSA para SSH en el router.',
+                hint1   : 'CLI: crypto key generate rsa modulus 2048',
+                hint2   : 'Las claves RSA se generan usando el hostname y domain-name configurados.',
+                hint3   : 'Sin claves RSA, el router no puede aceptar conexiones SSH.',
+                validate: (sim) => {
+                    const r = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+                    return !!(r?.sshEnabled || r?.cryptoKey || r?.ssh?.enabled);
+                },
+            },
+            {
+                id      : 'create-user',
+                title   : 'Crear usuario local con contraseña',
+                desc    : 'Crea un usuario "admin" con contraseña "Cisco123!" para autenticación SSH.',
+                hint1   : 'CLI: username admin privilege 15 secret Cisco123!',
+                hint2   : 'privilege 15 da acceso de administrador completo.',
+                hint3   : 'Verifica: show running-config | include username',
+                validate: (sim) => {
+                    const r = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+                    const hasUsers = r?.localUsers &&
+                        (Array.isArray(r.localUsers) ? r.localUsers.length > 0 : Object.keys(r.localUsers).length > 0);
+                    return !!(hasUsers || r?.sshEnabled || r?.users?.length > 0);
+                },
+            },
+            {
+                id      : 'configure-vty',
+                title   : 'Configurar líneas VTY para SSH',
+                desc    : 'Configura las líneas VTY 0-4 para aceptar solo SSH (no Telnet).',
+                hint1   : 'CLI: line vty 0 4 → transport input ssh → login local',
+                hint2   : '"transport input ssh" bloquea Telnet automáticamente.',
+                hint3   : '"login local" usa la base de datos de usuarios locales.',
+                validate: (sim) => {
+                    const r = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+                    const vty = r?.vtyConfig;
+                    return !!(r?.sshEnabled || vty?.transportInput === 'ssh' || vty?.transport === 'ssh' ||
+                              vty?.loginLocal || r?.ssh?.enabled);
+                },
+            },
+            {
+                id      : 'set-ssh-version',
+                title   : 'Forzar SSHv2',
+                desc    : 'Configura el router para aceptar solo SSHv2 (más seguro que SSHv1).',
+                hint1   : 'CLI: ip ssh version 2',
+                hint2   : 'SSHv2 tiene mejor cifrado y autenticación que SSHv1.',
+                hint3   : 'Verifica: show ip ssh',
+                validate: (sim) => {
+                    const r = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+                    return !!(r?.sshVersion === 2 || r?.sshEnabled || r?.ssh?.version === 2 || r?.ssh?.enabled);
+                },
+            },
+            {
+                id      : 'test-ssh',
+                title   : 'Probar conexión SSH desde PC',
+                desc    : 'Agrega una PC, conéctala al router, y prueba SSH desde su CLI.',
+                hint1   : 'En CLI de la PC: ssh -l admin <IP-del-router>',
+                hint2   : 'O usa el comando: ssh admin@<IP> desde la CLI de la PC.',
+                hint3   : 'El router debe aceptar la conexión y pedir contraseña.',
+                validate: (sim) => {
+                    const r   = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+                    const pcs = sim.devices.filter(d => d.type === 'PC');
+                    return pcs.length >= 1 && (r?.sshEnabled || r?.ssh?.enabled) && sim.simulationRunning;
+                },
+            },
+        ],
+    },
+
+    {
+        id   : 'lab-25',
+        title: '🌍 Lab 25: IPv6 con SLAAC y EUI-64',
+        level: 'Avanzado',
+        color: '#60a5fa',
+        desc : 'Configura una red IPv6 completa: router con prefijo /64, PCs con autoconfiguración SLAAC.',
+        steps: [
+            {
+                id      : 'add-router-v6',
+                title   : 'Agregar Router con IPv6 habilitado',
+                desc    : 'Agrega un Router y habilita IPv6 en él.',
+                hint1   : 'CLI: enable → conf t → ipv6 unicast-routing',
+                hint2   : '"ipv6 unicast-routing" activa el forwarding de paquetes IPv6.',
+                hint3   : 'Sin este comando, el router descarta paquetes IPv6.',
+                validate: (sim) => sim.devices.some(d => ['Router','RouterWifi'].includes(d.type)),
+            },
+            {
+                id      : 'ipv6-interface',
+                title   : 'Configurar prefijo IPv6 en la interfaz LAN',
+                desc    : 'En la interfaz LAN del router: asigna 2001:db8:acad:1::1/64.',
+                hint1   : 'CLI: interface ETH0 → ipv6 address 2001:db8:acad:1::1/64 → no shutdown',
+                hint2   : '2001:db8::/32 es el rango reservado para documentación/labs.',
+                hint3   : 'El router usará esta dirección como link-local gateway.',
+                validate: (sim) => {
+                    const r = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+                    return !!(r?.ipv6Address || r?.ipv6Config?.address ||
+                           r?.interfaces?.find?.(i => i.ipv6Config?.address));
+                },
+            },
+            {
+                id      : 'slaac-pcs',
+                title   : 'Agregar PCs con SLAAC automático',
+                desc    : 'Agrega 3 PCs. Activa IPv6 en ellas — recibirán IP automáticamente vía SLAAC.',
+                hint1   : 'SLAAC: Stateless Address AutoConfiguration — no requiere servidor DHCPv6.',
+                hint2   : 'CLI de la PC: enable → conf t → interface ETH0 → ipv6 enable → ipv6 address autoconfig',
+                hint3   : 'El router envía Router Advertisements (RA) con el prefijo /64.',
+                validate: (sim) => {
+                    const pcs = sim.devices.filter(d => d.type === 'PC');
+                    return pcs.length >= 3 && pcs.some(p =>
+                        p.ipv6Address || p.ipv6Config || p.ipv6Enabled ||
+                        p.interfaces?.some(i => i.ipv6Config?.address || i.ipv6LinkLocal)
+                    );
+                },
+            },
+            {
+                id      : 'eui64',
+                title   : 'Verificar EUI-64 en las PCs',
+                desc    : 'Las PCs generan su IPv6 con EUI-64: usan su MAC + FF:FE en el medio.',
+                hint1   : 'EUI-64 toma la MAC (48 bits) y la expande a 64 bits insertando FF:FE.',
+                hint2   : 'Ejemplo: MAC 00:1A:2B:3C:4D:5E → IPv6 host: 021A:2BFF:FE3C:4D5E',
+                hint3   : 'Show: ipv6 interface brief en la PC para ver la dirección generada.',
+                validate: (sim) => {
+                    const pcs = sim.devices.filter(d => d.type === 'PC');
+                    return pcs.some(p =>
+                        p.ipv6Address?.includes(':') || p.ipv6Config?.address ||
+                        p.interfaces?.some(i => i.ipv6Config?.address || i.ipv6LinkLocal)
+                    );
+                },
+            },
+            {
+                id      : 'link-local',
+                title   : 'Verificar direcciones Link-Local (FE80::)',
+                desc    : 'Cada interfaz IPv6 genera automáticamente una dirección link-local FE80::/10.',
+                hint1   : 'CLI router: show ipv6 interface ETH0',
+                hint2   : 'La link-local se usa para comunicación en el mismo segmento (neighbor discovery).',
+                hint3   : 'Link-local: FE80::1/10 (no routable — solo local al segmento).',
+                validate: (sim) => {
+                    const r = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+                    return !!(r?.ipv6Address || r?.ipv6Config || r?.interfaces?.ETH0?.ipv6Address || sim.simulationRunning);
+                },
+            },
+            {
+                id      : 'ping6-verify',
+                title   : 'Verificar conectividad con ping6',
+                desc    : 'Inicia simulación. Prueba ping6 desde una PC al router (2001:db8:acad:1::1).',
+                hint1   : 'CLI de la PC: ping6 2001:db8:acad:1::1',
+                hint2   : 'O desde el router: ping6 <IPv6-de-la-PC>',
+                hint3   : 'También puedes hacer traceroute6 para ver la ruta.',
+                validate: (sim) => {
+                    if (!sim.simulationRunning) return false;
+                    const r   = sim.devices.find(d => ['Router','RouterWifi'].includes(d.type));
+                    const pcs = sim.devices.filter(d => d.type === 'PC');
+                    return r && pcs.length >= 3 && (r?.ipv6Address || r?.ipv6Config || r?.ipv6Enabled ||
+                           r?.interfaces?.some(i => i.ipv6Config?.address));
+                },
+            },
+        ],
+    },
+
+    {
+        id   : 'lab-26',
+        title: '🏡 Lab 26: Red doméstica con WiFi',
+        level: 'Intermedio',
+        color: '#f97316',
+        desc : 'Diseña una red doméstica con router WiFi, PCs, teléfono y acceso a Internet.',
+        steps: [
+            {
+                id      : 'home-router',
+                title   : 'Agregar Router WiFi',
+                desc    : 'Coloca un Router WiFi en el canvas y conéctalo a Internet usando un ISP.',
+                hint1   : 'El ISP suele representar la salida a Internet en el simulador.',
+                hint2   : 'Conecta el router WiFi al ISP con un cable.',
+                hint3   : 'El router WiFi manejará tráfico LAN y WiFi doméstico.',
+                validate: (sim) => sim.devices.some(d => d.type === 'RouterWifi'),
+            },
+            {
+                id      : 'home-devices',
+                title   : 'Agregar PCs y teléfono',
+                desc    : 'Agrega al menos 2 PCs y un teléfono / Laptop a tu red doméstica.',
+                hint1   : 'Puedes usar cables o conexiones WiFi para los dispositivos.',
+                hint2   : 'Asegúrate de que los dispositivos estén conectados al router.',
+                hint3   : 'La red doméstica no debe tener switches obligatorios.',
+                validate: (sim) => {
+                    const pcs = sim.devices.filter(d => d.type === 'PC');
+                    return pcs.length >= 2 && sim.devices.some(d => d.type === 'Phone');
+                },
+            },
+            {
+                id      : 'home-ips',
+                title   : 'Asignar IPs privadas',
+                desc    : 'Configura direcciones 192.168.0.x en las PCs y el router.',
+                hint1   : 'Usa la máscara 255.255.255.0 para la red doméstica.',
+                hint2   : 'El router debe tener una IP en la misma subred.',
+                hint3   : 'PCs pueden usar 192.168.0.10 y 192.168.0.11, por ejemplo.',
+                validate: (sim) => {
+                    const pcs = sim.devices.filter(d => d.type === 'PC');
+                    return pcs.every(p => p.ipConfig?.ipAddress?.startsWith('192.168.0.'));
+                },
+            },
+            {
+                id      : 'home-dhcp',
+                title   : 'Configurar DHCP',
+                desc    : 'Activa DHCP en el Router WiFi para que las PCs obtengan IP automáticamente.',
+                hint1   : 'Busca la sección DHCP en el panel del router.',
+                hint2   : 'Si no hay DHCP, asigna ips manualmente y aun así valida.',
+                hint3   : 'Una red doméstica suele usar DHCP para los clientes.',
+                validate: (sim) => {
+                    const router = sim.devices.find(d => d.type === 'RouterWifi');
+                    return !!(router?.dhcpServer || router?.dhcpPools?.length);
+                },
+            },
+            {
+                id      : 'home-sim',
+                title   : 'Iniciar simulación y probar internet',
+                desc    : 'Inicia la simulación para activar el WiFi y el tráfico LAN.',
+                hint1   : 'Presiona el botón ▶ para iniciar.',
+                hint2   : 'Verifica que el router WiFi esté en línea.',
+                hint3   : 'Comprueba que las PCs y el teléfono se conectan al router.',
+                validate: (sim) => sim.simulationRunning,
+            },
+        ],
+    },
+
+    {
+        id   : 'lab-27',
+        title: '📷 Lab 27: Red CCTV con cámaras PoE',
+        level: 'Intermedio',
+        color: '#0ea5e9',
+        desc : 'Crea una red de CCTV con cámaras IP, DVR y switch PoE.',
+        steps: [
+            {
+                id      : 'cctv-switch',
+                title   : 'Agregar Switch PoE',
+                desc    : 'Coloca un Switch PoE y conéctalo a un Router/Firewall.',
+                hint1   : 'El Switch PoE alimenta cámaras IP directamente.',
+                hint2   : 'Conecta el switch a un Router o Firewall para enrutar tráfico.',
+                hint3   : 'Un switch PoE tiene puertos Ethernet para cámaras.',
+                validate: (sim) => sim.devices.some(d => d.type === 'SwitchPoE'),
+            },
+            {
+                id      : 'cctv-cameras',
+                title   : 'Agregar al menos 3 Cámaras IP',
+                desc    : 'Agrega 3 Cameras y conéctalas al Switch PoE.',
+                hint1   : 'Las cámaras deben usar el switch PoE para energía y datos.',
+                hint2   : 'En la red CCTV, las cámaras suelen estar en VLAN separada.',
+                hint3   : 'Asegúrate de ver al menos 3 cámaras conectadas al switch.',
+                validate: (sim) => {
+                    const sw = sim.devices.find(d => d.type === 'SwitchPoE');
+                    return sw && sim.devices.filter(d => d.type === 'Camera').length >= 3;
+                },
+            },
+            {
+                id      : 'cctv-dvr',
+                title   : 'Agregar un DVR/Servidor de video',
+                desc    : 'Coloca un DVR o Server en la misma red CCTV y conéctalo al switch.',
+                hint1   : 'El DVR guarda el video de las cámaras IP.',
+                hint2   : 'Puede ser un dispositivo DVR o un Server configurado como grabador.',
+                hint3   : 'Conecta el DVR al mismo switch PoE.',
+                validate: (sim) => sim.devices.some(d => ['DVR','Server'].includes(d.type)),
+            },
+            {
+                id      : 'cctv-ips',
+                title   : 'Asignar IPs CCTV',
+                desc    : 'Configura IPs 192.168.10.x a las cámaras y al DVR.',
+                hint1   : 'Usa máscara 255.255.255.0 para la red CCTV.',
+                hint2   : 'Los dispositivos de CCTV deben estar en el mismo segmento.',
+                hint3   : 'Las cámaras pueden usar 192.168.10.11, 12, 13 y el DVR 192.168.10.20.',
+                validate: (sim) => sim.devices.filter(d => d.type === 'Camera').every(c => c.ipConfig?.ipAddress?.startsWith('192.168.10.')),
+            },
+            {
+                id      : 'cctv-sim',
+                title   : 'Iniciar simulación CCTV',
+                desc    : 'Inicia la simulación y verifica que la topología CCTV está activa.',
+                hint1   : 'Presiona ▶ para iniciar el motor de red.',
+                hint2   : 'Las cámaras deben permanecer en línea sin errores de conexión.',
+                hint3   : 'Un switch PoE activo es clave para la red CCTV.',
+                validate: (sim) => sim.simulationRunning,
+            },
+        ],
+    },
+
+    {
+        id   : 'lab-28',
+        title: '🏫 Lab 28: Red escolar básica',
+        level: 'Intermedio',
+        color: '#8b5cf6',
+        desc : 'Diseña una red de escuela con aulas, administración y WiFi.',
+        steps: [
+            {
+                id      : 'school-router',
+                title   : 'Agregar un Router de escuela',
+                desc    : 'Coloca un Router y conéctalo a Internet mediante un ISP.',
+                hint1   : 'El Router será el gateway principal de la escuela.',
+                hint2   : 'Conecta el router al ISP con un cable físico.',
+                hint3   : 'La escuela necesita acceso a Internet para clases y administración.',
+                validate: (sim) => sim.devices.some(d => ['Router','RouterWifi'].includes(d.type)),
+            },
+            {
+                id      : 'school-switches',
+                title   : 'Agregar switches para aulas y administración',
+                desc    : 'Coloca al menos 2 switches y conéctalos al router.',
+                hint1   : 'Un switch puede atender varias PCs de una aula.',
+                hint2   : 'Conecta cada switch al router o entre ellos si deseas redundancia.',
+                hint3   : 'La topología típica de escuela es árbol (router → switches).',
+                validate: (sim) => sim.devices.filter(d => ['Switch','SwitchPoE'].includes(d.type)).length >= 2,
+            },
+            {
+                id      : 'school-devices',
+                title   : 'Agregar PCs y APs',
+                desc    : 'Agrega al menos 4 PCs y 1 Access Point para WiFi en el aula.',
+                hint1   : 'Los APs proveen WiFi para estudiantes y profesores.',
+                hint2   : 'Conecta los PCs y el AP al switch correspondiente.',
+                hint3   : 'Las aulas suelen combinar conexiones cableadas e inalámbricas.',
+                validate: (sim) => sim.devices.filter(d => d.type === 'PC').length >= 4 && sim.devices.some(d => d.type === 'AP'),
+            },
+            {
+                id      : 'school-subnets',
+                title   : 'Configurar subredes para Aulas y Administración',
+                desc    : 'Usa 192.168.20.x para aulas y 192.168.30.x para administración.',
+                hint1   : 'Asigna IPs con máscara 255.255.255.0.',
+                hint2   : 'El router debe tener una IP en cada subred.',
+                hint3   : 'Esto permite separar los tráficos de estudiantes y staff.',
+                validate: (sim) => {
+                    const pcs = sim.devices.filter(d => d.type === 'PC');
+                    return pcs.some(p => p.ipConfig?.ipAddress?.startsWith('192.168.20.')) &&
+                           pcs.some(p => p.ipConfig?.ipAddress?.startsWith('192.168.30.'));
+                },
+            },
+            {
+                id      : 'school-wifi',
+                title   : 'Activar WiFi y verificar',
+                desc    : 'Inicia simulación y comprueba que el AP ofrece cobertura en el aula.',
+                hint1   : 'Presiona ▶ para iniciar el motor de red.',
+                hint2   : 'Selecciona el AP y revisa su estado en el panel.',
+                hint3   : 'Los clientes inalámbricos deben poder conectarse al AP.',
+                validate: (sim) => sim.simulationRunning && sim.devices.some(d => d.type === 'AP'),
+            },
+        ],
+    },
+
+    {
+        id   : 'lab-29',
+        title: '🌍 Lab 29: Red multisite con VPN',
+        level: 'Avanzado',
+        color: '#14b8a6',
+        desc : 'Crea dos sitios remotos conectados por un túnel VPN o rutas estáticas.',
+        steps: [
+            {
+                id      : 'site-a',
+                title   : 'Configurar Site A',
+                desc    : 'Agrega un Router y un Switch para el primer sitio.',
+                hint1   : 'Site A representa una sucursal local.',
+                hint2   : 'Conecta una o dos PCs al switch.',
+                hint3   : 'El router deber tener una red privada interna.',
+                validate: (sim) => sim.devices.filter(d => d.type === 'Router').length >= 1 &&
+                                      sim.devices.filter(d => ['Switch','SwitchPoE'].includes(d.type)).length >= 1,
+            },
+            {
+                id      : 'site-b',
+                title   : 'Configurar Site B',
+                desc    : 'Agrega un segundo Router y otro Switch para el segundo sitio.',
+                hint1   : 'Site B será la sucursal remota.',
+                hint2   : 'Incluye al menos 1 PC en el sitio B.',
+                hint3   : 'Ambos sitios deben poder alcanzar Internet o una nube.',
+                validate: (sim) => sim.devices.filter(d => d.type === 'Router').length >= 2,
+            },
+            {
+                id      : 'internet-backbone',
+                title   : 'Conectar ambos sitios a Internet',
+                desc    : 'Agrega un ISP o Internet y conecta los routers de ambos sitios.',
+                hint1   : 'Cada sitio debe tener salida a la nube/ISP.',
+                hint2   : 'Esto permite establecer un VPN o ruta entre ellos.',
+                hint3   : 'Puedes usar un solo ISP y conectar ambos routers a él.',
+                validate: (sim) => sim.devices.filter(d => d.type === 'ISP').length >= 1,
+            },
+            {
+                id      : 'vpn-tunnel',
+                title   : 'Configurar túnel VPN entre sites',
+                desc    : 'Habilita VPN en los routers para que los sitios se vean como una sola red.',
+                hint1   : 'Busca la opción VPN en los routers o configura rutas estáticas.',
+                hint2   : 'Ambos routers deben poder alcanzar la IP pública del otro.',
+                hint3   : 'Un túnel site-to-site conecta dos redes privadas.',
+                validate: (sim) => sim.devices.filter(d => d.type === 'Router').length >= 2,
+            },
+            {
+                id      : 'multisite-test',
+                title   : 'Verificar conectividad entre sitios',
+                desc    : 'Inicia la simulación y prueba ping entre una PC de Site A y Site B.',
+                hint1   : 'Un ping entre dos subredes remotas valida la VPN.',
+                hint2   : 'Usa direcciones IP de cada sitio para la prueba.',
+                hint3   : 'Si no hay VPN, el ping debe fallar entre sitios.',
+                validate: (sim) => sim.simulationRunning,
+            },
+        ],
+    },
+
+    {
+        id   : 'lab-30',
+        title: '🏨 Lab 30: Red de hotel con guest WiFi',
+        level: 'Intermedio',
+        color: '#22c55e',
+        desc : 'Diseña una red de hotel con red privada, WiFi de invitados y NAT a Internet.',
+        steps: [
+            {
+                id      : 'hotel-router',
+                title   : 'Agregar Router y ISP',
+                desc    : 'Coloca un Router y conéctalo a Internet mediante un ISP.',
+                hint1   : 'El router será el gateway para la red del hotel.',
+                hint2   : 'Conecta el router al ISP con un cable.',
+                hint3   : 'El hotel necesita acceso a Internet para huéspedes.',
+                validate: (sim) => sim.devices.some(d => d.type === 'Router'),
+            },
+            {
+                id      : 'hotel-ap',
+                title   : 'Agregar Access Point para huéspedes',
+                desc    : 'Coloca un AP y conéctalo al router o switch del hotel.',
+                hint1   : 'El AP provee WiFi para los huéspedes.',
+                hint2   : 'Puedes tener una red hotelera y otra de invitados.',
+                hint3   : 'Un solo AP puede servir para varios dispositivos.',
+                validate: (sim) => sim.devices.some(d => d.type === 'AP'),
+            },
+            {
+                id      : 'hotel-guest',
+                title   : 'Agregar PCs/Laptops de huéspedes',
+                desc    : 'Agrega 2 Laptops/PCs y conéctalas al AP o switch.',
+                hint1   : 'Los huéspedes usan la red guest para navegar.',
+                hint2   : 'Asegúrate de que los dispositivos tienen IP válida.',
+                hint3   : 'Un hotel típico separa red interna y guest.',
+                validate: (sim) => sim.devices.filter(d => ['Laptop','PC'].includes(d.type)).length >= 2,
+            },
+            {
+                id      : 'hotel-nat',
+                title   : 'Configurar NAT en el router',
+                desc    : 'Activa NAT para que los huéspedes accedan a Internet con IP pública.',
+                hint1   : 'La interfaz WAN del router debe ser NAT outside.',
+                hint2   : 'La red de huéspedes debe ser NATeada hacia el ISP.',
+                hint3   : 'Sin NAT, no hay acceso a Internet desde IPs privadas.',
+                validate: (sim) => {
+                    const r = sim.devices.find(d => d.type === 'Router');
+                    return !!(r?.natRules || r?.natEnabled || r?.ipConfig?.gateway);
+                },
+            },
+            {
+                id      : 'hotel-sim',
+                title   : 'Iniciar simulación y validar WiFi',
+                desc    : 'Inicia la simulación y revisa que los huéspedes tienen conectividad.',
+                hint1   : 'Presiona ▶ para iniciar la red.',
+                hint2   : 'Verifica el AP y las laptops conectadas al mismo.',
+                hint3   : 'La red de hotel debe estar activa y sin errores.',
+                validate: (sim) => sim.simulationRunning,
+            },
+        ],
+    },
+
+    {
+        id   : 'lab-31',
+        title: '📞 Lab 31: Red de oficina con VoIP',
+        level: 'Intermedio',
+        color: '#f472b6',
+        desc : 'Crea una red de oficina con teléfonos IP y voz sobre IP.',
+        steps: [
+            {
+                id      : 'voip-router',
+                title   : 'Agregar Router y Switch',
+                desc    : 'Coloca un Router y un Switch para la red de oficina.',
+                hint1   : 'La red VoIP necesita buen enroutamiento y QoS opcional.',
+                hint2   : 'Conecta el switch al router para distribuir voz y datos.',
+                hint3   : 'Un switch estándar puede conectar teléfonos y PCs.',
+                validate: (sim) => sim.devices.some(d => d.type === 'Router') && sim.devices.some(d => d.type === 'Switch'),
+            },
+            {
+                id      : 'voip-phones',
+                title   : 'Agregar teléfonos IP',
+                desc    : 'Coloca al menos 2 IP Phones y conéctalos al switch.',
+                hint1   : 'Los teléfonos IP usan Ethernet para voz y datos.',
+                hint2   : 'Un número de teléfono por dispositivo ayuda a testear llamadas.',
+                hint3   : 'La voz puede coexistir con datos en la misma red.',
+                validate: (sim) => sim.devices.filter(d => d.type === 'IPPhone').length >= 2,
+            },
+            {
+                id      : 'voip-server',
+                title   : 'Agregar un servidor de voz o PBX',
+                desc    : 'Coloca un Server en la red para gestionar las llamadas VoIP.',
+                hint1   : 'El Server será el controlador de llamadas.',
+                hint2   : 'Conéctalo al mismo switch que los IP Phones.',
+                hint3   : 'Un PBX virtual usa el servidor para centralizar VoIP.',
+                validate: (sim) => sim.devices.some(d => d.type === 'Server'),
+            },
+            {
+                id      : 'voip-setup',
+                title   : 'Configurar IPs y puertas de enlace',
+                desc    : 'Asigna IPs a los teléfonos, servidor y router en la misma red.',
+                hint1   : 'Usa una red como 192.168.50.0/24 para la oficina.',
+                hint2   : 'Las IP Phones deben tener gateway apuntando al router.',
+                hint3   : 'El Server y los teléfonos deben poder comunicarse entre sí.',
+                validate: (sim) => sim.devices.filter(d => ['IPPhone','Server'].includes(d.type)).every(d => d.ipConfig?.ipAddress),
+            },
+            {
+                id      : 'voip-test',
+                title   : 'Verificar llamadas y conectividad',
+                desc    : 'Inicia la simulación y asegura que la red VoIP permanece estable.',
+                hint1   : 'Presiona ▶ para activar la simulación.',
+                hint2   : 'Los dispositivos deben aparecer conectados en la topología.',
+                hint3   : 'Una red VoIP estable necesita enrutamiento y QoS opcional.',
+                validate: (sim) => sim.simulationRunning,
+            },
+        ],
+    },
+
+    {
+        id   : 'lab-32',
+        title: '💼 Lab 32: Red de coworking con WiFi',
+        level: 'Intermedio',
+        color: '#c084fc',
+        desc : 'Diseña una red de coworking con WiFi, laptops y separación de invitados.',
+        steps: [
+            {
+                id      : 'cowork-router',
+                title   : 'Agregar Router y Switch',
+                desc    : 'Coloca un Router y un Switch que sirvan al espacio de coworking.',
+                hint1   : 'Un espacio de coworking suele tener muchos clientes temporales.',
+                hint2   : 'Conecta el switch al router para distribución de red.',
+                hint3   : 'El router puede gestionar NAT y rutas de invitados.',
+                validate: (sim) => sim.devices.some(d => d.type === 'Router') && sim.devices.some(d => d.type === 'Switch'),
+            },
+            {
+                id      : 'cowork-aps',
+                title   : 'Agregar Access Points',
+                desc    : 'Coloca al menos 2 APs para cobertura inalámbrica en el coworking.',
+                hint1   : 'Los APs ayudan a distribuir la señal WiFi a múltiples clientes.',
+                hint2   : 'Conéctalos al switch para que reciban red.',
+                hint3   : 'Al menos uno puede servir a una red guest separada.',
+                validate: (sim) => sim.devices.filter(d => d.type === 'AP').length >= 2,
+            },
+            {
+                id      : 'cowork-laptops',
+                title   : 'Agregar laptops de coworking',
+                desc    : 'Agrega 3 laptops y conéctalas al AP o al switch.',
+                hint1   : 'Los coworkers usan laptops en la red pública y privada.',
+                hint2   : 'Asegura que todos los dispositivos tienen IPs válidas.',
+                hint3   : 'Una laptop puede estar conectada por cable o WiFi.',
+                validate: (sim) => sim.devices.filter(d => d.type === 'Laptop').length >= 3,
+            },
+            {
+                id      : 'cowork-guest',
+                title   : 'Configurar red de invitados',
+                desc    : 'Crea una red guest separada o asigna IPs de un rango distinto.',
+                hint1   : 'La red guest ofrece acceso limitado a Internet.',
+                hint2   : 'Puedes usar 192.168.60.x para el guest y 192.168.70.x para staff.',
+                hint3   : 'Separar guest y staff mejora la seguridad.',
+                validate: (sim) => sim.devices.some(d => d.ipConfig?.ipAddress?.startsWith('192.168.60.')) || sim.devices.some(d => d.ipConfig?.ipAddress?.startsWith('192.168.70.')),
+            },
+            {
+                id      : 'cowork-sim',
+                title   : 'Iniciar simulación y validar cobertura',
+                desc    : 'Inicia la simulación y confirma que el WiFi de coworking funciona.',
+                hint1   : 'Presiona ▶ para iniciar el motor de red.',
+                hint2   : 'Revisa el estado de los APs y las laptops conectadas.',
+                hint3   : 'La simulación debe mostrar la red activa sin desconexiones.',
+                validate: (sim) => sim.simulationRunning,
+            },
+        ],
+    },
+
+    {
+        id   : 'lab-33',
+        title: '🛰️ Lab 33: Red ISP local con ONT',
+        level: 'Avanzado',
+        color: '#22c55e',
+        desc : 'Crea una pequeña red ISP con ONT, Router, y clientes residenciales.',
+        steps: [
+            {
+                id      : 'isp-ont',
+                title   : 'Agregar ISP y ONT',
+                desc    : 'Coloca un ISP y un ONT para representar la cabecera de red.',
+                hint1   : 'El ONT convierte fibra a Ethernet para el router.',
+                hint2   : 'Conecta el ONT al ISP y al router.',
+                hint3   : 'Esta topología simula una instalación FTTH doméstica.',
+                validate: (sim) => sim.devices.some(d => d.type === 'ISP') && sim.devices.some(d => d.type === 'ONT'),
+            },
+            {
+                id      : 'isp-router',
+                title   : 'Agregar Router de cliente',
+                desc    : 'Coloca un Router en el cliente final y conéctalo al ONT.',
+                hint1   : 'El router del cliente obtiene una IP pública del ISP.',
+                hint2   : 'Conecta el router al ONT con un cable.',
+                hint3   : 'El router provee NAT para la red residencial.',
+                validate: (sim) => sim.devices.some(d => d.type === 'Router'),
+            },
+            {
+                id      : 'isp-clients',
+                title   : 'Agregar PCs o laptops residenciales',
+                desc    : 'Agrega al menos 2 dispositivos finales y conéctalos al router.',
+                hint1   : 'Los clientes usan la red privada detrás del router.',
+                hint2   : 'Pueden ser PCs, laptops o teléfonos.',
+                hint3   : 'El router debe proveer IPs privadas en la LAN.',
+                validate: (sim) => sim.devices.filter(d => ['PC','Laptop','Phone'].includes(d.type)).length >= 2,
+            },
+            {
+                id      : 'isp-nat',
+                title   : 'Configurar NAT en el router del cliente',
+                desc    : 'Activa NAT para que los clientes accedan a Internet.',
+                hint1   : 'La interfaz WAN del router debe estar en la red pública.',
+                hint2   : 'El router traduce IPs privadas a la IP del ONT.',
+                hint3   : 'Sin NAT, los clientes no navegarán a Internet.',
+                validate: (sim) => {
+                    const router = sim.devices.find(d => d.type === 'Router');
+                    return !!(router?.natEnabled || router?.natRules?.length || router?.ipConfig?.gateway);
+                },
+            },
+            {
+                id      : 'isp-test',
+                title   : 'Iniciar simulación y probar acceso a Internet',
+                desc    : 'Inicia la simulación y verifica que los clientes tienen conectividad.',
+                hint1   : 'Presiona ▶ para iniciar la simulación.',
+                hint2   : 'Comprueba que las PCs y laptops obtienen IPs válidas.',
+                hint3   : 'La red ISP debería parecer una red doméstica con acceso público.',
+                validate: (sim) => sim.simulationRunning,
+            },
+        ],
+    },
+
+    {
+        id   : 'lab-34',
+        title: '🏥 Lab 34: Red de hospital con CCTV y datos',
+        level: 'Avanzado',
+        color: '#ef4444',
+        desc : 'Diseña una red de hospital con cámaras, PCs de datos y VLANs de servicio.',
+        steps: [
+            {
+                id      : 'hospital-switch',
+                title   : 'Agregar Switch y Router',
+                desc    : 'Coloca un Router y un Switch que sirvan la red del hospital.',
+                hint1   : 'Un hospital requiere segmentación entre datos y CCTV.',
+                hint2   : 'Conecta el switch al router para direccionamiento.',
+                hint3   : 'El router puede manejar múltiples redes internas.',
+                validate: (sim) => sim.devices.some(d => d.type === 'Router') && sim.devices.some(d => d.type === 'Switch'),
+            },
+            {
+                id      : 'hospital-cameras',
+                title   : 'Agregar cámaras CCTV',
+                desc    : 'Coloca al menos 2 Cameras y conéctalas al switch.',
+                hint1   : 'Las cámaras suelen estar en una VLAN separada.',
+                hint2   : 'Un switch PoE es ideal si tienes cámaras IP.',
+                hint3   : 'Conecta las cámaras físicamente al switch.',
+                validate: (sim) => sim.devices.filter(d => d.type === 'Camera').length >= 2,
+            },
+            {
+                id      : 'hospital-pcs',
+                title   : 'Agregar PCs de administración',
+                desc    : 'Coloca al menos 2 PCs para administración hospitalaria.',
+                hint1   : 'Los PCs deben estar conectados al switch y a la red del hospital.',
+                hint2   : 'Pueden usar una subred distinta a las cámaras.',
+                hint3   : 'Cada PC debe tener una dirección IP válida.',
+                validate: (sim) => sim.devices.filter(d => d.type === 'PC').length >= 2,
+            },
+            {
+                id      : 'hospital-segmentation',
+                title   : 'Configurar subredes separadas',
+                desc    : 'Usa 10.0.10.x para datos y 10.0.20.x para CCTV.',
+                hint1   : 'El router debe tener una IP en cada subred.',
+                hint2   : 'Así separas tráfico de vigilancia y administrativo.',
+                hint3   : 'Una VLAN para CCTV mejora la seguridad.',
+                validate: (sim) => {
+                    const pcs = sim.devices.filter(d => d.type === 'PC');
+                    const cams = sim.devices.filter(d => d.type === 'Camera');
+                    return pcs.some(p => p.ipConfig?.ipAddress?.startsWith('10.0.10.')) &&
+                           cams.some(c => c.ipConfig?.ipAddress?.startsWith('10.0.20.'));
+                },
+            },
+            {
+                id      : 'hospital-sim',
+                title   : 'Iniciar simulación y verificar que todo está activo',
+                desc    : 'Inicia la simulación y confirma que la topología hospitalaria funciona.',
+                hint1   : 'Presiona ▶ para activar la red.',
+                hint2   : 'Revisa que las cámaras y PCs estén conectadas.',
+                hint3   : 'La red de hospital debe ser estable y segmentada.',
+                validate: (sim) => sim.simulationRunning,
+            },
+        ],
+    },
+
+    {
+        id   : 'lab-35',
+        title: '🏬 Lab 35: Red de centro comercial con CCTV',
+        level: 'Avanzado',
+        color: '#f59e0b',
+        desc : 'Crea una red comercial con CCTV, WiFi de clientes y punto de ventas.',
+        steps: [
+            {
+                id      : 'mall-router',
+                title   : 'Agregar Router y Switch',
+                desc    : 'Coloca un Router y un Switch para la red del centro comercial.',
+                hint1   : 'El switch interconecta cámaras, APs y puntos de venta.',
+                hint2   : 'Conecta el switch al router para acceso externo.',
+                hint3   : 'La red del mall combina datos de clientes y seguridad.',
+                validate: (sim) => sim.devices.some(d => d.type === 'Router') && sim.devices.some(d => d.type === 'Switch'),
+            },
+            {
+                id      : 'mall-cameras',
+                title   : 'Agregar cámaras de seguridad',
+                desc    : 'Coloca al menos 3 Cameras y conéctalas al switch.',
+                hint1   : 'Las cámaras monitorean zonas del centro comercial.',
+                hint2   : 'Preferiblemente usa un Switch PoE si está disponible.',
+                hint3   : 'Conecta todas las cámaras al mismo switch.',
+                validate: (sim) => sim.devices.filter(d => d.type === 'Camera').length >= 3,
+            },
+            {
+                id      : 'mall-pos',
+                title   : 'Agregar puntos de venta y un servidor',
+                desc    : 'Agrega 2 PCs/Laptops para punto de venta y un Server.',
+                hint1   : 'Los POS pueden ser PCs o laptops conectadas al switch.',
+                hint2   : 'El servidor puede alojar la base de datos de ventas.',
+                hint3   : 'Asegúrate de que el servidor y los POS están en la topología.',
+                validate: (sim) => sim.devices.filter(d => ['PC','Laptop'].includes(d.type)).length >= 2 && sim.devices.some(d => d.type === 'Server'),
+            },
+            {
+                id      : 'mall-wifi',
+                title   : 'Agregar WiFi para clientes',
+                desc    : 'Coloca un AP y conéctalo al switch para ofrecer WiFi público.',
+                hint1   : 'El AP da cobertura para visitantes del centro comercial.',
+                hint2   : 'Puede ser la misma red o una red guest separada.',
+                hint3   : 'Conecta el AP al switch con un cable.',
+                validate: (sim) => sim.devices.some(d => d.type === 'AP'),
+            },
+            {
+                id      : 'mall-sim',
+                title   : 'Simulación activa del centro comercial',
+                desc    : 'Inicia la simulación y verifica que la red CCTV y WiFi está operativa.',
+                hint1   : 'Presiona ▶ para iniciar la red.',
+                hint2   : 'Verifica que cámaras, AP y puntos de venta están conectados.',
+                hint3   : 'La topología debe ser estable con todos los nodos activos.',
+                validate: (sim) => sim.simulationRunning,
             },
         ],
     },
@@ -1797,17 +3069,30 @@ class LabGuide {
     }
 
     _renderMenu(el) {
+        // Load saved progress
+        let progress = {};
+        try { progress = JSON.parse(localStorage.getItem('netops_lab_progress') || '{}'); } catch(e) {}
+        const completedCount = Object.values(progress).filter(p => p.completed).length;
+
         el.innerHTML = `<div class="lab-menu">
   <div class="lab-menu-title">Elige un laboratorio</div>
-  ${LABS.map(lab => `
-  <div class="lab-card" data-lab="${lab.id}" style="border-left:3px solid ${lab.color}">
+  ${completedCount > 0 ? `<div style="font-size:9px;color:#4ade80;padding:4px 0 6px;border-bottom:1px solid rgba(74,222,128,.15);margin-bottom:8px">
+    🏆 ${completedCount} de ${LABS.length} labs completados — ${Math.round(completedCount/LABS.length*100)}%
+  </div>` : ''}
+  ${LABS.map(lab => {
+      const done     = progress[lab.id]?.completed;
+      const timeMin  = done ? Math.floor((progress[lab.id].timeMs||0)/60000) : null;
+      const badgeEl  = done ? `<span style="font-size:8px;color:#4ade80;margin-left:4px">✅ ${timeMin !== null ? timeMin+'min' : ''}</span>` : '';
+      return `
+  <div class="lab-card" data-lab="${lab.id}" style="border-left:3px solid ${lab.color}${done?';opacity:.85':''}">
     <div class="lab-card-header">
-      <div class="lab-card-title">${lab.title}</div>
+      <div class="lab-card-title">${lab.title}${badgeEl}</div>
       <div class="lab-card-level" style="background:${lab.color}22;color:${lab.color};border:1px solid ${lab.color}44">${lab.level}</div>
     </div>
     <div class="lab-card-desc">${lab.desc}</div>
-    <div class="lab-card-steps">${lab.steps.length} pasos</div>
-  </div>`).join('')}
+    <div class="lab-card-steps">${lab.steps.length} pasos${done ? ' — <span style="color:#4ade80">Completado ✓</span>' : ''}</div>
+  </div>`;
+  }).join('')}
 </div>`;
 
         el.querySelectorAll('.lab-card').forEach(card => {
@@ -1869,6 +3154,7 @@ class LabGuide {
             this._render();
         });
         el.querySelector('#lb-skip').addEventListener('click', () => {
+            this._skippedSteps = (this._skippedSteps || 0) + 1;
             window.labChecker?.onStepSkipped();
             this._nextStep(true);
         });
@@ -1908,11 +3194,12 @@ class LabGuide {
     /* ── Lógica de lab ───────────────────────────────────────────── */
 
     _startLab(lab) {
-        this._currentLab  = lab;
-        this._currentStep = 0;
-        this._hintLevel   = 0;
-        this._startTime   = Date.now();
-        this._mode        = 'lab';
+        this._currentLab   = lab;
+        this._currentStep  = 0;
+        this._hintLevel    = 0;
+        this._skippedSteps = 0;
+        this._startTime    = Date.now();
+        this._mode         = 'lab';
 
         // Timer de UI cada segundo
         if (this._timer) clearInterval(this._timer);
@@ -1931,6 +3218,18 @@ class LabGuide {
             if (this._timer) clearInterval(this._timer);
             const elapsed = this._startTime ? Date.now() - this._startTime : 0;
             window.labChecker?.onLabComplete(this._currentLab.id, elapsed);
+            // ── Persistir progreso en localStorage ────────────────────
+            try {
+                const key  = 'netops_lab_progress';
+                const data = JSON.parse(localStorage.getItem(key) || '{}');
+                data[this._currentLab.id] = {
+                    completed : true,
+                    timeMs    : elapsed,
+                    date      : new Date().toISOString(),
+                    skipped   : this._skippedSteps || 0,
+                };
+                localStorage.setItem(key, JSON.stringify(data));
+            } catch(e) {}
         }
         this._render();
     }
@@ -2015,6 +3314,6 @@ window._labInit = function(sim) {
         if (window.labGuide._validTimer) clearInterval(window.labGuide._validTimer);
     }
     window.labGuide = new LabGuide(sim);
-    console.log('[LabGuide] ✅ Inicializado — 5 laboratorios disponibles');
+    console.log('[LabGuide] ✅ Inicializado — 25 laboratorios disponibles (Labs 1-25, incluyendo CCNA 18-25)');
     return window.labGuide;
 };

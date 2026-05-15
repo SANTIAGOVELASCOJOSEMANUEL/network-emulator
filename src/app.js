@@ -12,19 +12,44 @@ document.addEventListener('DOMContentLoaded', () => {
     const $ = id => document.getElementById(id);
 
     // ── PacketAnimator — animación visual de paquetes ─────────────────
-    if (typeof window._paInit === 'function') {
-        window._paInit(simulator);
-    }
+    import('./visualizers/packet-animator.js').then(({ initPacketAnimator }) => {
+        initPacketAnimator(simulator);
+    }).catch(e => console.warn('PacketAnimator no disponible:', e));
+
+    // ── TCP Visualizer — handshake educativo ─────────────────────────
+    import('./visualizers/tcp-visualizer.js').then(({ initTCPVisualizer }) => {
+        initTCPVisualizer(simulator);
+    }).catch(e => console.warn('TCP Visualizer no disponible:', e));
 
     // ── ARPVisualizer — proceso ARP educativo ─────────────────────────
-    if (typeof window._arpVizInit === 'function') {
-        window._arpVizInit(simulator);
-    }
+    import('./visualizers/arp-visualizer.js').then(({ initARPVisualizer }) => {
+        initARPVisualizer(simulator);
+    }).catch(e => console.warn('ARP Visualizer no disponible:', e));
 
-    // ── RoutingVisualizer — convergencia OSPF/RIP dinámica ───────────
-    if (typeof window._rvInit === 'function') {
-        window._rvInit(simulator);
-    }
+    // ── DHCPVisualizer — tabla de leases DHCP ─────────────────────────
+    import('./visualizers/dhcp-visualizer.js').then(({ initDHCPVisualizer }) => {
+        initDHCPVisualizer(simulator);
+    }).catch(e => console.warn('DHCP Visualizer no disponible:', e));
+
+    // ── NATVisualizer — traducciones NAT/PAT ─────────────────────────
+    import('./visualizers/nat-visualizer.js').then(({ initNATVisualizer }) => {
+        initNATVisualizer(simulator);
+    }).catch(e => console.warn('NAT Visualizer no disponible:', e));
+
+    // ── PacketInspector — inspector de paquetes ─────────────────────
+    import('./visualizers/packet-inspector.js').then(({ initPacketInspector }) => {
+        initPacketInspector(simulator);
+    }).catch(e => console.warn('PacketInspector no disponible:', e));
+
+    // ── PacketLifecycleVisualizer — ciclo de vida del paquete ───────
+    import('./visualizers/packet-lifecycle-visualizer.js').then(({ initPacketLifecycleVisualizer }) => {
+        initPacketLifecycleVisualizer(simulator);
+    }).catch(e => console.warn('PacketLifecycleVisualizer no disponible:', e));
+
+    // ── SDWANVisualizer — gestión SD-WAN ─────────────────────────
+    import('./visualizers/sdwan-visualizer.js').then(({ initSDWANVisualizer }) => {
+        initSDWANVisualizer(simulator);
+    }).catch(e => console.warn('SDWANVisualizer no disponible:', e));
 
     // ── LabGuide — laboratorio guiado ────────────────────────────────
     if (typeof window._labInit === 'function') {
@@ -37,35 +62,63 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // -- BGP
-    if (typeof window._bgpInit === 'function') { window._bgpInit(simulator); }
+    import('./protocols/bgp.js').then(({ initBGP }) => {
+        initBGP(simulator);
+    }).catch(e => console.warn('BGP no disponible:', e));
 
     // -- STP
-    if (typeof window._stpInit === 'function') { window._stpInit(simulator); }
+    import('./protocols/stp.js').then(({ initSTP }) => {
+        initSTP(simulator);
+    }).catch(e => console.warn('STP no disponible:', e));
 
     // -- MPLS
-    if (typeof window._mplsInit === 'function') { window._mplsInit(simulator); }
+    import('./protocols/mpls.js').then(({ initMPLS }) => {
+        initMPLS(simulator);
+    }).catch(e => console.warn('MPLS no disponible:', e));
 
     // -- VPN
-    if (typeof window._vpnInit === 'function') { window._vpnInit(simulator); }
+    import('./protocols/vpn.js').then(({ initVPN }) => {
+        initVPN(simulator);
+    }).catch(e => console.warn('VPN no disponible:', e));
 
     // -- QoS
-    if (typeof window._qosInit === 'function') { window._qosInit(simulator); }
+    import('./protocols/qos.js').then(({ initQoS }) => {
+        initQoS(simulator);
+    }).catch(e => console.warn('QoS no disponible:', e));
 
     // -- IPConfigPanel
-    if (typeof window._ipConfigPanelInit === 'function') { window._ipConfigPanelInit(simulator); }
+    import('./ui/ip-config-panel.js').then(({ initIPConfigPanel }) => {
+        initIPConfigPanel(simulator);
+    }).catch(e => console.warn('IPConfigPanel no disponible:', e));
 
     // -- DeviceSearch
-    if (typeof window._deviceSearchInit === 'function') { window._deviceSearchInit(simulator); }
+    import('./ui/device-search.js').then(({ initDeviceSearch }) => {
+        initDeviceSearch(simulator);
+    }).catch(e => console.warn('DeviceSearch no disponible:', e));
 
     // -- EnhancedExporter
-    if (typeof window._enhancedExportInit === 'function') { window._enhancedExportInit(simulator); }
+    import('./ui/export-enhanced.js').then(({ initEnhancedExporter }) => {
+        initEnhancedExporter(simulator);
+    }).catch(e => console.warn('EnhancedExporter no disponible:', e));
 
     // -- ProjectManager
-    if (typeof window._projectManagerInit === 'function') { window._projectManagerInit(simulator); }
+    import('./ui/project-manager.js').then(({ initProjectManager }) => {
+        initProjectManager(simulator);
+    }).catch(e => console.warn('ProjectManager no disponible:', e));
+
+    // -- TelemetryDashboard
+    import('./ui/telemetry-dashboard.js').then(({ initTelemetryDashboard }) => {
+        initTelemetryDashboard(simulator);
+    }).catch(e => console.warn('TelemetryDashboard no disponible:', e));
+
+    // -- IPv6Engine
+    import('./protocols/ipv6.js').then(({ initIPv6Engine }) => {
+        initIPv6Engine(simulator);
+    }).catch(e => console.warn('IPv6Engine no disponible:', e));
 
     // ── Autocargar topología guardada ────────────────────────────────
     try {
-        const loaded = loadNetwork(simulator);
+        const loaded = loadNetwork(simulator, {});
         if (loaded) {
             setTimeout(() => {
                 updateCounts();
@@ -98,7 +151,19 @@ document.addEventListener('DOMContentLoaded', () => {
         simulator.draw();
     };
 
-    startAutoSave(simulator, 30000);
+    startAutoSave(simulator, {}, 30000);
+
+    // ── Optimización de rendimiento: throttling de draw ─────────────────
+    let drawRequested = false;
+    function throttledDraw() {
+        if (!drawRequested) {
+            drawRequested = true;
+            requestAnimationFrame(() => {
+                simulator.draw();
+                drawRequested = false;
+            });
+        }
+    }
 
     let mode = 'select';
     let isDragging = false, dragDev = null, dragOffX = 0, dragOffY = 0;
@@ -131,6 +196,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function _checkTopologyWarning(d1, d2, i1, i2) {
+        // Guardia: si algún dispositivo o interfaz es null, no hay advertencia que mostrar
+        if (!d1 || !d2 || !i1 || !i2) return null;
         const t1 = d1.type, t2 = d2.type;
         const role1 = i1.type, role2 = i2.type;
 
@@ -223,11 +290,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ── Theme ────────────────────────────────────────
     function applyTheme() {
+        document.body.style.transition = 'background-color 0.3s ease, color 0.3s ease';
         document.body.classList.toggle('light-mode', !darkMode);
         simulator.darkMode = darkMode;
         simulator.draw();
         const btn = $('darkModeToggle');
         if (btn) btn.innerHTML = darkMode ? '<span class="icon">☀️</span> Claro' : '<span class="icon">🌙</span> Oscuro';
+        setTimeout(() => document.body.style.transition = '', 300); // Remover transición después
     }
     const saved = localStorage.getItem('theme') || 'dark';
     darkMode = saved === 'dark';
@@ -366,6 +435,63 @@ document.addEventListener('DOMContentLoaded', () => {
     $('undoBtn')?.addEventListener('click', _undo);
     $('redoBtn')?.addEventListener('click', _redo);
 
+    // ── Inline annotation input (reemplaza prompt nativo) ─────────────
+    function _showInlineAnnotationInput(clientX, clientY, wx, wy) {
+        const existing = document.getElementById('_ann-input-wrap');
+        if (existing) existing.remove();
+        const wrap = document.createElement('div');
+        wrap.id = '_ann-input-wrap';
+
+        // ── Calcular posición segura dentro del viewport ─────────────
+        // El input mide aprox 260px de ancho y 38px de alto.
+        // Si el cursor está demasiado cerca del borde derecho o inferior,
+        // anclar al borde opuesto para que no quede fuera de pantalla.
+        const INPUT_W = 268, INPUT_H = 42;
+        const vw = window.innerWidth, vh = window.innerHeight;
+        const safeLeft = Math.min(clientX - 10, vw - INPUT_W - 8);
+        const safeTop  = Math.min(clientY - 18, vh - INPUT_H - 8);
+
+        wrap.style.cssText = `position:fixed;left:${Math.max(4, safeLeft)}px;top:${Math.max(4, safeTop)}px;z-index:9999;display:flex;gap:4px;align-items:center;background:#1e293b;border:1px solid #6366f1;border-radius:8px;padding:5px 8px;box-shadow:0 4px 20px rgba(0,0,0,.6)`;
+        const inp = document.createElement('input');
+        inp.type = 'text';
+        inp.placeholder = 'Comentario / etiqueta…';
+        inp.style.cssText = 'background:transparent;border:none;outline:none;color:#e2e8f0;font-size:13px;width:200px;font-family:inherit';
+        const btn = document.createElement('button');
+        btn.textContent = '✓';
+        btn.style.cssText = 'background:#6366f1;border:none;border-radius:4px;color:#fff;cursor:pointer;padding:2px 7px;font-size:13px';
+        wrap.appendChild(inp); wrap.appendChild(btn);
+        document.body.appendChild(wrap);
+        inp.focus();
+
+        // Evitar que eventos dentro del wrap burbujeen y lo cierren al instante.
+        wrap.addEventListener('pointerdown', e => e.stopPropagation());
+        wrap.addEventListener('pointerup',   e => e.stopPropagation());
+        wrap.addEventListener('click',      e => e.stopPropagation());
+
+        const commit = () => {
+            const txt = inp.value.trim();
+            if (txt) { simulator.addAnnotation(wx, wy, txt); _snapshot(); }
+            wrap.remove();
+            document.removeEventListener('pointerup', away); // limpiar siempre al confirmar
+        };
+        btn.onclick = commit;
+        inp.addEventListener('keydown', e => {
+            if (e.key === 'Enter') { commit(); }
+            if (e.key === 'Escape') { wrap.remove(); document.removeEventListener('pointerup', away); }
+        });
+
+        // Cerrar si el usuario hace click fuera del wrap.
+        // Usar pointerup en lugar de pointerdown para evitar conflicto con el mousedown inicial.
+        function away(ev) {
+            if (!wrap.contains(ev.target)) {
+                wrap.remove();
+                document.removeEventListener('pointerup', away);
+            }
+        }
+        setTimeout(() => document.addEventListener('pointerup', away), 10);
+    }
+
+
     // ── Mode management ──────────────────────────────
     function setMode(m) {
         mode = m;
@@ -426,6 +552,47 @@ document.addEventListener('DOMContentLoaded', () => {
         $('connectionStatus').className = 'status-value online';
         if ($('startSimulation')) $('startSimulation').style.opacity = '0.5';
         if ($('stopSimulation'))  $('stopSimulation').style.opacity  = '1';
+
+        // ── Auto-arrancar protocolos de routing dinámico ─────────────
+        // OSPF: arranca si hay routers con ospfNetworks configuradas
+        setTimeout(() => {
+            try {
+                if (typeof window._ospfStart === 'function') {
+                    const ospfRouters = (simulator.devices || []).filter(d =>
+                        d.ospfNetworks?.length > 0 || d.routingProtocol === 'ospf'
+                    );
+                    if (ospfRouters.length >= 1) {
+                        window._ospfStart();
+                        window.networkConsole?.writeToConsole('📡 OSPF: motor iniciado automáticamente — ' + ospfRouters.length + ' router(s)');
+                    }
+                }
+            } catch(e) { console.warn('[OSPF autostart]', e); }
+
+            // RIP: arranca buildRoutingTables para poblar rutas tipo R
+            try {
+                const ripRouters = (simulator.devices || []).filter(d =>
+                    d.rip?.networks?.length > 0 || d.routingProtocol === 'rip'
+                );
+                if (ripRouters.length >= 1 && typeof buildRoutingTables === 'function') {
+                    buildRoutingTables(simulator.devices || [], simulator.connections || []);
+                    ripRouters.forEach(r => {
+                        if (r.routingTable?.routes) r.routingTable.routes.forEach(rt => { if (!rt.type) rt.type = 'R'; });
+                    });
+                    window.networkConsole?.writeToConsole('🔄 RIP v2: convergencia calculada — ' + ripRouters.length + ' router(s)');
+                }
+            } catch(e) { console.warn('[RIP autostart]', e); }
+
+            // BGP: conectar sesiones pendientes
+            try {
+                if (typeof BGPEngine !== 'undefined' && BGPEngine.connectAll) {
+                    const bgpRouters = (simulator.devices || []).filter(d => d.bgp?.neighbors?.length > 0);
+                    if (bgpRouters.length >= 1) {
+                        BGPEngine.connectAll(simulator.devices || []);
+                        window.networkConsole?.writeToConsole('🌍 BGP: sesiones iniciadas — ' + bgpRouters.length + ' speaker(s)');
+                    }
+                }
+            } catch(e) {}
+        }, 400);
     });
     $('stopSimulation')?.addEventListener('click', () => {
         simulator.stopSimulation();
@@ -462,7 +629,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
     $('openTrafficBtn')?.addEventListener('click', () => { toggleAdvBtn('openTrafficBtn'); window.trafficMonitor?.toggle(); });
     $('openFaultBtn')?.addEventListener('click',   () => { toggleAdvBtn('openFaultBtn');   window.faultSimulator?.toggle(); });
+    $('openTroubleshootBtn')?.addEventListener('click', () => { window.troubleshootMode ? window.troubleshootMode.showMenu() : (window.troubleshootMode = new TroubleshootMode(simulator), window.troubleshootMode.showMenu()); });
     $('openEventLogBtn')?.addEventListener('click',() => { toggleAdvBtn('openEventLogBtn');window.eventLog?.toggle(); });
+    $('openTerminalBtn')?.addEventListener('click', () => { toggleAdvBtn('openTerminalBtn'); window.networkTerminal?.toggle(); });
+    $('openInventoryBtn')?.addEventListener('click', () => {
+        toggleAdvBtn('openInventoryBtn');
+        const modal = document.getElementById('inventoryModal');
+        if (!modal) return;
+        const isOpen = modal.style.display === 'flex';
+        modal.style.display = isOpen ? 'none' : 'flex';
+        if (!isOpen) window.renderInventoryPage?.();
+    });
+    document.getElementById('inventoryCloseBtn')?.addEventListener('click', () => {
+        const modal = document.getElementById('inventoryModal');
+        if (modal) modal.style.display = 'none';
+    });
 
     // Botones rail: modulos avanzados de red
     $('openBGPBtn')?.addEventListener('click',  () => { toggleAdvBtn('openBGPBtn');  window.bgpManager?.show(); });
@@ -516,14 +697,16 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!window.FirewallEngine)window.FirewallEngine= new FirewallEngineClass(simulator);
         if (!window.trafficMonitor)window.trafficMonitor= new TrafficMonitor(simulator);
         if (!window.faultSimulator)window.faultSimulator= new FaultSimulator(simulator);
+        if (!window.troubleshootMode && window.TroubleshootMode) window.troubleshootMode = new TroubleshootMode(simulator);
         if (!window.networkDiag)   window.networkDiag   = new NetworkDiagnostics(simulator);
         if (!window.eventLog)      window.eventLog      = new EventLog();
+        if (!window.networkTerminal && window.NetworkTerminal) window.networkTerminal = new NetworkTerminal(simulator);
         // Hook network events into log
         const origConnect = simulator.connectDevices.bind(simulator);
         simulator.connectDevices = function(d1, d2, i1, i2, ls) {
             const r = origConnect(d1, d2, i1, i2, ls);
             if (r.success) {
-                window.eventLog?.add(`🔗 Enlace creado: ${d1?.name} ↔ ${d2?.name}`, '•', 'ok');
+                window.eventLog?.add('ok', `🔗 Enlace creado: ${d1?.name} ↔ ${d2?.name}`);
                 // Propagar SSID del AC a cualquier AP que se acabe de conectar
                 if (d1?.type === 'AC' && d2?.type === 'AP') d1.propagateSSID(simulator.connections||[]);
                 if (d2?.type === 'AC' && d1?.type === 'AP') d2.propagateSSID(simulator.connections||[]);
@@ -535,7 +718,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const origAdd = simulator.addDevice.bind(simulator);
         simulator.addDevice = function(type, x, y) {
             const d = origAdd(type, x, y);
-            if (d) window.eventLog?.add(`➕ Dispositivo agregado: ${d.name} (${d.type})`, '•', 'info');
+            if (d) window.eventLog?.add('info', `➕ Dispositivo agregado: ${d.name} (${d.type})`);
             return d;
         };
 
@@ -543,7 +726,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const origSendPing = simulator.sendPing?.bind(simulator);
         if (origSendPing) {
             simulator.sendPing = function(src, dst) {
-                window.eventLog?.add(`📡 Ping: ${src?.name} → ${dst?.name}`, '•', 'info');
+                window.eventLog?.add('info', `📡 Ping: ${src?.name} → ${dst?.name}`);
                 return origSendPing(src, dst);
             };
         }
@@ -569,6 +752,44 @@ document.addEventListener('DOMContentLoaded', () => {
             window.HTTPEngine._sim = window.simulator;
         }
     }, 500);
+
+    // ── OSPF Engine: inicialización y reconexión cuando cambia la topología ──
+    // ospf-engine.js define OSPFEngine pero nunca lo arranca — lo hacemos aquí.
+    setTimeout(() => {
+        const sim = window.simulator;
+        if (!sim || !window.OSPFEngine) return;
+
+        const startOSPF = () => {
+            if (window._ospfEngine) window._ospfEngine.destroy();
+            const engine = new window.OSPFEngine();
+            // Poblar con los routers que tienen ospfNetworks configurado
+            engine.routers = (sim.devices || []).filter(d =>
+                d.ospfNetworks?.length || d.routing === 'ospf' || d.ospf
+            );
+            if (engine.routers.length > 0) {
+                engine.initialize();
+                window._ospfEngine = engine;
+                console.log(`[OSPF] Motor iniciado con ${engine.routers.length} router(s)`);
+            }
+        };
+
+        // Arranque inicial
+        startOSPF();
+
+        // Re-arrancar OSPF cuando se añaden/quitan dispositivos o conexiones
+        const _origAddDevice = sim.addDevice?.bind(sim);
+        if (_origAddDevice) {
+            sim.addDevice = (...args) => {
+                const dev = _origAddDevice(...args);
+                setTimeout(startOSPF, 300);
+                return dev;
+            };
+        }
+
+        // Escuchar evento personalizado que algunos módulos emiten al configurar OSPF
+        window.addEventListener('ospf:configure', startOSPF);
+        window.addEventListener('device:ospfEnabled', startOSPF);
+    }, 600);
 
     // ── Fix #1 & #2: Inicializar MetricsDashboard, TrafficGenerator y LinkConfigPanel
     //    desde app.js para que estén disponibles sin necesidad de abrir advanced.js ──
@@ -629,7 +850,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const result = _origConnect(...args);
             if (result?.success && window.eventLog) {
                 const [d1,,d2] = args;
-                window.eventLog.add(`Cable: ${d1?.name}↔${d2?.name} conectados`);
+                window.eventLog.add('ok', `Cable: ${d1?.name}↔${d2?.name} conectados`);
             }
             // Propagar SSID del AC si se conecta un AP
             if (result?.success) {
@@ -994,7 +1215,26 @@ document.addEventListener('DOMContentLoaded', () => {
         c.innerHTML = h;
 
         // Bind events
-        $('devName')?.addEventListener('change', e => { device.name = e.target.value; simulator.draw(); });
+        $('devName')?.addEventListener('input', e => {
+            const val = e.target.value.trim();
+            const invalidChars = /[^a-zA-Z0-9\-_\s]/;
+            if (val === '') {
+                e.target.setCustomValidity('El nombre no puede estar vacío');
+            } else if (invalidChars.test(val)) {
+                e.target.setCustomValidity('Solo letras, números, espacios, guiones y guiones bajos');
+            } else if (val.length > 20) {
+                e.target.setCustomValidity('Máximo 20 caracteres');
+            } else {
+                e.target.setCustomValidity('');
+            }
+            e.target.reportValidity();
+        });
+        $('devName')?.addEventListener('change', e => { 
+            if (e.target.checkValidity()) {
+                device.name = e.target.value.trim(); 
+                simulator.draw(); 
+            }
+        });
         $('devSSID')?.addEventListener('change', e => { device.ssid = e.target.value; });
         $('devOpMode')?.addEventListener('change', e => {
             if (device.setOperationMode) { device.setOperationMode(e.target.value); simulator.draw(); }
@@ -1189,7 +1429,7 @@ document.addEventListener('DOMContentLoaded', () => {
     simulator.canvas.addEventListener('mousedown', e => {
         const sc = sCoords(e), wc = simulator.screenToWorld(sc.x, sc.y);
         if (e.altKey || mode === 'pan') { isPanDrag = true; simulator.startPan(sc.x, sc.y); simulator.canvas.style.cursor = 'grabbing'; return; }
-        if (mode === 'text') { const txt = prompt('Texto / comentario:'); if (txt?.trim()) { simulator.addAnnotation(wc.x, wc.y, txt.trim()); } setMode('select'); return; }
+        if (mode === 'text') { _showInlineAnnotationInput(e.clientX, e.clientY, wc.x, wc.y); setMode('select'); return; }
 
         const ann = simulator.findAnnotationAt(wc.x, wc.y);
         if (ann && mode === 'select') { dragAnnotation = ann; ann.selected = true; simulator.draw(); return; }
@@ -1263,8 +1503,8 @@ document.addEventListener('DOMContentLoaded', () => {
     simulator.canvas.addEventListener('mousemove', e => {
         const sc = sCoords(e), wc = simulator.screenToWorld(sc.x, sc.y);
         if (isPanDrag) { simulator.doPan(sc.x, sc.y); return; }
-        if (isDragging && dragDev) { dragDev.x = wc.x - dragOffX; dragDev.y = wc.y - dragOffY; simulator.draw(); return; }
-        if (dragAnnotation) { dragAnnotation.x = wc.x; dragAnnotation.y = wc.y; simulator.draw(); return; }
+        if (isDragging && dragDev) { dragDev.x = wc.x - dragOffX; dragDev.y = wc.y - dragOffY; throttledDraw(); return; }
+        if (dragAnnotation) { dragAnnotation.x = wc.x; dragAnnotation.y = wc.y; throttledDraw(); return; }
 
         // Tooltip — sobre interfaces (modo cable) y sobre cables (todos los modos)
         const dev = simulator.findDeviceAt(wc.x, wc.y);
@@ -1662,9 +1902,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const exBtn = document.createElement('button');
     exBtn.className = 'btn';
     exBtn.innerHTML = '<span class="icon">📋</span> Ejemplo';
-    exBtn.addEventListener('click', () => { buildExample(); _snapshot(); });
-    lg?.appendChild(exBtn);
-
+    // Conectar el boton HTML real (id="exampleBtn") al menu de plantillas
     // ── Plantillas de topologías ──────────────────────────────────────
     const TEMPLATES = [
         {
@@ -1686,7 +1924,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 pc2.name    = 'PC2'; pc2.ipConfig    = { ipAddress: '192.168.1.11', subnetMask: '255.255.255.0', gateway: '192.168.1.1' };
                 pc3.name    = 'PC3'; pc3.ipConfig    = { ipAddress: '192.168.1.12', subnetMask: '255.255.255.0', gateway: '192.168.1.1' };
 
-                const c = (a, b) => sim.connectDevices(a, b, a.interfaces[0], b.interfaces[0]);
+                const c = (a, b) => { const r = sim.connectDevices(a, b); if (r && !r.success) console.warn('[TPL]', a.name, '↔', b.name, r.message); return r; };
                 c(inet, router); c(router, sw); c(sw, pc1); c(sw, pc2); c(sw, pc3);
             },
         },
@@ -1716,7 +1954,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 pc4.name  = 'PC-B2'; pc4.ipConfig = { ipAddress: '192.168.2.11', subnetMask: '255.255.255.0', gateway: '192.168.2.1' };
                 lap.name  = 'Laptop-B'; lap.ipConfig = { ipAddress: '192.168.2.12', subnetMask: '255.255.255.0', gateway: '192.168.2.1' };
 
-                const c = (a, b) => sim.connectDevices(a, b, a.interfaces[0], b.interfaces[0]);
+                const c = (a, b) => { const r = sim.connectDevices(a, b); if (r && !r.success) console.warn('[TPL]', a.name, '↔', b.name, r.message); return r; };
                 c(isp, fw); c(fw, r1); c(r1, sw1); c(r1, sw2);
                 c(sw1, pc1); c(sw1, pc2); c(sw1, srv);
                 c(sw2, pc3); c(sw2, pc4); c(sw2, lap);
@@ -1745,13 +1983,197 @@ document.addEventListener('DOMContentLoaded', () => {
                 ['PC-A1','PC-A2','PC-A3'].forEach((n, i) => { [pc1,pc2,pc3][i].name = n; [pc1,pc2,pc3][i].ipConfig = { ipAddress: `192.168.10.${10+i}`, subnetMask: '255.255.255.0', gateway: '192.168.10.1' }; });
                 ['PC-B1','PC-B2','PC-B3'].forEach((n, i) => { [pc4,pc5,pc6][i].name = n; [pc4,pc5,pc6][i].ipConfig = { ipAddress: `192.168.20.${10+i}`, subnetMask: '255.255.255.0', gateway: '192.168.20.1' }; });
 
-                const c = (a, b) => sim.connectDevices(a, b, a.interfaces[0], b.interfaces[0]);
+                const c = (a, b) => { const r = sim.connectDevices(a, b); if (r && !r.success) console.warn('[TPL]', a.name, '↔', b.name, r.message); return r; };
                 c(inet, r1); c(inet, r2); c(r1, sw1); c(r2, sw2);
                 c(sw1, srv1); c(sw1, pc1); c(sw1, pc2); c(sw1, pc3);
                 c(sw2, srv2); c(sw2, pc4); c(sw2, pc5); c(sw2, pc6);
             },
         },
+        {
+            name: '🏨 Hotel / Hospitality',
+            desc: 'ISP → Firewall → Router → Switch core → APs por piso + servidor',
+            build(sim) {
+                sim.clear();
+                const isp  = sim.addDevice('ISP', 500, 50);
+                const fw   = sim.addDevice('Firewall', 500, 180);
+                const rtr  = sim.addDevice('Router', 500, 320);
+                const swC  = sim.addDevice('Switch', 500, 460);
+                const ap1  = sim.addDevice('AP', 180, 600);
+                const ap2  = sim.addDevice('AP', 500, 600);
+                const ap3  = sim.addDevice('AP', 820, 600);
+                const srv  = sim.addDevice('Server', 820, 460);
+                const lap1 = sim.addDevice('Laptop', 100, 750);
+                const lap2 = sim.addDevice('Laptop', 280, 750);
+                const ph1  = sim.addDevice('Phone', 430, 750);
+                const ph2  = sim.addDevice('Phone', 580, 750);
+                const lap3 = sim.addDevice('Laptop', 740, 750);
+                const pc1  = sim.addDevice('PC', 920, 750);
+
+                isp.name  = 'ISP-Hotel';  isp.ipConfig  = { ipAddress: '200.5.5.1', subnetMask: '255.255.255.0', gateway: '' };
+                fw.name   = 'FW-Perimetral'; fw.ipConfig = { ipAddress: '10.0.0.1', subnetMask: '255.255.255.0', gateway: '200.5.5.1' };
+                rtr.name  = 'Router-Core'; rtr.ipConfig  = { ipAddress: '192.168.0.1', subnetMask: '255.255.255.0', gateway: '10.0.0.1' };
+                swC.name  = 'SW-Core';
+                ap1.name  = 'AP-Piso1'; ap2.name = 'AP-Piso2'; ap3.name = 'AP-Piso3';
+                srv.name  = 'Servidor-Hotel'; srv.ipConfig = { ipAddress: '192.168.0.100', subnetMask: '255.255.255.0', gateway: '192.168.0.1' };
+                ['Huesped1','Huesped2'].forEach((n,i) => { [lap1,lap2][i].name=n; [lap1,lap2][i].ipConfig={ipAddress:`192.168.1.${10+i}`,subnetMask:'255.255.255.0',gateway:'192.168.0.1'}; });
+                ['Movil1','Movil2'].forEach((n,i) => { [ph1,ph2][i].name=n; [ph1,ph2][i].ipConfig={ipAddress:`192.168.1.${20+i}`,subnetMask:'255.255.255.0',gateway:'192.168.0.1'}; });
+                lap3.name='Admin'; lap3.ipConfig={ipAddress:'192.168.0.50',subnetMask:'255.255.255.0',gateway:'192.168.0.1'};
+                pc1.name='PC-Recepcion'; pc1.ipConfig={ipAddress:'192.168.0.51',subnetMask:'255.255.255.0',gateway:'192.168.0.1'};
+
+                const c = (a, b) => { const r = sim.connectDevices(a, b); if (r && !r.success) console.warn('[TPL]', a.name, '↔', b.name, r.message); return r; };
+                c(isp, fw); c(fw, rtr); c(rtr, swC); c(swC, srv);
+                c(swC, ap1); c(swC, ap2); c(swC, ap3);
+                c(ap1, lap1); c(ap1, lap2);
+                c(ap2, ph1); c(ap2, ph2);
+                c(ap3, lap3); c(ap3, pc1);
+            },
+        },
+        {
+            name: '🏭 Red Industrial / SCADA',
+            desc: 'Internet → Firewall → Router → Red OT con PLCs y HMI + Red IT',
+            build(sim) {
+                sim.clear();
+                const inet = sim.addDevice('Internet', 500, 40);
+                const fw   = sim.addDevice('Firewall', 500, 170);
+                const rtr  = sim.addDevice('Router', 500, 310);
+                const swIT = sim.addDevice('Switch', 250, 450);
+                const swOT = sim.addDevice('Switch', 750, 450);
+                const srv  = sim.addDevice('Server', 100, 600);
+                const pc1  = sim.addDevice('PC', 280, 600);
+                const pc2  = sim.addDevice('PC', 420, 600);
+                const hmi  = sim.addDevice('ControlTerminal', 600, 600);
+                const pc3  = sim.addDevice('PC', 780, 600);
+                const pc4  = sim.addDevice('PC', 920, 600);
+
+                inet.name = 'Internet'; inet.ipConfig = { ipAddress: '8.8.8.8', subnetMask: '255.0.0.0', gateway: '' };
+                fw.name   = 'FW-Industrial'; fw.ipConfig = { ipAddress: '10.0.0.1', subnetMask: '255.255.255.0', gateway: '' };
+                rtr.name  = 'Router-DMZ'; rtr.ipConfig  = { ipAddress: '172.16.0.1', subnetMask: '255.255.255.0', gateway: '10.0.0.1' };
+                swIT.name = 'SW-IT'; swOT.name = 'SW-OT';
+                srv.name  = 'Servidor-SCADA'; srv.ipConfig = { ipAddress: '172.16.1.100', subnetMask: '255.255.255.0', gateway: '172.16.0.1' };
+                pc1.name  = 'PC-Operador1'; pc1.ipConfig = { ipAddress: '172.16.1.10', subnetMask: '255.255.255.0', gateway: '172.16.0.1' };
+                pc2.name  = 'PC-Ingeniero'; pc2.ipConfig = { ipAddress: '172.16.1.11', subnetMask: '255.255.255.0', gateway: '172.16.0.1' };
+                hmi.name  = 'HMI-Principal'; hmi.ipConfig = { ipAddress: '172.16.2.10', subnetMask: '255.255.255.0', gateway: '172.16.0.1' };
+                pc3.name  = 'PLC-Linea1'; pc3.ipConfig   = { ipAddress: '172.16.2.20', subnetMask: '255.255.255.0', gateway: '172.16.0.1' };
+                pc4.name  = 'PLC-Linea2'; pc4.ipConfig   = { ipAddress: '172.16.2.21', subnetMask: '255.255.255.0', gateway: '172.16.0.1' };
+
+                const c = (a, b) => { const r = sim.connectDevices(a, b); if (r && !r.success) console.warn('[TPL]', a.name, '↔', b.name, r.message); return r; };
+                c(inet, fw); c(fw, rtr);
+                c(rtr, swIT); c(rtr, swOT);
+                c(swIT, srv); c(swIT, pc1); c(swIT, pc2);
+                c(swOT, hmi); c(swOT, pc3); c(swOT, pc4);
+            },
+        },
+        {
+            name: '📹 Red de Videovigilancia',
+            desc: 'Router → Switch PoE → Cámaras IP + DVR + Monitor',
+            build(sim) {
+                sim.clear();
+                const inet = sim.addDevice('Internet', 400, 50);
+                const rtr  = sim.addDevice('Router', 400, 190);
+                const swP  = sim.addDevice('SwitchPoE', 400, 350);
+                const dvr  = sim.addDevice('DVR', 400, 520);
+                const cam1 = sim.addDevice('Camera', 100, 520);
+                const cam2 = sim.addDevice('Camera', 220, 520);
+                const cam3 = sim.addDevice('Camera', 580, 520);
+                const cam4 = sim.addDevice('Camera', 700, 520);
+                const pc1  = sim.addDevice('PC', 240, 680);
+                const pc2  = sim.addDevice('PC', 560, 680);
+
+                inet.name = 'Internet'; inet.ipConfig = { ipAddress: '8.8.8.8', subnetMask: '255.0.0.0', gateway: '' };
+                rtr.name  = 'Router-CCTV'; rtr.ipConfig  = { ipAddress: '192.168.1.1', subnetMask: '255.255.255.0', gateway: '8.8.8.8' };
+                swP.name  = 'SW-PoE-CCTV';
+                dvr.name  = 'DVR-Principal'; dvr.ipConfig = { ipAddress: '192.168.1.200', subnetMask: '255.255.255.0', gateway: '192.168.1.1' };
+                ['CAM-Entrada','CAM-Pasillo1','CAM-Pasillo2','CAM-Patio'].forEach((n,i) => {
+                    [cam1,cam2,cam3,cam4][i].name = n;
+                    [cam1,cam2,cam3,cam4][i].ipConfig = { ipAddress:`192.168.1.${10+i}`, subnetMask:'255.255.255.0', gateway:'192.168.1.1' };
+                });
+                pc1.name = 'PC-Monitoreo'; pc1.ipConfig = { ipAddress:'192.168.1.50', subnetMask:'255.255.255.0', gateway:'192.168.1.1' };
+                pc2.name = 'PC-Admin'; pc2.ipConfig = { ipAddress:'192.168.1.51', subnetMask:'255.255.255.0', gateway:'192.168.1.1' };
+
+                const c = (a, b) => { const r = sim.connectDevices(a, b); if (r && !r.success) console.warn('[TPL]', a.name, '↔', b.name, r.message); return r; };
+                c(inet, rtr); c(rtr, swP);
+                c(swP, dvr); c(swP, cam1); c(swP, cam2); c(swP, cam3); c(swP, cam4);
+                c(swP, pc1); c(swP, pc2);
+            },
+        },
+        {
+            name: '🏫 Red Educativa',
+            desc: 'ISP → Router WiFi → Switch → Lab PCs + Sala Docentes + Servidor',
+            build(sim) {
+                sim.clear();
+                const isp   = sim.addDevice('ISP', 500, 50);
+                const rtr   = sim.addDevice('RouterWifi', 500, 190);
+                const swC   = sim.addDevice('Switch', 500, 340);
+                const swLab = sim.addDevice('Switch', 200, 500);
+                const swDoc = sim.addDevice('Switch', 800, 500);
+                const srv   = sim.addDevice('Server', 500, 500);
+                const pc1   = sim.addDevice('PC', 60,  660); const pc2 = sim.addDevice('PC', 180, 660);
+                const pc3   = sim.addDevice('PC', 300, 660); const pc4 = sim.addDevice('PC', 420, 660);
+                const lap1  = sim.addDevice('Laptop', 680, 660);
+                const lap2  = sim.addDevice('Laptop', 820, 660);
+                const lap3  = sim.addDevice('Laptop', 960, 660);
+                const ap1   = sim.addDevice('AP', 200, 340);
+
+                isp.name  = 'ISP-Escuela'; isp.ipConfig  = { ipAddress:'200.10.10.1', subnetMask:'255.255.255.0', gateway:'' };
+                rtr.name  = 'Router-Principal'; rtr.ipConfig = { ipAddress:'192.168.0.1', subnetMask:'255.255.255.0', gateway:'200.10.10.1' };
+                swC.name  = 'SW-Core'; swLab.name = 'SW-Laboratorio'; swDoc.name = 'SW-Docentes';
+                srv.name  = 'Servidor-Escolar'; srv.ipConfig = { ipAddress:'192.168.0.100', subnetMask:'255.255.255.0', gateway:'192.168.0.1' };
+                ap1.name  = 'AP-Biblioteca';
+                ['PC-Lab1','PC-Lab2','PC-Lab3','PC-Lab4'].forEach((n,i) => {
+                    [pc1,pc2,pc3,pc4][i].name=n; [pc1,pc2,pc3,pc4][i].ipConfig={ipAddress:`192.168.1.${10+i}`,subnetMask:'255.255.255.0',gateway:'192.168.0.1'};
+                });
+                ['Docente1','Docente2','Docente3'].forEach((n,i) => {
+                    [lap1,lap2,lap3][i].name=n; [lap1,lap2,lap3][i].ipConfig={ipAddress:`192.168.2.${10+i}`,subnetMask:'255.255.255.0',gateway:'192.168.0.1'};
+                });
+
+                const c = (a, b) => { const r = sim.connectDevices(a, b); if (r && !r.success) console.warn('[TPL]', a.name, '↔', b.name, r.message); return r; };
+                c(isp, rtr); c(rtr, swC); c(swC, srv);
+                c(swC, swLab); c(swC, swDoc); c(swC, ap1);
+                c(swLab, pc1); c(swLab, pc2); c(swLab, pc3); c(swLab, pc4);
+                c(swDoc, lap1); c(swDoc, lap2); c(swDoc, lap3);
+            },
+        },
     ];
+
+    const exampleBtnHTML = document.getElementById('exampleBtn');
+    if (exampleBtnHTML) {
+        exampleBtnHTML.addEventListener('click', () => {
+            const existing = document.getElementById('tpl-modal');
+            if (existing) { existing.remove(); return; }
+            const modal = document.createElement('div');
+            modal.id = 'tpl-modal';
+            modal.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:9999;background:#1a1f2e;border:1px solid #334;border-radius:12px;padding:20px;min-width:320px;max-width:420px;width:90vw;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.5)';
+            const ALL = [
+                { name: 'Red de Ejemplo Completa', desc: 'Topologia demo: SDWAN, ISPs, Firewall, Router, Switches, APs, DVR, Camaras y mas', fn: () => { buildExample(); _snapshot(); } },
+                ...TEMPLATES.map(t => ({ name: t.name, desc: t.desc, fn: () => { t.build(simulator); simulator.draw(); updateCounts(); simulator.fitAll(); _snapshot(); } }))
+            ];
+            modal.innerHTML =
+                '<div style="font-weight:600;font-size:15px;margin-bottom:12px;color:#e2e8f0;flex-shrink:0">Ejemplos y Plantillas</div>' +
+                '<div style="overflow-y:auto;flex:1;padding-right:2px">' +
+                ALL.map((t, i) => '<div class="tpl-item" data-idx="' + i + '" style="border:1px solid #334;border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer"><div style="font-weight:500;color:#c4c9d4">' + t.name + '</div><div style="font-size:11px;color:#8892a4;margin-top:3px">' + t.desc + '</div></div>').join('') +
+                '</div>' +
+                '<button id="tpl-cancel" style="width:100%;margin-top:10px;flex-shrink:0;background:transparent;border:1px solid #334;border-radius:6px;color:#8892a4;cursor:pointer;padding:7px">Cancelar</button>';
+            document.body.appendChild(modal);
+            modal.querySelector('#tpl-cancel').onclick = () => modal.remove();
+            modal.querySelectorAll('.tpl-item').forEach(el => {
+                el.onmouseover = () => el.style.background = 'rgba(99,102,241,.15)';
+                el.onmouseout  = () => el.style.background = '';
+                el.onclick = () => {
+                    const idx = parseInt(el.dataset.idx);
+                    if (confirm('Cargar "' + ALL[idx].name + '"? Se borrara la topologia actual.')) {
+                        ALL[idx].fn();
+                        netConsole.writeToConsole('Cargado: ' + ALL[idx].name);
+                        modal.remove();
+                    }
+                };
+            });
+            setTimeout(() => document.addEventListener('click', function close(e) {
+                if (!modal.contains(e.target) && e.target !== exampleBtnHTML) { modal.remove(); document.removeEventListener('click', close); }
+            }), 50);
+        });
+    }
+    lg?.appendChild(exBtn);
+
 
     const tplBtn = document.createElement('button');
     tplBtn.className = 'btn';

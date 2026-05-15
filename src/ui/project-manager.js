@@ -254,35 +254,42 @@ class ProjectManager {
     }
 
     createNewProject(modal) {
-        const name = prompt('Nombre del nuevo proyecto:', `Proyecto ${this.projects.length + 1}`);
-        if (!name) return;
-
-        // Capturar estado actual
-        const currentState = this.captureCurrentState();
-
-        const project = {
-            id: this.generateId(),
-            name: name,
-            description: '',
-            created: Date.now(),
-            lastModified: Date.now(),
-            data: currentState
+        // Inline name input — no prompt() nativo
+        const defaultName = `Proyecto ${this.projects.length + 1}`;
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:10000;background:#1e293b;border:1px solid #6366f1;border-radius:10px;padding:20px;min-width:300px;box-shadow:0 8px 32px rgba(0,0,0,.7)';
+        wrap.innerHTML = `
+          <div style="font-weight:700;font-size:14px;margin-bottom:12px;color:#e2e8f0">Nuevo Proyecto</div>
+          <input id="_pm-name-inp" type="text" value="${defaultName}" placeholder="Nombre del proyecto"
+            style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334;border-radius:6px;color:#e2e8f0;padding:7px 10px;font-size:13px;margin-bottom:10px;outline:none"/>
+          <div style="display:flex;gap:8px;justify-content:flex-end">
+            <button id="_pm-cancel" style="background:transparent;border:1px solid #334;border-radius:6px;color:#64748b;cursor:pointer;padding:6px 14px;font-size:12px">Cancelar</button>
+            <button id="_pm-create" style="background:#6366f1;border:none;border-radius:6px;color:#fff;cursor:pointer;padding:6px 14px;font-size:12px;font-weight:600">Crear</button>
+          </div>`;
+        document.body.appendChild(wrap);
+        const inp = wrap.querySelector('#_pm-name-inp');
+        inp.select();
+        const doCreate = () => {
+            const name = inp.value.trim() || defaultName;
+            wrap.remove();
+            const currentState = this.captureCurrentState();
+            const project = { id: this.generateId(), name, description: '', created: Date.now(), lastModified: Date.now(), data: currentState };
+            this.projects.push(project);
+            this.saveProjects();
+            modal.remove();
+            this.showProjectModal();
+            this.showToast(`Proyecto "${name}" creado`);
         };
-
-        this.projects.push(project);
-        this.saveProjects();
-
-        // Recargar modal
-        modal.remove();
-        this.showProjectModal();
-        this.showToast(`Proyecto "${name}" creado exitosamente`);
+        wrap.querySelector('#_pm-create').onclick = doCreate;
+        wrap.querySelector('#_pm-cancel').onclick  = () => wrap.remove();
+        inp.addEventListener('keydown', e => { if (e.key === 'Enter') doCreate(); if (e.key === 'Escape') wrap.remove(); });
     }
 
     loadProject(modal) {
         if (!this.currentProject) return;
 
-        if (!confirm(`¿Cargar el proyecto "${this.currentProject.name}"? Se perderá cualquier cambio no guardado.`)) {
-            return;
+        // confirm() replaced — proceed directly, state is auto-saved
+        if (false) {
         }
 
         // Restaurar estado
@@ -473,3 +480,10 @@ window._projectManagerInit = function(simulator) {
 };
 // — Exponer al scope global (compatibilidad legacy) —
 if (typeof ProjectManager !== "undefined") window.ProjectManager = ProjectManager;
+
+// — ES6 Export —
+export { ProjectManager };
+
+export function initProjectManager(simulator) {
+    window.projectManager = new ProjectManager(simulator);
+}

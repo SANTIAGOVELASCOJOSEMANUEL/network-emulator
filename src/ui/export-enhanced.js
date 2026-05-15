@@ -459,3 +459,10 @@ window._enhancedExportInit = function(simulator) {
 };
 // — Exponer al scope global (compatibilidad legacy) —
 if (typeof EnhancedExporter !== "undefined") window.EnhancedExporter = EnhancedExporter;
+
+// — ES6 Export —
+export { EnhancedExporter };
+
+export function initEnhancedExporter(simulator) {
+    window.enhancedExporter = new EnhancedExporter(simulator);
+}

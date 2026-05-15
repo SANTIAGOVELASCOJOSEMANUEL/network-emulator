@@ -91,6 +91,9 @@ function showToast(msg, type = 'info', duration = 4000) {
 // Exponer globalmente
 if (typeof window !== 'undefined') window.showToast = showToast;
 
+// — ES6 Export —
+export { showToast };
+
 // ══════════════════════════════════════════════════════════════════════
 //  ERROR HANDLER
 // ══════════════════════════════════════════════════════════════════════
@@ -135,3 +138,6 @@ function withErrorHandling(fn, silent = false) {
 // — Exponer al scope global (compatibilidad legacy) —
 if (typeof handleError !== "undefined") window.handleError = handleError;
 if (typeof withErrorHandling !== "undefined") window.withErrorHandling = withErrorHandling;
+
+// — ES6 Export —
+export { handleError, withErrorHandling };

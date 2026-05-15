@@ -564,3 +564,10 @@ window._ipConfigPanelInit = function(simulator) {
 };
 // — Exponer al scope global (compatibilidad legacy) —
 if (typeof IPConfigPanel !== "undefined") window.IPConfigPanel = IPConfigPanel;
+
+// — ES6 Export —
+export { IPConfigPanel };
+
+export function initIPConfigPanel(simulator) {
+    window.ipConfigPanel = new IPConfigPanel(simulator);
+}

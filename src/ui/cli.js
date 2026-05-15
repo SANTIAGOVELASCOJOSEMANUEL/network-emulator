@@ -28,12 +28,14 @@ class DeviceCLI {
             case 'router':      return `${h}(config-router)#`;
             case 'dhcp':        return `${h}(config-dhcp)#`;
             case 'bgp':         return `${h}(config-router)#`;
+            case 'rip':         return `${h}(config-router)#`;
             case 'ssh':         return this._sshSession ? `${this._sshSession.target}#` : `${h}>`;
             case 'telephony':   return `${h}(config-telephony)#`;
             case 'ephone-dn':   return `${h}(config-ephone-dn)#`;
             case 'ephone':      return `${h}(config-ephone)#`;
             case 'policy-map':  return `${h}(config-pmap${this._policyClassCtx ? '-c' : ''})#`;
             case 'class-map':   return `${h}(config-cmap)#`;
+            case 'linevty':     return `${h}(config-line)#`;
             default:            return `${h}>`;
         }
     }
@@ -71,12 +73,14 @@ class DeviceCLI {
             case 'router':      return this._routerMode(cmd, parts);
             case 'dhcp':        return this._dhcpMode(cmd, parts);
             case 'bgp':         return this._bgpMode(cmd, parts);
+            case 'rip':         return this._ripMode(cmd, parts);
             case 'ssh':         return this._sshMode(cmd, parts);
             case 'telephony':   return this._telephonyMode(cmd, parts);
             case 'ephone-dn':   return this._ephoneDnMode(cmd, parts);
             case 'ephone':      return this._ephoneMode(cmd, parts);
             case 'policy-map':  return this._policyMapMode(cmd, parts);
             case 'class-map':   return this._classMapMode(cmd, parts);
+            case 'linevty':     return this._lineVtyCmd(cmd, parts);
         }
     }
 
@@ -107,7 +111,7 @@ class DeviceCLI {
             help      : () => this._help(),
         };
         if (cmds[cmd]) cmds[cmd]();
-        else this._unknown(cmd, ['enable','ping','ping6','traceroute','tcp connect','show','curl','dial','hangup']);
+        else this._unknown(cmd, ['enable','ping','ping6','traceroute','traceroute6','tcp connect','show','curl','dial','hangup']);
     }
 
     // ══════════════════════════════════════════════════════
@@ -135,6 +139,15 @@ class DeviceCLI {
             hangup    : () => this._doHangup(),
             curl      : () => this._doCurl(parts),
             tcp       : () => this._doTCPConnect(parts),
+            troubleshoot: () => { window.troubleshootMode ? window.troubleshootMode.showMenu() : this.write('% TroubleshootMode no disponible','cli-err'); },
+            'ipv6'      : () => {
+                if (parts[1]==='enable') {
+                    if (window.ipv6Engine) {
+                        window.ipv6Engine.runSLAAC();
+                        this.write('IPv6 SLAAC ejecutado en toda la topología. Usa: show ipv6 interface','cli-ok');
+                    } else { this.write('% IPv6Engine no cargado','cli-err'); }
+                } else { this._unknown(cmd,['ipv6 enable']); }
+            },
         };
         if (cmds[cmd]) cmds[cmd]();
         else { this._privExec(parts); }
@@ -253,13 +266,74 @@ class DeviceCLI {
             case 'qos':
                 return this._configQoS(parts);
 
+            case 'sdwan':
+                return this._configSdwan(parts);
+
+            case 'ipv6':
+                // ipv6 unicast-routing
+                if (parts[1] === 'unicast-routing') {
+                    this.device.ipv6UnicastRouting = true;
+                    this.device.ipv6Enabled = true;
+                    this.write('IPv6 unicast routing enabled', 'cli-ok');
+                } else {
+                    this.write(`% Unknown ipv6 config command: ${parts[1] || ''}`, 'cli-err');
+                }
+                break;
+
+            case 'line':
+                // line vty 0 4  →  simulated line config
+                if (parts[1] === 'vty') {
+                    if (!this.device.vtyConfig) this.device.vtyConfig = {};
+                    this._lineVtyMode();
+                } else {
+                    this.write('% Only "line vty <start> <end>" supported', 'cli-warn');
+                }
+                break;
+
             default:
-                this._unknown(cmd, ['hostname','interface','vlan','ip','router','no','access-list','spanning-tree','crypto','username','telephony-service','ephone-dn','ephone','policy-map','class-map','qos']);
+                this._unknown(cmd, ['hostname','interface','vlan','ip','ipv6','router','no','access-list','spanning-tree','crypto','username','telephony-service','ephone-dn','ephone','policy-map','class-map','qos','sdwan','line']);
         }
     }
 
     // ══════════════════════════════════════════════════════
-    //  INTERFACE MODE  (Router(config-if)#)
+    //  LINE VTY MODE — simulated transport/login config
+    // ══════════════════════════════════════════════════════
+    _lineVtyMode() {
+        this.mode = 'linevty';
+        this.write('Enter line vty config. Commands: transport input [ssh|telnet|all|none], login [local], exec-timeout <min> <sec>', 'cli-dim');
+    }
+
+    _lineVtyCmd(cmd, parts) {
+        if (!this.device.vtyConfig) this.device.vtyConfig = {};
+        switch(cmd) {
+            case 'transport':
+                if (parts[1] === 'input') {
+                    const proto = parts[2]?.toLowerCase() || 'ssh';
+                    this.device.vtyConfig.transportInput = proto;
+                    this.device.vtyConfig.telnetDisabled = (proto === 'ssh' || proto === 'none');
+                    this.write(`Transport input: ${proto}${proto==='ssh'?' (Telnet blocked)':''}`, 'cli-ok');
+                } else this._bad();
+                break;
+            case 'login':
+                this.device.vtyConfig.loginLocal = true;
+                this.write('Login authentication: local database', 'cli-ok');
+                break;
+            case 'exec-timeout':
+                this.device.vtyConfig.execTimeout = (parseInt(parts[1])||10) * 60 + (parseInt(parts[2])||0);
+                this.write(`Exec timeout: ${parts[1]||10} min ${parts[2]||0} sec`, 'cli-ok');
+                break;
+            case 'no':
+                if (parts[1]==='login') { this.device.vtyConfig.loginLocal = false; this.write('Login: no authentication','cli-ok'); }
+                break;
+            case 'exit':
+                this.mode = 'config'; break;
+            case 'end':
+                this.mode = 'enable'; break;
+            default:
+                this._unknown(cmd, ['transport input [ssh|telnet|all|none]','login [local]','exec-timeout <min> <sec>','exit']);
+        }
+    }
+
     // ══════════════════════════════════════════════════════
     _ifMode(cmd, parts) {
         const intf = this.ifContext;
@@ -363,14 +437,103 @@ class DeviceCLI {
                 this._ipv6IfMode(parts);
                 break;
 
+            case 'standby':
+                this._hsrpCmd(parts);
+                break;
+
             default:
-                this._unknown(cmd,['ip','ipv6','no','shutdown','description','duplex','speed','switchport','encapsulation','spanning-tree']);
+                this._unknown(cmd,['ip','ipv6','no','shutdown','description','duplex','speed','switchport','encapsulation','spanning-tree','standby']);
         }
     }
 
     // ══════════════════════════════════════════════════════
     //  IPV6 INTERFACE COMMANDS
     // ══════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════
+    //  HSRP — standby <group> ip <vip> | priority <n> | preempt | track
+    // ══════════════════════════════════════════════════════
+    _hsrpCmd(parts) {
+        // parts: ['standby', <group>, <subcommand>, ...]
+        const groupId = parseInt(parts[1]) || 1;
+        const sub     = parts[2]?.toLowerCase();
+        const d       = this.device;
+        if (!d.hsrp) d.hsrp = { enabled: false, groups: {} };
+        if (!d.hsrp.groups[groupId]) {
+            d.hsrp.groups[groupId] = { vip: null, priority: 100, preempt: false, role: 'init', state: 'Init' };
+        }
+        const grp = d.hsrp.groups[groupId];
+
+        if (sub === 'ip') {
+            const vip = parts[3];
+            if (!vip) return this.write('% Usage: standby <group> ip <virtual-ip>','cli-err');
+            grp.vip = vip;
+            d.hsrp.enabled = true;
+            d.hsrp.vip     = vip; // shortcut for validation
+            this.write(`HSRP group ${groupId}: virtual IP ${vip}`,'cli-ok');
+            this.write(`%HSRP-5-STATECHANGE: ${d.name} Grp ${groupId} state Init -> Speak`,'cli-warn');
+            // Elect role based on priority vs existing routers
+            this._hsrpElect(groupId);
+        } else if (sub === 'priority') {
+            const prio = parseInt(parts[3]);
+            if (isNaN(prio)) return this.write('% Usage: standby <group> priority <0-255>','cli-err');
+            grp.priority = prio;
+            d.hsrp.priority = prio;
+            this.write(`HSRP group ${groupId}: priority ${prio}`,'cli-ok');
+            this._hsrpElect(groupId);
+        } else if (sub === 'preempt') {
+            grp.preempt = true;
+            d.hsrp.preempt = true;
+            this.write(`HSRP group ${groupId}: preempt enabled`,'cli-ok');
+            this._hsrpElect(groupId);
+        } else if (sub === 'track') {
+            const trackIntf = parts[3] || 'WAN0';
+            const decrement = parseInt(parts[4]) || 10;
+            grp.track = { interface: trackIntf, decrement };
+            this.write(`HSRP group ${groupId}: tracking ${trackIntf} decrement ${decrement}`,'cli-ok');
+        } else if (sub === 'timers') {
+            grp.helloTimer  = parseInt(parts[3]) || 3;
+            grp.holdTimer   = parseInt(parts[4]) || 10;
+            this.write(`HSRP timers: hello ${grp.helloTimer}s hold ${grp.holdTimer}s`,'cli-ok');
+        } else if (sub === 'authentication') {
+            grp.authKey = parts[3];
+            this.write(`HSRP authentication key set`,'cli-ok');
+        } else {
+            this.write('% Usage: standby <group> [ip <vip>] [priority <0-255>] [preempt] [track <intf> [decrement]]','cli-err');
+        }
+    }
+
+    _hsrpElect(groupId) {
+        const d = this.device;
+        const sim = window.simulator;
+        if (!sim || !d.hsrp?.groups[groupId]) return;
+        const grp = d.hsrp.groups[groupId];
+        // Find peer routers with HSRP in same group
+        const peers = (sim.devices || []).filter(dev =>
+            dev !== d && ['Router','RouterWifi'].includes(dev.type) &&
+            dev.hsrp?.groups?.[groupId]?.vip
+        );
+        const myPriority = grp.priority ?? 100;
+        const maxPeer    = peers.reduce((mx, p) => Math.max(mx, p.hsrp.groups[groupId]?.priority ?? 100), 0);
+
+        if (myPriority > maxPeer) {
+            grp.role = 'active'; d.hsrp.role = 'active';
+            this.write(`%HSRP-5-STATECHANGE: ${d.name} Grp ${groupId} state Speak -> Active`,'cli-ok');
+            // Set peer(s) to standby
+            peers.forEach(p => {
+                if (p.hsrp.groups[groupId]) {
+                    p.hsrp.groups[groupId].role = 'standby';
+                    p.hsrp.role = 'standby';
+                }
+            });
+        } else if (peers.length > 0) {
+            grp.role = 'standby'; d.hsrp.role = 'standby';
+            this.write(`%HSRP-5-STATECHANGE: ${d.name} Grp ${groupId} state Speak -> Standby`,'cli-warn');
+        } else {
+            grp.role = 'speak';
+            this.write(`%HSRP-5-STATECHANGE: ${d.name} Grp ${groupId} state Init -> Speak (waiting for peers)`,'cli-warn');
+        }
+    }
+
     _ipv6IfMode(parts) {
         const intf = this.ifContext || this.device;
         const sub  = parts[1]?.toLowerCase();
@@ -394,6 +557,11 @@ class DeviceCLI {
                 const plen       = cidr.includes('/') ? parseInt(cidr.split('/')[1], 10) : 64;
                 const compressed = IPv6Utils.compress(addr);
                 intf.ipv6Config  = { address: compressed, prefixLen: plen };
+
+                // Propagate to device root so lab validators (r?.ipv6Config) can find it
+                if (!this.device.ipv6Config || !this.device.ipv6Config.address) {
+                    this.device.ipv6Config = { address: compressed, prefixLen: plen };
+                }
 
                 // Auto link-local EUI-64
                 const mac = intf.mac || this.device.mac;
@@ -426,17 +594,32 @@ class DeviceCLI {
         } else if (sub === 'enable') {
             if (!this.device.ndCache) this.device.ndCache = new NDCache();
             if (!this.device.routingTableV6) this.device.routingTableV6 = new RoutingTableIPv6();
+            this.device.ipv6Enabled = true; // mark device as IPv6-capable for lab validators
             const mac = intf.mac || this.device.mac;
             if (mac && typeof IPv6Utils !== 'undefined') {
                 intf.ipv6LinkLocal = IPv6Utils.generateLinkLocal(mac);
                 this.write(`IPv6 enabled on ${intf.name || this.device.name} — link-local: ${intf.ipv6LinkLocal}`, 'cli-ok');
+                if (window.ipv6Engine) { window.ipv6Engine.runSLAAC(); }
             } else {
                 this.write(`IPv6 enabled on ${intf.name || this.device.name}`, 'cli-ok');
             }
 
+        } else if (sub === 'address' && (parts[3]?.toLowerCase() === 'autoconfig' || parts[2]?.toLowerCase() === 'autoconfig')) {
+            // ipv6 address autoconfig
+            intf.ipv6Autoconfig = true;
+            this.device.ipv6Enabled = true;
+            if (!this.device.ndCache) this.device.ndCache = new NDCache();
+            const mac2 = intf.mac || this.device.mac;
+            if (mac2 && typeof IPv6Utils !== 'undefined') {
+                intf.ipv6LinkLocal = IPv6Utils.generateLinkLocal(mac2);
+            }
+            this.write(`SLAAC autoconfig enabled on ${intf.name || this.device.name}`, 'cli-ok');
+            this.write('  IPv6 address will be assigned via Router Advertisement (RA)', 'cli-dim');
+            if (window.ipv6Engine) window.ipv6Engine.runSLAAC();
+
         } else {
             this.write(`% Unknown ipv6 command: ${sub || ''}`, 'cli-err');
-            this.write('  Available: ipv6 address <addr>/<prefix>  |  ipv6 enable', 'cli-dim');
+            this.write('  Available: ipv6 address <addr>/<prefix>  |  ipv6 address autoconfig  |  ipv6 enable', 'cli-dim');
         }
     }
 
@@ -455,6 +638,10 @@ class DeviceCLI {
             // Update device VLAN table if switch
             if (this.device.vlans && !this.device.vlans[vid]) {
                 this.device.vlans[vid] = { name:`VLAN${vid}`, network:`192.168.${vid}.0/24`, gateway:`192.168.${vid}.254` };
+            }
+            // Sync _vlanEngine.portConfig so lab validators can read portConfig
+            if (this.device._vlanEngine) {
+                this.device._vlanEngine.setAccess(intf.name, vid);
             }
             this.redraw && this.redraw();
         } else if (sub === 'trunk') {
@@ -531,6 +718,19 @@ class DeviceCLI {
             this.write(`Entering BGP configuration (AS ${asn})`, 'cli-ok');
             return;
         }
+        if (proto === 'rip') {
+            if (!this.device.rip) this.device.rip = { version: 2, networks: [], passive: [], redistributeConnected: false };
+            this.mode = 'rip';
+            this.routerProto = 'rip';
+            this.device.routingProtocol = 'rip';
+            this.write(`Entering RIP router configuration`,'cli-ok');
+            this.write(`  Use \"version 2\" and \"network <ip>\" to configure`,'cli-dim');
+            return;
+        }
+        if (proto === 'ospf') {
+            const pid = parseInt(parts[2]) || 1;
+            this.device.ospfProcessId = pid;
+        }
         this.mode = 'router';
         this.routerProto = proto;
         this.device.routingProtocol = proto;
@@ -540,13 +740,45 @@ class DeviceCLI {
     _routerMode(cmd, parts) {
         switch(cmd) {
             case 'network':
+                if (!parts[1]) { this._bad(); break; }
                 if (!this.device.ospfNetworks) this.device.ospfNetworks = [];
-                this.device.ospfNetworks.push({ network:parts[1], wildcard:parts[2], area:parts[4]||'0' });
-                this.write(`Network ${parts[1]} area ${parts[4]||'0'} added`,'cli-ok');
+                const netEntry = { network: parts[1], wildcard: parts[2] || '0.0.0.255', area: parts[4] || '0' };
+                this.device.ospfNetworks.push(netEntry);
+                this.write(`Network ${parts[1]} ${netEntry.wildcard} area ${netEntry.area} added`,'cli-ok');
+
+                // Construir/actualizar OSPFRouter inmediatamente
+                // Normalizar ospfNetworks a strings CIDR que OSPFRouter espera
+                const cidrNets = this.device.ospfNetworks.map(n => {
+                    // Convertir wildcard → prefix length si es necesario
+                    if (n.network && n.wildcard) {
+                        const wparts = n.wildcard.split('.').map(Number);
+                        const bits = 32 - wparts.reduce((a, b) => a + (255 - b).toString(2).split('').filter(c => c==='1').length, 0);
+                        return `${n.network}/${bits}`;
+                    }
+                    return n.network;
+                }).filter(Boolean);
+
+                if (typeof OSPFRouter !== 'undefined') {
+                    if (!this.device.ospfInstance) {
+                        this.device.ospfInstance = new OSPFRouter(this.device.id, cidrNets);
+                    } else {
+                        this.device.ospfInstance.networks = cidrNets;
+                    }
+                    // Lanzar flooding y SPF
+                    this.device.ospfInstance.floodLSAs();
+                    this.device.ospfInstance.runSPF();
+                    // Instalar rutas OSPF en la routing table del router
+                    if (typeof OSPFEngine !== 'undefined') {
+                        const eng = window._ospfEngine || new OSPFEngine();
+                        window._ospfEngine = eng;
+                        eng.installOSPFRoutes(this.device);
+                    }
+                }
                 break;
             case 'router-id':
                 this.device.routerId = parts[1];
                 this.write(`Router ID: ${parts[1]}`,'cli-ok');
+                if (this.device.ospfInstance) this.device.ospfInstance.routerId = parts[1];
                 break;
             case 'passive-interface':
                 if (!this.device.passiveInterfaces) this.device.passiveInterfaces = [];
@@ -560,7 +792,7 @@ class DeviceCLI {
                 this.write(`Default-information originate configured`,'cli-ok');
                 break;
             default:
-                this._unknown(cmd,['network','router-id','passive-interface','redistribute']);
+                this._unknown(cmd,['network','router-id','passive-interface','redistribute','default-information']);
         }
     }
 
@@ -604,14 +836,27 @@ class DeviceCLI {
         const sub = parts[1]?.toLowerCase();
         switch(sub) {
             case 'route':
-                // ip route <network> <mask> <next-hop>
-                if (parts.length >= 5) {
-                    if (!this.device.routingTable) this.device.routingTable = { routes: [] };
-                    const table = this.device.routingTable;
-                    if (table.add) table.add(parts[2], parts[3], parts[4], 'static', parseInt(parts[5])||1);
-                    else if (table.routes) table.routes.push({ network:parts[2], mask:parts[3], nexthop:parts[4], type:'S' });
-                    this.write(`Static route: ${parts[2]} via ${parts[4]}`,'cli-ok');
-                    if (typeof buildRoutingTables==='function') buildRoutingTables(window.simulator?.devices||[], window.simulator?.connections||[]);
+                // ip route <network> <mask> <next-hop>   (IPv4)
+                // ip route <ipv6-prefix/len> <next-hop>  (IPv6 shorthand used in labs)
+                if (parts.length >= 4) {
+                    const isIPv6 = parts[2]?.includes(':');
+                    if (isIPv6) {
+                        // ipv6 static route via ip route shorthand
+                        if (!this.device.routingTableV6) this.device.routingTableV6 = new RoutingTableIPv6();
+                        const [prefix, plenStr] = (parts[2] || '').split('/');
+                        const plen   = parseInt(plenStr) || 64;
+                        const nexthop = parts[3];
+                        this.device.routingTableV6.add(prefix, plen, nexthop, '', 1, 'S');
+                        this.device.ipv6Enabled = true;
+                        this.write(`IPv6 static route: ${parts[2]} via ${nexthop}`, 'cli-ok');
+                    } else if (parts.length >= 5) {
+                        if (!this.device.routingTable) this.device.routingTable = { routes: [] };
+                        const table = this.device.routingTable;
+                        if (table.add) table.add(parts[2], parts[3], parts[4], 'static', parseInt(parts[5])||1);
+                        else if (table.routes) table.routes.push({ network:parts[2], mask:parts[3], nexthop:parts[4], type:'S' });
+                        this.write(`Static route: ${parts[2]} via ${parts[4]}`,'cli-ok');
+                        if (typeof buildRoutingTables==='function') buildRoutingTables(window.simulator?.devices||[], window.simulator?.connections||[]);
+                    } else this._bad();
                 } else this._bad();
                 break;
 
@@ -782,15 +1027,38 @@ class DeviceCLI {
     _configACL(parts) {
         const d = this.device;
         if (!d.accessLists) d.accessLists = {};
-        const num = parts[1];
+        const num    = parts[1];
         const action = parts[2]?.toLowerCase(); // permit | deny
         const proto  = parts[3]?.toLowerCase(); // ip | tcp | udp | icmp
-        const src    = parts[4];
-        const dst    = parts[5];
         if (!num || !action) return this._bad();
+
+        // Parse src/dst with optional 'host', wildcard, and 'eq <port>'
+        // Format: access-list <n> <action> <proto> <src> [<wildcard>] <dst> [<wildcard>] [eq <port>]
+        let idx   = 4;
+        let src   = 'any', srcWild = '', dst = 'any', dstPort = null;
+
+        if (parts[idx] && parts[idx] !== 'any') {
+            if (parts[idx].toLowerCase() === 'host') { src = parts[idx+1] || 'any'; idx += 2; }
+            else { src = parts[idx]; idx++;
+                if (parts[idx] && !parts[idx].includes('.') === false && !parts[idx].startsWith('eq') && !parts[idx].includes(':')) { srcWild = parts[idx]; idx++; }
+            }
+        } else if (parts[idx] === 'any') { src = 'any'; idx++; }
+
+        if (parts[idx] && parts[idx] !== 'eq') {
+            if (parts[idx].toLowerCase() === 'host') { dst = parts[idx+1] || 'any'; idx += 2; }
+            else { dst = parts[idx]; idx++;
+                if (parts[idx] && !parts[idx].startsWith('eq') && !parts[idx].includes(':')) { idx++; }
+            }
+        } else if (parts[idx] === 'any') { dst = 'any'; idx++; }
+
+        if (parts[idx]?.toLowerCase() === 'eq') { dstPort = parts[idx+1]; }
+
         if (!d.accessLists[num]) d.accessLists[num] = [];
-        d.accessLists[num].push({ action, proto: proto||'ip', src: src||'any', dst: dst||'any' });
-        this.write(`ACL ${num}: ${action} ${proto||'ip'} ${src||'any'} → ${dst||'any'}`,'cli-ok');
+        const rule = { action, proto: proto||'ip', src: src||'any', dst: dst||'any' };
+        if (dstPort) rule.port = dstPort;
+        d.accessLists[num].push(rule);
+        const portStr = dstPort ? ` eq ${dstPort}` : '';
+        this.write(`ACL ${num}: ${action} ${proto||'ip'} ${src||'any'} → ${dst||'any'}${portStr}`, 'cli-ok');
         if (window.FirewallEngine) window.FirewallEngine.rebuildRules(d);
     }
 
@@ -825,19 +1093,29 @@ class DeviceCLI {
         const d = this.device;
 
         switch(sub) {
-            case 'interfaces': case 'int': case 'interface':
+            case 'interfaces': case 'int': case 'interface': {
                 this.write(`\n${d.name} — Interfaces`,'cli-section');
                 d.interfaces.forEach(i => {
-                    const st = i.status === 'down' ? '🔴 down' : '🟢 up';
-                    const conn = i.connectedTo ? `↔ ${i.connectedTo.name}:${i.connectedInterface?.name}` : 'not connected';
-                    this.write(`  ${i.name.padEnd(12)} ${st.padEnd(12)} ${i.speed.padEnd(10)} ${i.mediaType}`,'cli-data');
+                    // Estado administrativo vs estado de línea
+                    const adminDown  = i.status === 'down';
+                    const lineDown   = !i.connectedTo;   // sin cable = line protocol down
+                    const lineStatus = adminDown ? 'administratively down' : (lineDown ? 'down' : 'up');
+                    const lineProto  = (!adminDown && !lineDown) ? 'up' : 'down';
+                    const lineIcon   = lineProto === 'up' ? '🟢' : '🔴';
+                    this.write(`  ${i.name} is ${lineStatus}, line protocol is ${lineProto} ${lineIcon}`,'cli-data');
+                    if (i.description) this.write(`    Description: ${i.description}`,'cli-dim');
+                    const mtu = i.mtu || 1500;
+                    this.write(`    MTU ${mtu} bytes, BW ${i.speed || '—'}, ${i.mediaType || 'copper'}, ${i.duplex||'full'}-duplex`,'cli-dim');
                     if (i.ipConfig?.ipAddress && i.ipConfig.ipAddress !== '0.0.0.0') {
-                        this.write(`    Internet address: ${i.ipConfig.ipAddress}/${i.ipConfig.subnetMask}`,'cli-data');
+                        this.write(`    Internet address is ${i.ipConfig.ipAddress}/${i.ipConfig.subnetMask}`,'cli-data');
                     }
-                    if (i.vlan && i.vlan > 0) this.write(`    VLAN: ${i.vlan}`,'cli-data');
+                    if (i.vlan && i.vlan > 0) this.write(`    Encapsulation: 802.1Q, VLAN ${i.vlan}`,'cli-dim');
+                    if (i.natDirection) this.write(`    IP NAT ${i.natDirection}`,'cli-dim');
+                    const conn = i.connectedTo ? `↔ ${i.connectedTo.name}:${i.connectedInterface?.name||'?'}` : '(not connected)';
                     this.write(`    ${conn}`,'cli-dim');
                 });
                 break;
+            }
 
             case 'ip':
                 const subsub = parts[2]?.toLowerCase();
@@ -854,16 +1132,54 @@ class DeviceCLI {
                     }
                 } else if (subsub === 'route') {
                     this.write(`\nIP Routing Table — ${d.name}`,'cli-section');
+                    this.write(`  Codes: C-connected, S-static, O-OSPF, B-BGP, R-RIP`,'cli-dim');
+
+                    // Recopilar rutas conectadas desde interfaces con IP
+                    const connectedRoutes = [];
+                    (d.interfaces||[]).forEach(intf => {
+                        const ip  = intf.ipConfig?.ipAddress;
+                        const msk = intf.ipConfig?.subnetMask;
+                        if (ip && ip !== '0.0.0.0' && msk) {
+                            // Calcular red
+                            const ipToInt = s => s.split('.').reduce((a,o)=>(a<<8)+parseInt(o,10),0)>>>0;
+                            const intToIp = n => [(n>>>24)&255,(n>>>16)&255,(n>>>8)&255,n&255].join('.');
+                            const net = intToIp(ipToInt(ip) & ipToInt(msk));
+                            const bits = msk.split('.').reduce((a,o)=>a+parseInt(o,10).toString(2).split('').filter(b=>b==='1').length,0);
+                            connectedRoutes.push({ type:'C', network:`${net}/${bits}`, via: `${intf.name} (${ip})` });
+                        }
+                    });
+                    // También IP global del dispositivo si no está cubierta
+                    if (d.ipConfig?.ipAddress && d.ipConfig.ipAddress !== '0.0.0.0' && d.ipConfig.subnetMask) {
+                        const ipToInt = s => s.split('.').reduce((a,o)=>(a<<8)+parseInt(o,10),0)>>>0;
+                        const intToIp = n => [(n>>>24)&255,(n>>>16)&255,(n>>>8)&255,n&255].join('.');
+                        const ip  = d.ipConfig.ipAddress;
+                        const msk = d.ipConfig.subnetMask;
+                        const net = intToIp(ipToInt(ip) & ipToInt(msk));
+                        const bits= msk.split('.').reduce((a,o)=>a+parseInt(o,10).toString(2).split('').filter(b=>b==='1').length,0);
+                        const netCidr = `${net}/${bits}`;
+                        if (!connectedRoutes.find(r=>r.network===netCidr))
+                            connectedRoutes.push({ type:'C', network:netCidr, via:`direct (${ip})` });
+                    }
+
+                    // Mostrar rutas conectadas
+                    connectedRoutes.forEach(r =>
+                        this.write(`  ${'C'.padEnd(3)} ${r.network.padEnd(20)} is directly connected, ${r.via}`,'cli-data')
+                    );
+
+                    // Mostrar rutas de la tabla (estáticas, OSPF, BGP, etc.)
+                    const printRoute = r => {
+                        const code   = (r.type || r._type || 'S').padEnd(3);
+                        const prefix = (r.network || r.destination || '?') + (r.mask && !String(r.network||'').includes('/') ? `/${r.mask}`:'');
+                        const metric = r.metric !== undefined ? `[${r.metric}/0]` : '[1/0]';
+                        const via    = r.nexthop || r.gateway || r.nextHop || '—';
+                        this.write(`  ${code} ${prefix.padEnd(20)} ${metric} via ${via}`,'cli-data');
+                    };
+
                     if (d.routingTable?.routes?.length) {
-                        this.write(`  Codes: S-static, C-connected, O-OSPF, R-RIP`,'cli-dim');
-                        d.routingTable.routes.forEach(r => {
-                            this.write(`  ${(r.type||'C').padEnd(3)} ${(r.network||'').padEnd(20)} [${r.metric||1}/0] via ${r.nexthop||r.gateway||'—'}`,'cli-data');
-                        });
+                        d.routingTable.routes.forEach(printRoute);
                     } else if (d.routingTable?.getAll) {
-                        const all = d.routingTable.getAll();
-                        this.write(`  Codes: S-static, C-connected`,'cli-dim');
-                        all.forEach(r => this.write(`  ${(r.type||'C').padEnd(3)} ${(r.network||r.destination+'/'+(r.mask||'0')).padEnd(20)} via ${r.gateway||r.nextHop||'—'}`,'cli-data'));
-                    } else {
+                        d.routingTable.getAll().forEach(printRoute);
+                    } else if (!connectedRoutes.length) {
                         this.write(`  (no routes)`,'cli-dim');
                     }
                 } else if (subsub === 'nat') {
@@ -872,13 +1188,17 @@ class DeviceCLI {
                         Object.entries(d.natTable).forEach(([k,v]) => this.write(`  ${k} → ${v}`,'cli-data'));
                     } else this.write(`  (no translations)`,'cli-dim');
                 } else if (subsub === 'dhcp') {
-                    this._showDHCP();
+                    this._showDHCP(parts[3]?.toLowerCase());
                 } else if (subsub === 'arp') {
                     this._showARP();
                 } else if (subsub === 'access-lists') {
                     this._showACL();
+                } else if (subsub === 'ospf') {
+                    this._showOSPF(parts[3]?.toLowerCase());
+                } else if (subsub === 'rip') {
+                    this._showRIP();
                 } else {
-                    this.write('  ip interface | ip route | ip nat | ip dhcp | ip arp | ip access-lists','cli-dim');
+                    this.write('  ip interface | ip route | ip nat | ip dhcp | ip arp | ip access-lists | ip ospf | ip rip','cli-dim');
                 }
                 break;
 
@@ -960,8 +1280,14 @@ class DeviceCLI {
             case 'firewall-log':
                 return this._showFirewallLog();
 
+            case 'hsrp': case 'standby':
+                return this._showHSRP(parts);
+
+            case 'rip':
+                return this._showRIP();
+
             default:
-                this.write(`  show interfaces | ip route | ip interface | vlan | version | running-config | spanning-tree | arp | dhcp | cdp neighbors | bgp | bgp summary | ssh | users | crypto key | sip | qos | policy-map | firewall | firewall-log`,'cli-dim');
+                this.write(`  show interfaces | ip route | ip interface | ip nat | ip dhcp | ip rip | ip ospf | vlan | version | running-config | spanning-tree | arp | dhcp | cdp neighbors | bgp | bgp summary | hsrp | rip | ssh | users | crypto key | sip | qos | policy-map | firewall | firewall-log`,'cli-dim');
         }
     }
 
@@ -1040,6 +1366,91 @@ class DeviceCLI {
         fw.showLog(this.device, 30).forEach(l => this.write(l,'cli-data'));
     }
 
+    _showHSRP(parts) {
+        const d = this.device;
+        if (!d.hsrp?.enabled && !d.hsrp?.groups) {
+            this.write(`% HSRP not configured on ${d.name}`,'cli-warn');
+            this.write(`  Configure with: interface <intf> → standby <group> ip <vip>`,'cli-dim');
+            return;
+        }
+        this.write(`\n${d.name} — HSRP Status`,'cli-section');
+        const groups = d.hsrp.groups || {};
+        const entries = Object.entries(groups);
+        if (entries.length === 0 && d.hsrp.vip) {
+            // Legacy single-group format
+            const role = d.hsrp.role || 'unknown';
+            const prio = d.hsrp.priority || 100;
+            const vip  = d.hsrp.vip;
+            const icon = role === 'active' ? '🟢' : role === 'standby' ? '🟡' : '🔵';
+            this.write(`  Group 1: VIP ${vip}  Priority ${prio}  Role ${role.toUpperCase()} ${icon}`,'cli-data');
+            if (d.hsrp.preempt) this.write(`    Preempt: enabled`,'cli-dim');
+        } else {
+            entries.forEach(([gid, grp]) => {
+                const role = grp.role || 'unknown';
+                const icon = role === 'active' ? '🟢' : role === 'standby' ? '🟡' : '🔵';
+                this.write(`  Group ${gid}: VIP ${grp.vip || '—'}  Priority ${grp.priority ?? 100}  Role ${role.toUpperCase()} ${icon}`,'cli-data');
+                if (grp.preempt) this.write(`    Preempt: enabled`,'cli-dim');
+                if (grp.track)  this.write(`    Track: ${grp.track.interface} decrement ${grp.track.decrement}`,'cli-dim');
+                if (grp.helloTimer) this.write(`    Timers: hello ${grp.helloTimer}s hold ${grp.holdTimer}s`,'cli-dim');
+            });
+        }
+        // Show peer status
+        const sim = window.simulator;
+        if (sim) {
+            const peers = (sim.devices || []).filter(dev =>
+                dev !== d && ['Router','RouterWifi'].includes(dev.type) && dev.hsrp?.enabled
+            );
+            if (peers.length > 0) {
+                this.write(`  Peers:`,'cli-dim');
+                peers.forEach(p => {
+                    const prole = p.hsrp.role || 'unknown';
+                    this.write(`    ${p.name}: priority ${p.hsrp.priority??100} — ${prole}`,'cli-dim');
+                });
+            }
+        }
+    }
+
+    _showRIP() {
+        const d   = this.device;
+        const rip = d.rip;
+        if (!rip || !rip.networks?.length) {
+            this.write(`% RIP not configured on ${d.name}`,'cli-warn');
+            this.write(`  Configure: router rip → version 2 → network <ip>`,'cli-dim');
+            return;
+        }
+        this.write(`\n${d.name} — RIP Status`,'cli-section');
+        this.write(`  Version  : ${rip.version || 2}`,'cli-data');
+        this.write(`  Networks : ${rip.networks.join(', ')}`,'cli-data');
+        if (rip.passive?.length)  this.write(`  Passive  : ${rip.passive.join(', ')}`,'cli-dim');
+        if (rip.redistributeConnected) this.write(`  Redistribute: connected`,'cli-dim');
+        if (rip.redistributeStatic)    this.write(`  Redistribute: static`,'cli-dim');
+        if (rip.autoSummary === false)  this.write(`  Auto-summary: disabled`,'cli-dim');
+        const timers = rip.updateTimer  ? `update ${rip.updateTimer}s  invalid ${rip.invalidTimer}s  hold ${rip.holdTimer}s  flush ${rip.flushTimer}s` : 'default (30/180/180/240)';
+        this.write(`  Timers   : ${timers}`,'cli-dim');
+        // Show RIP routes in routing table
+        const routes = (d.routingTable?.routes || []).filter(r => r.type === 'R');
+        if (routes.length > 0) {
+            this.write(`\n  RIP Routes:`,'cli-section');
+            routes.forEach(r => {
+                const prefix = `${r.network || r.destination || '?'}${r.mask ? '/'+r.mask : ''}`;
+                this.write(`    R  ${prefix.padEnd(22)} [120/${r.metric??1}] via ${r.nexthop || r.gateway || r.nextHop || '—'}`,'cli-data');
+            });
+        }
+        // Neighbors
+        const sim = window.simulator;
+        if (sim) {
+            const ripNeighbors = (sim.devices || []).filter(dev =>
+                dev !== d && ['Router','RouterWifi'].includes(dev.type) &&
+                dev.rip?.networks?.length &&
+                sim.connections.some(c => (c.from === d && c.to === dev) || (c.from === dev && c.to === d))
+            );
+            if (ripNeighbors.length > 0) {
+                this.write(`\n  RIP Neighbors:`,'cli-section');
+                ripNeighbors.forEach(n => this.write(`    ${n.name} — networks: ${(n.rip.networks||[]).join(', ')}`,'cli-data'));
+            }
+        }
+    }
+
     _showRunningConfig() {
         const d = this.device;
         const h = d.config?.hostname || d.name;
@@ -1089,20 +1500,42 @@ class DeviceCLI {
         this.write(`end`,'cli-data');
     }
 
-    _showDHCP() {
+    _showDHCP(sub) {
         const pool = this.device.dhcpServer;
-        if (!pool) { this.write('  DHCP not configured','cli-dim'); return; }
-        this.write(`\nDHCP Pool: ${pool.poolName}`,'cli-section');
-        this.write(`  Network : ${pool.network}`,'cli-data');
-        this.write(`  Gateway : ${pool.gateway}`,'cli-data');
-        this.write(`  DNS     : ${(pool.dns||[]).join(', ')}`,'cli-data');
-        this.write(`  Range   : ${pool.range?.start} – ${pool.range?.end}`,'cli-data');
-        const leases = Object.entries(pool.leases||{});
-        if (leases.length) {
-            this.write(`\n  Bindings (${leases.length}):`,'cli-data');
-            leases.forEach(([ip,info])=>this.write(`    ${ip.padEnd(18)} ${info.mac||'—'}  ${info.device||'—'}`,'cli-data'));
-        } else {
-            this.write(`  No active leases`,'cli-dim');
+        if (!pool) { this.write('  DHCP not configured on this device','cli-dim'); return; }
+
+        if (sub === 'binding' || !sub) {
+            // show ip dhcp binding — tabla estilo Cisco
+            this.write(`\nIP address       Client-ID / Hardware address    Lease expiration        Type`,'cli-section');
+            this.write(`---------------  ------------------------------  ----------------------  --------`,'cli-dim');
+            const leases = Object.entries(pool.leases||{});
+            if (leases.length) {
+                leases.forEach(([ip, info]) => {
+                    const ip_     = ip.padEnd(17);
+                    const mac_    = (info.mac || '—').padEnd(32);
+                    const exp_    = (info.expiry || 'Infinite').toString().padEnd(24);
+                    const type_   = info.type || 'Automatic';
+                    this.write(`${ip_}${mac_}${exp_}${type_}`,'cli-data');
+                });
+                this.write(`\nTotal number of leases: ${leases.length}`,'cli-dim');
+            } else {
+                this.write('  (no active bindings)','cli-dim');
+            }
+        }
+
+        if (sub === 'pool' || !sub) {
+            // show ip dhcp pool — configuración del pool
+            this.write(`\nPool ${pool.poolName} :`,'cli-section');
+            this.write(`   Utilization mark (high/low)  : 100 / 0`,'cli-dim');
+            this.write(`   Subnet size (first/next)     : 0 / 0`,'cli-dim');
+            this.write(`   Total addresses              : ${pool.network}`,'cli-data');
+            this.write(`   Leased addresses             : ${Object.keys(pool.leases||{}).length}`,'cli-data');
+            this.write(`   Excluded addresses           : ${(pool.excluded||[]).join(', ') || 'none'}`,'cli-data');
+            this.write(`   Pending event                : none`,'cli-dim');
+            this.write(`   Network              : ${pool.network}`,'cli-data');
+            this.write(`   Default router       : ${pool.gateway||'—'}`,'cli-data');
+            this.write(`   DNS server           : ${(pool.dns||[]).join(', ')||'—'}`,'cli-data');
+            this.write(`   Range                : ${pool.range?.start||'—'} – ${pool.range?.end||'—'}`,'cli-data');
         }
     }
 
@@ -1127,6 +1560,72 @@ class DeviceCLI {
             this.write(`\nStandard IP access list ${num}`,'cli-section');
             rules.forEach((r,i) => this.write(`  ${i+1}0 ${r.action} ${r.proto} ${r.src} ${r.dst}`,'cli-data'));
         });
+    }
+
+    _showOSPF(sub) {
+        const d = this.device;
+        const ospf = d.ospfInstance;
+
+        if (!d.ospfNetworks?.length && !ospf) {
+            this.write('% OSPF not configured on this device','cli-err');
+            this.write('  Use: router ospf <pid>  →  network <net> <wildcard> area <id>','cli-dim');
+            return;
+        }
+
+        if (!sub || sub === 'neighbor' || sub === 'neighbors') {
+            this.write(`\nOSPF Neighbor Table — ${d.name}`,'cli-section');
+            if (!ospf) { this.write('  OSPF process not running (no connections established)','cli-dim'); return; }
+            const neighbors = ospf.getNeighbors();
+            if (!neighbors.length) {
+                this.write('  (no neighbors)','cli-dim');
+            } else {
+                this.write(`  ${'Neighbor ID'.padEnd(18)} ${'State'.padEnd(10)} ${'Dead Time'.padEnd(12)} Interface`,'cli-dim');
+                neighbors.forEach(n => {
+                    const dead = n.state === 'FULL' ? '00:00:40' : '—';
+                    this.write(`  ${(n.routerId||'—').padEnd(18)} ${(n.state||'—').padEnd(10)} ${dead.padEnd(12)} ${n.ip||'—'}`,'cli-data');
+                });
+                this.write(`\nTotal neighbors: ${neighbors.length}`,'cli-dim');
+            }
+        }
+
+        if (!sub || sub === 'database' || sub === 'lsdb') {
+            this.write(`\nOSPF Link-State Database — Area 0`,'cli-section');
+            if (!ospf) { this.write('  (no LSDB)','cli-dim'); return; }
+            const lsdb = ospf.getLSDB();
+            if (!lsdb.length) {
+                this.write('  (empty)','cli-dim');
+            } else {
+                this.write(`  ${'LSA Type'.padEnd(14)} ${'Router ID'.padEnd(18)} ${'Seq'.padEnd(8)} Networks`,'cli-dim');
+                lsdb.forEach(lsa => {
+                    const nets = (lsa.networks||[]).join(', ') || '—';
+                    this.write(`  ${(lsa.type||'Router-LSA').padEnd(14)} ${(lsa.routerId||'—').padEnd(18)} ${String(lsa.seq||1).padEnd(8)} ${nets}`,'cli-data');
+                });
+            }
+        }
+
+        if (sub === 'interface' || sub === 'interfaces') {
+            this.write(`\nOSPF Interface Info — ${d.name}`,'cli-section');
+            const nets = d.ospfNetworks || [];
+            if (!nets.length) { this.write('  No OSPF networks configured','cli-dim'); return; }
+            d.interfaces.forEach(intf => {
+                if (!intf.ipConfig?.ipAddress || intf.ipConfig.ipAddress === '0.0.0.0') return;
+                const ip = intf.ipConfig.ipAddress;
+                const area = nets.find(n => n.area)?.area || '0';
+                this.write(`  ${intf.name} — ${ip} — Area ${area} — ${ospf ? 'OSPF enabled' : 'process down'}`,'cli-data');
+            });
+        }
+
+        if (!sub) {
+            // Show general OSPF process info
+            const pid = d.routingProtocol === 'ospf' ? 1 : '—';
+            const rid = d.routerId || d.ipConfig?.ipAddress || '—';
+            this.write(`\nOSPF Process ${pid}, Router ID ${rid}`,'cli-section');
+            this.write(`  Supports only single TOS (TOS0) routes`,'cli-dim');
+            this.write(`  Number of areas: 1   SPF schedule delay: 5s`,'cli-dim');
+            const nets = d.ospfNetworks || [];
+            this.write(`  Networks in OSPF:`,'cli-data');
+            nets.forEach(n => this.write(`    ${n.network} ${n.wildcard} area ${n.area}`,'cli-data'));
+        }
     }
 
     _showSTP() {
@@ -1206,47 +1705,54 @@ class DeviceCLI {
     // ══════════════════════════════════════════════════════
     _doPing(parts) {
         const targetIP = parts[1];
-        if (!targetIP) { this.write('Usage: ping <ip>','cli-dim'); return; }
+        if (!targetIP) { this.write('Usage: ping <ip> [repeat <count>]','cli-dim'); return; }
         const net = window.simulator;
         if (!net) return;
-        const dest = net.devices.find(d => d.ipConfig?.ipAddress === targetIP);
-        const src  = this.device;
-        const srcIP = src.ipConfig?.ipAddress || '0.0.0.0';
 
-        this.write(`\nSending 5, 100-byte ICMP Echos to ${targetIP}:`,'cli-section');
+        // Soporte: ping <ip> repeat <n>
+        const repeatIdx = parts.indexOf('repeat');
+        const COUNT = repeatIdx !== -1 ? Math.min(100, Math.max(1, parseInt(parts[repeatIdx+1])||5)) : 5;
 
-        if (!dest) { 
-            for (let i=0;i<5;i++) setTimeout(()=>this.write('  .','cli-err'), i*300);
-            setTimeout(()=>this.write(`\nSuccess rate is 0% (0/5), round-trip min/avg/max = —`,'cli-data'), 1600);
-            return; 
+        const dest  = net.devices.find(d => d.ipConfig?.ipAddress === targetIP);
+        const src   = this.device;
+
+        this.write(`\nSending ${COUNT}, 100-byte ICMP Echos to ${targetIP}, timeout is 2 seconds:`,'cli-section');
+
+        if (!dest) {
+            for (let i=0;i<COUNT;i++) setTimeout(()=>this.write('  .','cli-err'), i*300);
+            setTimeout(()=>this.write(`\nSuccess rate is 0 percent (0/${COUNT})`,'cli-data'), COUNT*300+200);
+            return;
         }
 
         const ruta = net.engine.findRoute(src.id, dest.id);
         let ok = 0;
         const times = [];
-        let pending = 5;
+        let pending = COUNT;
 
-        for (let i=0;i<5;i++) {
+        for (let i=0;i<COUNT;i++) {
             setTimeout(()=>{
-                const ls = ruta.length>1 ? net.engine.getLinkState(ruta[0],ruta[1]) : null;
-                const lost = ruta.length===0 || (ls&&!ls.isUp()) || (ls&&Math.random()<ls.lossRate);
+                // sendPacket devuelve null si la ruta no existe, el firewall bloquea, o TTL=0
+                const pkt = net.sendPacket(src, dest, 'ping', 100, { ttl: 64 });
+                const ls  = ruta.length > 1 ? net.engine.getLinkState(ruta[0], ruta[1]) : null;
+                // Determinar pérdida: sin ruta, firewall bloqueó (pkt===null) o pérdida aleatoria
+                const lost = !pkt || ruta.length === 0 || (ls && !ls.isUp()) || (ls && Math.random() < (ls.lossRate || 0));
                 if (!lost) {
                     ok++;
                     const base = ls?.latency || 2;
-                    const t = Math.max(1, Math.round(base * (ruta.length - 1)));
+                    const t    = Math.max(1, Math.round(base * (ruta.length - 1) + Math.random() * base * 0.3));
+                    const ttlLeft = 64 - (ruta.length - 1);
                     times.push(t);
-                    this.write(`  !`,'cli-ok');
-                    net.sendPacket(src, dest, 'ping', 100, { ttl:64 });
+                    this.write(`  ! bytes=100 time=${t}ms TTL=${ttlLeft}`,'cli-ok');
                 } else {
                     this.write(`  .`,'cli-err');
                 }
                 pending--;
-                if (pending===0) {
-                    const rate = Math.round((ok/5)*100);
-                    const minT = times.length?Math.min(...times):'—';
-                    const maxT = times.length?Math.max(...times):'—';
-                    const avgT = times.length?Math.round(times.reduce((a,b)=>a+b,0)/times.length):'—';
-                    this.write(`\nSuccess rate is ${rate}% (${ok}/5), round-trip min/avg/max = ${minT}/${avgT}/${maxT} ms`,'cli-data');
+                if (pending === 0) {
+                    const rate  = Math.round((ok/COUNT)*100);
+                    const minT  = times.length ? Math.min(...times) : '—';
+                    const maxT  = times.length ? Math.max(...times) : '—';
+                    const avgT  = times.length ? Math.round(times.reduce((a,b)=>a+b,0)/times.length) : '—';
+                    this.write(`\nSuccess rate is ${rate} percent (${ok}/${COUNT})${times.length?`, round-trip min/avg/max = ${minT}/${avgT}/${maxT} ms`:''}`,'cli-data');
                 }
             }, i*350);
         }
@@ -1262,18 +1768,41 @@ class DeviceCLI {
         const ruta = net.engine.findRoute(this.device.id, dest.id);
         if (!ruta.length) { this.write(`% No route to host`,'cli-err'); return; }
 
-        this.write(`\nTraceroute to ${targetIP}:`,'cli-section');
+        const src = this.device;
+        this.write(`\nTraceroute to ${targetIP} (${dest.name}), 30 hops max, 32 byte packets:`,'cli-section');
+
         ruta.forEach((nodeId, idx) => {
-            if (idx===0) return;
-            setTimeout(()=>{
-                const node = net.devices.find(d=>d.id===nodeId);
-                const ls = net.engine.getLinkState(ruta[idx-1], nodeId);
-                const t  = Math.max(1, Math.round((ls?.latency||2)*idx));
-                const ip = node?.ipConfig?.ipAddress || '—';
-                this.write(`  ${idx}   ${t} ms   ${ip}   ${node?.name||nodeId}`,'cli-data');
-            }, idx*400);
+            if (idx === 0) return;  // saltar origen
+            setTimeout(() => {
+                const node = net.devices.find(d => d.id === nodeId);
+                const ls   = net.engine.getLinkState(ruta[idx - 1], nodeId);
+                const ip   = node?.ipConfig?.ipAddress || '—';
+                const name = node?.name || nodeId;
+
+                // Tiempo acumulado: suma de latencias de cada salto
+                const t1 = Math.max(1, Math.round((ls?.latency || 2) * (1 + Math.random() * 0.2)));
+                const t2 = Math.max(1, Math.round((ls?.latency || 2) * (1 + Math.random() * 0.2)));
+                const t3 = Math.max(1, Math.round((ls?.latency || 2) * (1 + Math.random() * 0.2)));
+
+                // Comprobar si el link está caído
+                if (ls && !ls.isUp()) {
+                    this.write(`  ${idx}   *   *   *   ${ip}  (link down)`,'cli-err');
+                } else {
+                    this.write(`  ${idx}   ${t1} ms  ${t2} ms  ${t3} ms   ${ip}  [${name}]`,'cli-data');
+                    // Animar el paquete tracert en el canvas
+                    const subRuta = ruta.slice(0, idx + 1);
+                    try {
+                        const pkt = new Packet({ origen: src, destino: dest, ruta: subRuta, tipo: 'tracert', ttl: idx });
+                        pkt.speed = 0.022;
+                        pkt._tracertHop    = idx;
+                        pkt._tracertRouter = node;
+                        net.packets.push(pkt);
+                    } catch(e) {}
+                }
+            }, (idx - 1) * 500);
         });
-        setTimeout(()=>this.write(`\nTrace complete.`,'cli-dim'), ruta.length*400+200);
+
+        setTimeout(() => this.write('\nTrace complete.','cli-dim'), (ruta.length - 1) * 500 + 300);
     }
 
     _doClear(parts) {
@@ -1284,6 +1813,25 @@ class DeviceCLI {
         } else if (sub==='ip' && parts[2]==='nat' && parts[3]==='translation') {
             this.device.natTable = {};
             this.write('NAT translation table cleared','cli-ok');
+        } else if (sub==='ip' && parts[2]==='dhcp' && parts[3]==='binding') {
+            // clear ip dhcp binding * | <ip>
+            const pool = this.device.dhcpServer;
+            if (!pool) { this.write('% DHCP not configured on this device','cli-err'); return; }
+            const target = parts[4];
+            if (!target || target === '*') {
+                const count = Object.keys(pool.leases||{}).length;
+                pool.leases = {};
+                if (window.dhcpEngine?.leases) window.dhcpEngine.leases = {};
+                this.write(`Cleared ${count} DHCP binding(s)`,'cli-ok');
+            } else {
+                if (pool.leases?.[target]) {
+                    delete pool.leases[target];
+                    if (window.dhcpEngine?.leases?.[target]) delete window.dhcpEngine.leases[target];
+                    this.write(`Binding ${target} removed`,'cli-ok');
+                } else {
+                    this.write(`% No binding found for ${target}`,'cli-err');
+                }
+            }
         } else if (sub==='counters') {
             this.device._totalPackets=0; this.device._droppedPackets=0;
             this.write('Counters cleared','cli-ok');
@@ -1365,6 +1913,7 @@ class DeviceCLI {
                 case 'vlan':        this.mode='config'; this.vlanContext=null; break;
                 case 'router':      this.mode='config'; break;
                 case 'bgp':         this.mode='config'; this.bgpContext=null; break;
+                case 'rip':         this.mode='config'; break;
                 case 'dhcp':        this.mode='config'; break;
                 case 'ssh':         this._exitSSH(); break;
                 case 'telephony':   this.mode='config'; break;
@@ -1387,12 +1936,13 @@ class DeviceCLI {
 
     _help() {
         const helps = {
-            user:         ['enable','ping <ip>','ping6 <ipv6>','traceroute <ip>','traceroute6 <ipv6>','tcp connect <ip> [port]','show interfaces','show version','dial <ext>','hangup'],
-            enable:       ['configure terminal','show running-config','show ip route','show ip interface','show ipv6 route','show ipv6 interface','show ipv6 neighbors','show tcp sessions','show vlan','copy run start','write','ping <ip>','ping6 <ipv6>','traceroute <ip>','traceroute6 <ipv6>','tcp connect <ip> [port]','clear ip arp','reload','dial <ext>','hangup'],
-            config:       ['hostname <n>','interface <intf>','ip route <net> <mask> <gw>','ip dhcp pool <n>','ip nat inside source list <n> interface <intf> overload','vlan <id>','router ospf <pid>','no <cmd>','telephony-service','ephone-dn <n>','ephone <n>','class-map <n>','policy-map <n>','qos apply policy-map <n> interface <intf> [in|out]'],
-            if:           ['ip address <ip> <mask>','ip address dhcp','ipv6 address <addr>/<prefix>','ipv6 enable','no shutdown','shutdown','switchport mode [access|trunk]','switchport access vlan <id>','encapsulation dot1q <vlan>','description <text>','ip nat [inside|outside]','no ip address'],
+            user:         ['enable','ping <ip>','ping6 <ipv6>','traceroute <ip>','traceroute6 <ipv6>','tcp connect <ip> [port]','show interfaces','show version','show arp','dial <ext>','hangup'],
+            enable:       ['configure terminal','show running-config','show ip route','show ip interface','show ip nat','show ip dhcp','show ip rip','show ip ospf neighbor','show ip ospf database','show ipv6 route','show ipv6 interface','show tcp sessions','show vlan','show hsrp','show rip','show bgp summary','show spanning-tree','copy run start','write','ping <ip>','ping6 <ipv6>','traceroute <ip>','traceroute6 <ipv6>','tcp connect <ip> [port]','clear ip arp','reload','dial <ext>','hangup','troubleshoot','ipv6 enable'],
+            config:       ['hostname <n>','interface <intf>','ip route <net> <mask> <gw>','ip dhcp pool <n>','ip dhcp excluded-address <ip>','ip nat inside source list <n> interface <intf> overload','ip nat inside source static <inside> <outside>','ip access-list <n> permit|deny ip|tcp|udp <src> <dst>','vlan <id>','router ospf <pid>','router rip','router bgp <asn>','spanning-tree mode [pvst|rapid-pvst]','no <cmd>','telephony-service','ephone-dn <n>','ephone <n>','class-map <n>','policy-map <n>','qos apply policy-map <n> interface <intf> [in|out]'],
+            if:           ['ip address <ip> <mask>','ip address dhcp','ipv6 address <addr>/<prefix>','ipv6 enable','no shutdown','shutdown','switchport mode [access|trunk]','switchport access vlan <id>','switchport trunk allowed vlan <vlans>','encapsulation dot1q <vlan>','description <text>','ip nat [inside|outside]','ip access-group <acl> [in|out]','ip helper-address <dhcp-server>','standby <group> ip <vip>','standby <group> priority <0-255>','standby <group> preempt','standby <group> track <intf> [decrement]','standby <group> timers <hello> <hold>','no ip address','channel-group <n>','spanning-tree portfast'],
             vlan:         ['name <n>','state [active|suspend]'],
-            router:       ['network <ip> <wildcard> area <id>','router-id <id>','passive-interface <intf>','redistribute connected'],
+            router:       ['network <ip> <wildcard> area <id>','router-id <id>','passive-interface <intf>','redistribute connected','redistribute static','default-information originate'],
+            rip:          ['version [1|2]','network <classful-ip>','no auto-summary','auto-summary','passive-interface <intf>','redistribute connected','redistribute static','timers basic <update> <invalid> <hold> <flush>','default-information originate'],
             bgp:          ['neighbor <ip> remote-as <asn>','neighbor <ip> description <text>','neighbor <ip> shutdown','network <ip> mask <mask>','redistribute connected','redistribute static','bgp router-id <id>','aggregate-address <ip> <mask>'],
             dhcp:         ['network <ip> [mask]','default-router <ip>','dns-server <ip>','lease <days>','domain-name <n>'],
             telephony:    ['max-ephones <n>','max-dn <n>','ip source-address <ip> [port]','create cnf-files','no shutdown'],
@@ -1410,6 +1960,96 @@ class DeviceCLI {
     // ══════════════════════════════════════════════════════
     //  BGP MODE  (Router(config-router)# via router bgp <ASN>)
     // ══════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════
+    //  RIP MODE  (Router(config-router)# via router rip)
+    // ══════════════════════════════════════════════════════
+    _ripMode(cmd, parts) {
+        const d   = this.device;
+        const rip = d.rip || (d.rip = { version: 2, networks: [], passive: [], redistributeConnected: false });
+
+        switch(cmd) {
+            case 'version':
+                rip.version = parseInt(parts[1]) || 2;
+                this.write(`RIP version ${rip.version}`,'cli-ok');
+                break;
+            case 'network': {
+                if (!parts[1]) return this._bad();
+                if (!rip.networks.includes(parts[1])) rip.networks.push(parts[1]);
+                this.write(`RIP network ${parts[1]} added`,'cli-ok');
+                // Install routes via Bellman-Ford engine
+                this._ripInstallRoutes();
+                break;
+            }
+            case 'no':
+                if (parts[1] === 'auto-summary') {
+                    rip.autoSummary = false;
+                    this.write(`Auto-summary disabled`,'cli-ok');
+                } else if (parts[1] === 'network' && parts[2]) {
+                    rip.networks = rip.networks.filter(n => n !== parts[2]);
+                    this.write(`RIP network ${parts[2]} removed`,'cli-ok');
+                }
+                break;
+            case 'auto-summary':
+                rip.autoSummary = true;
+                this.write(`Auto-summary enabled`,'cli-ok');
+                break;
+            case 'passive-interface':
+                if (parts[1]) {
+                    if (!rip.passive.includes(parts[1])) rip.passive.push(parts[1]);
+                    this.write(`Passive interface: ${parts[1]}`,'cli-ok');
+                }
+                break;
+            case 'redistribute':
+                if (parts[1] === 'connected') {
+                    rip.redistributeConnected = true;
+                    this.write(`Redistribute connected routes into RIP`,'cli-ok');
+                    this._ripInstallRoutes();
+                } else if (parts[1] === 'static') {
+                    rip.redistributeStatic = true;
+                    this.write(`Redistribute static routes into RIP`,'cli-ok');
+                } else {
+                    this.write(`% Redistribute target not supported: ${parts[1]}`,'cli-warn');
+                }
+                break;
+            case 'timers':
+                if (parts[1] === 'basic') {
+                    rip.updateTimer  = parseInt(parts[2]) || 30;
+                    rip.invalidTimer = parseInt(parts[3]) || 180;
+                    rip.holdTimer    = parseInt(parts[4]) || 180;
+                    rip.flushTimer   = parseInt(parts[5]) || 240;
+                    this.write(`RIP timers: update ${rip.updateTimer}s invalid ${rip.invalidTimer}s hold ${rip.holdTimer}s flush ${rip.flushTimer}s`,'cli-ok');
+                }
+                break;
+            case 'default-information':
+                if (parts[1] === 'originate') {
+                    rip.originateDefault = true;
+                    this.write(`Default-information originate enabled`,'cli-ok');
+                }
+                break;
+            default:
+                this._unknown(cmd,['version','network','no','auto-summary','passive-interface','redistribute','timers basic','default-information originate']);
+        }
+    }
+
+    _ripInstallRoutes() {
+        const d   = this.device;
+        const rip = d.rip;
+        if (!rip || !rip.networks.length) return;
+        if (!d.routingTable) d.routingTable = { routes: [] };
+        const sim = window.simulator;
+        if (!sim) return;
+        // Run Bellman-Ford-like propagation for RIP
+        try {
+            if (typeof buildRoutingTables === 'function') {
+                buildRoutingTables(sim.devices || [], sim.connections || []);
+            }
+        } catch(e) {}
+        // Mark all routes as type R
+        (d.routingTable.routes || []).forEach(r => {
+            if (!r.type || r.type === 'S') r.type = 'R';
+        });
+    }
+
     _bgpMode(cmd, parts) {
         const bgp = this.bgpContext || this.device.bgp;
         if (!bgp) { this.mode = 'config'; return; }
@@ -1518,34 +2158,16 @@ class DeviceCLI {
         const d    = this.device;
 
         if (what === 'route' || what === 'routes') {
+            if (window.ipv6Engine) { window.ipv6Engine.showRoute(d, m => this.write(m, 'cli-data')); return; }
             this.write(`\nIPv6 Routing Table — ${d.name}`, 'cli-section');
-            this.write('Codes: C-Connected, S-Static, R-RIPng, B-BGP, S*-Default', 'cli-dim');
-            const rtv6 = d.routingTableV6;
-            if (!rtv6 || !rtv6.routes?.length) {
-                this.write('  (no IPv6 routes — use: ipv6 address <addr>/<prefix> on an interface)', 'cli-dim');
-                return;
-            }
-            rtv6.entries().forEach(r => {
-                const type   = (r._type || 'S').padEnd(3);
-                const prefix = `${r.prefix}/${r.prefixLen}`;
-                const via    = r.gateway ? `via ${r.gateway}` : 'directly connected';
-                const iface  = r.iface   ? `, ${r.iface}` : '';
-                this.write(`${type} ${prefix.padEnd(32)} ${via}${iface}`, 'cli-data');
-            });
+            this.write('  (no IPv6 routes — usa: ipv6 enable)', 'cli-dim');
+            return;
 
         } else if (what === 'interface' || what === 'interfaces') {
+            if (window.ipv6Engine) { window.ipv6Engine.showInterface(d, m => this.write(m, 'cli-data')); return; }
             this.write(`\nIPv6 Interface Summary — ${d.name}`, 'cli-section');
-            const ifaces = d.interfaces?.length ? d.interfaces : [d];
-            ifaces.forEach(i => {
-                const glob = i.ipv6Config
-                    ? `${i.ipv6Config.address}/${i.ipv6Config.prefixLen}`
-                    : '(not configured)';
-                const ll   = i.ipv6LinkLocal || '(none)';
-                this.write(`  ${i.name || i.id || 'int0'}`, 'cli-section');
-                this.write(`    Global IPv6:  ${glob}`, 'cli-data');
-                this.write(`    Link-local:   ${ll}`, 'cli-data');
-                this.write(`    Status:       ${i.status || 'up'}`, 'cli-data');
-            });
+            this.write('  IPv6Engine no disponible', 'cli-dim');
+            return;
 
         } else if (what === 'neighbors') {
             this.write(`\nIPv6 Neighbor Discovery Cache — ${d.name}`, 'cli-section');
@@ -1613,8 +2235,12 @@ class DeviceCLI {
     // ══════════════════════════════════════════════════════
     _doPing6(parts) {
         const targetIPv6 = parts[1];
-        if (!targetIPv6) {
-            this.write('Usage: ping6 <ipv6-address>', 'cli-dim');
+        if (!targetIPv6) { this.write('Usage: ping6 <ipv6-address>', 'cli-dim'); return; }
+        // Preferir IPv6Engine real si está disponible
+        if (window.ipv6Engine) {
+            const eng = window.ipv6Engine;
+            if (!eng.isIPv6(targetIPv6)) { this.write(`% Dirección IPv6 inválida: ${targetIPv6}`, 'cli-err'); return; }
+            eng.ping6(this.device, targetIPv6, 4, m => this.write(m, 'cli-data'));
             return;
         }
         if (typeof IPv6Utils === 'undefined' || !IPv6Utils.isValid(targetIPv6)) {
@@ -2390,6 +3016,44 @@ class DeviceCLI {
         this._classMapCtx = name;
         this.write(`Configuring class-map ${name}`, 'cli-ok');
         this.write('  Commands: match dscp <value> | match protocol <proto> | match ip dscp <val>','cli-dim');
+    }
+
+    _configSdwan(parts) {
+        const d = this.device;
+        if (!['Router','RouterWifi','SDWAN'].includes(d.type)) {
+            this.write('% sdwan: comando solo disponible en dispositivos SDWAN/Router','cli-err');
+            return;
+        }
+        const sub = parts[1]?.toLowerCase();
+        if (sub === 'policy') {
+            if (!d.sdwanPolicy) d.sdwanPolicy = { links: [] };
+            const action = parts[2]?.toLowerCase();
+            if (action === 'link') {
+                const linkName = parts[3];
+                const linkCmd  = parts[4]?.toLowerCase();
+                if (!linkName) { this.write('% Usage: sdwan policy link <name> priority <n>','cli-warn'); return; }
+                let link = d.sdwanPolicy.links.find(l => l.name === linkName);
+                if (!link) { link = { name: linkName }; d.sdwanPolicy.links.push(link); }
+                if (linkCmd === 'priority') {
+                    link.priority = parseInt(parts[5]) || 1;
+                    if (link.priority === 1) d.sdwanPolicy.primaryLink = linkName;
+                    this.write(`SD-WAN: link ${linkName} priority ${link.priority}`, 'cli-ok');
+                } else if (linkCmd === 'failover') {
+                    link.failover = parts[5]?.toLowerCase() !== 'manual';
+                    d.sdwanPolicy.failover = link.failover;
+                    this.write(`SD-WAN: link ${linkName} failover ${parts[5] || 'auto'}`, 'cli-ok');
+                } else if (linkCmd === 'bandwidth') {
+                    link.bandwidth = parts[5];
+                    this.write(`SD-WAN: link ${linkName} bandwidth ${parts[5]}`, 'cli-ok');
+                } else {
+                    this.write(`SD-WAN policy for link ${linkName} saved`, 'cli-ok');
+                }
+            } else {
+                this.write('SD-WAN policy — use: link <name> priority <n> | link <name> failover auto', 'cli-ok');
+            }
+        } else {
+            this.write('% Usage: sdwan policy link <name> [priority <n>|failover auto]', 'cli-warn');
+        }
     }
 
     _configQoS(parts) {

@@ -26,6 +26,8 @@ class NetworkRenderer {
         this._lastFrame   = 0;
         this._frameTarget = 1000 / 60; // ~16.67 ms
         this._rafId       = null;
+        this._dirty       = true;   // redraw static layer on next frame
+        this._staticCache = null;   // offscreen canvas for static layer
         // ── Caché de íconos PNG/SVG ──────────────────────────────────
         // Estado por tipo: null = no intentado, 'loading' = cargando,
         // HTMLImageElement = listo para dibujar, false = no existe (usar fallback)
@@ -177,21 +179,64 @@ class NetworkRenderer {
         }
     }
 
+    /** Marcar que la capa estática necesita redibujarse */
+    markDirty() { this._dirty = true; }
+
     render() {
         const { ctx, sim } = this;
         const { canvas, panX, panY, zoom } = sim;
+
+        const hasPackets = sim.packets && sim.packets.length > 0;
+
+        // ── Capa estática (grid + cables + dispositivos + anotaciones) ──
+        // Solo se redibuja cuando hay cambios, usando un offscreen canvas como cache.
+        if (this._dirty || !this._staticCache ||
+            this._staticCache.width !== canvas.width ||
+            this._staticCache.height !== canvas.height) {
+
+            // Crear / redimensionar offscreen canvas
+            if (!this._staticCache ||
+                this._staticCache.width !== canvas.width ||
+                this._staticCache.height !== canvas.height) {
+                this._staticCache = document.createElement('canvas');
+                this._staticCache.width  = canvas.width;
+                this._staticCache.height = canvas.height;
+            }
+            const sCtx = this._staticCache.getContext('2d');
+            sCtx.clearRect(0, 0, canvas.width, canvas.height);
+            sCtx.save();
+            sCtx.translate(panX, panY);
+            sCtx.scale(zoom, zoom);
+            sCtx.setLineDash([]); sCtx.shadowBlur = 0;
+            sCtx.shadowColor = 'transparent'; sCtx.globalAlpha = 1;
+            // Redirect sim.ctx to offscreen — same pattern used by exportToPNG
+            const origCtx = this.sim.ctx;
+            try {
+                this.sim.ctx = sCtx;
+                this.drawGrid();
+                this.drawConnections();
+                this.drawDevices();
+                this.drawAnnotations();
+            } finally {
+                this.sim.ctx = origCtx;
+                sCtx.restore();
+            }
+            this._dirty = false;
+        }
+
+        // ── Compositar capas ─────────────────────────────────────────
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.save();
-        ctx.translate(panX, panY);
-        ctx.scale(zoom, zoom);
-        ctx.setLineDash([]); ctx.shadowBlur = 0;
-        ctx.shadowColor = 'transparent'; ctx.globalAlpha = 1;
-        this.drawGrid();
-        this.drawConnections();
-        this.drawDevices();
-        this.drawAnnotations();
-        this.drawPackets();
-        ctx.restore();
+        ctx.drawImage(this._staticCache, 0, 0);
+
+        // Capa dinámica: paquetes (siempre animados sin invalidar cache)
+        if (hasPackets) {
+            ctx.save();
+            ctx.translate(panX, panY);
+            ctx.scale(zoom, zoom);
+            this.drawPackets();
+            ctx.restore();
+        }
+
         this.drawZoomHUD();
     }
 
@@ -1104,3 +1149,6 @@ class NetworkRenderer {
 if (typeof NetworkRenderer !== "undefined") window.NetworkRenderer = NetworkRenderer;
 if (typeof snapToGrid !== "undefined") window.snapToGrid = snapToGrid;
 if (typeof GRID_SIZE !== "undefined") window.GRID_SIZE = GRID_SIZE;
+
+// — ES6 Export —
+export { NetworkRenderer, snapToGrid, GRID_SIZE };

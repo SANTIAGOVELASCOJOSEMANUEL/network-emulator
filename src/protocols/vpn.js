@@ -586,6 +586,8 @@ if (typeof NetUtils !== 'undefined' && !NetUtils.nextIP) {
 window._vpnInit = function(simulator) {
     const mgr = new VPNManager(simulator);
     window.vpnManager = mgr;
+    if (typeof ServiceRegistry !== 'undefined') ServiceRegistry.register('vpn', mgr);
+    if (typeof EventBus !== 'undefined') EventBus.emit('SERVICE_READY', { name: 'vpn', service: mgr });
 
     // CLI helpers
     window._vpnStatus = () => {
@@ -620,3 +622,37 @@ window.VPN_STATE  = VPN_STATE;
 if (typeof SecurityAssociation !== "undefined") window.SecurityAssociation = SecurityAssociation;
 if (typeof GRETunnel !== "undefined") window.GRETunnel = GRETunnel;
 if (typeof IPSEC_PHASE !== "undefined") window.IPSEC_PHASE = IPSEC_PHASE;
+
+// — ES6 Export —
+export { VPNTunnel, VPNManager, VPN_TYPE, VPN_STATE };
+
+export function initVPN(simulator) {
+    const mgr = new VPNManager(simulator);
+    window.vpnManager = mgr;
+    if (typeof ServiceRegistry !== 'undefined') ServiceRegistry.register('vpn', mgr);
+    if (typeof EventBus !== 'undefined') EventBus.emit('SERVICE_READY', { name: 'vpn', service: mgr });
+
+    // CLI helpers
+    window._vpnStatus = () => {
+        for (const t of mgr.tunnels.values()) {
+            window.networkConsole?.writeToConsole(t.summary());
+        }
+    };
+
+    window._vpnConnect = (id) => {
+        const t = mgr.tunnels.get(id);
+        if (!t) return `Túnel '${id}' no encontrado`;
+        t.connect();
+        return `Conectando ${id}…`;
+    };
+
+    window._vpnDisconnect = (id) => {
+        const t = mgr.tunnels.get(id);
+        if (!t) return `Túnel '${id}' no encontrado`;
+        t.disconnect();
+        return `${id} desconectado`;
+    };
+
+    console.log('[VPN] VPNManager inicializado');
+    return mgr;
+}

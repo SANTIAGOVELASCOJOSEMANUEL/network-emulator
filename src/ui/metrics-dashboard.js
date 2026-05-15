@@ -101,6 +101,103 @@ class MetricsDashboard {
             .mdb-badge.down { background: rgba(239,68,68,.15);  color: #f87171; }
             .mdb-drop-pos { color: #ef4444; }
             .mdb-empty { text-align: center; padding: 20px; color: #334155; font-size: 10px; line-height: 1.8; }
+
+            /* ── ALERTAS ── */
+            .mdb-alert-badge {
+                display: inline-flex; align-items: center; justify-content: center;
+                min-width: 16px; height: 16px; border-radius: 8px;
+                background: #ef4444; color: #fff; font-size: 9px; font-weight: 700;
+                padding: 0 4px; margin-left: 6px; animation: mdbBadgePop .2s ease;
+            }
+            .mdb-alert-badge.warn { background: #f59e0b; }
+            .mdb-alert-badge.hidden { display: none; }
+            @keyframes mdbBadgePop { from { transform: scale(0); } to { transform: scale(1); } }
+
+            .mdb-tabs { display: flex; border-bottom: 1px solid #0e2a38; flex-shrink: 0; }
+            .mdb-tab {
+                flex: 1; padding: 6px 4px; font-size: 9px; font-weight: 700;
+                letter-spacing: .06em; text-transform: uppercase; text-align: center;
+                cursor: pointer; color: #475569; border-bottom: 2px solid transparent;
+                transition: all .15s; background: none; border-top: none; border-left: none; border-right: none;
+                font-family: inherit;
+            }
+            .mdb-tab.active { color: #06b6d4; border-bottom-color: #06b6d4; }
+            .mdb-tab.alert-tab.has-crit { color: #ef4444; border-bottom-color: #ef4444; }
+            .mdb-tab.alert-tab.has-warn { color: #f59e0b; border-bottom-color: #f59e0b; }
+
+            #mdbAlertsPanel { display: none; }
+            #mdbAlertsPanel.active { display: block; }
+            #mdbMetricsPanel.active { display: block; }
+            #mdbMetricsPanel { display: none; }
+
+            .mdb-thresholds {
+                background: rgba(6,182,212,.05); border: 1px solid rgba(6,182,212,.12);
+                border-radius: 8px; padding: 10px 12px; margin-bottom: 10px;
+            }
+            .mdb-thr-title { font-size: 9px; color: #06b6d4; text-transform: uppercase; letter-spacing: .07em; margin-bottom: 8px; }
+            .mdb-thr-row {
+                display: grid; grid-template-columns: 1fr auto auto auto; align-items: center;
+                gap: 6px; margin-bottom: 5px;
+            }
+            .mdb-thr-row:last-child { margin-bottom: 0; }
+            .mdb-thr-label { font-size: 9px; color: #94a3b8; }
+            .mdb-thr-input {
+                width: 52px; background: #0d1117; border: 1px solid #1e3a55;
+                color: #e2e8f0; font-family: inherit; font-size: 9px; font-weight: 700;
+                padding: 3px 5px; border-radius: 4px; text-align: right;
+            }
+            .mdb-thr-input:focus { outline: none; border-color: #06b6d4; }
+            .mdb-thr-unit { font-size: 8px; color: #475569; width: 22px; }
+            .mdb-thr-sev {
+                font-size: 8px; padding: 2px 6px; border-radius: 3px; font-weight: 700; cursor: pointer;
+                border: none; font-family: inherit;
+            }
+            .mdb-thr-sev.crit { background: rgba(239,68,68,.2); color: #ef4444; }
+            .mdb-thr-sev.warn { background: rgba(245,158,11,.2); color: #f59e0b; }
+
+            /* Lista de alertas activas */
+            .mdb-alert-list { display: flex; flex-direction: column; gap: 5px; }
+            .mdb-alert-item {
+                display: flex; align-items: flex-start; gap: 7px;
+                background: rgba(255,255,255,.03); border-radius: 6px;
+                padding: 7px 10px; border-left: 3px solid;
+                animation: mdbSlideIn .2s ease;
+            }
+            @keyframes mdbSlideIn { from { opacity: 0; transform: translateX(8px); } to { opacity: 1; transform: translateX(0); } }
+            .mdb-alert-item.crit { border-left-color: #ef4444; }
+            .mdb-alert-item.warn { border-left-color: #f59e0b; }
+            .mdb-alert-icon { font-size: 13px; flex-shrink: 0; margin-top: 1px; }
+            .mdb-alert-content { flex: 1; min-width: 0; }
+            .mdb-alert-msg { font-size: 10px; color: #e2e8f0; line-height: 1.4; }
+            .mdb-alert-meta { font-size: 8px; color: #475569; margin-top: 2px; }
+            .mdb-alert-val { font-weight: 700; }
+            .mdb-alert-val.crit { color: #f87171; }
+            .mdb-alert-val.warn { color: #fbbf24; }
+            .mdb-no-alerts { text-align: center; padding: 24px 12px; color: #334155; font-size: 10px; line-height: 2; }
+            .mdb-no-alerts-icon { font-size: 28px; display: block; margin-bottom: 6px; }
+
+            /* Toast */
+            #mdbToastArea { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 9999; display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
+            .mdb-toast {
+                display: flex; align-items: center; gap: 8px;
+                background: #0d1117; border: 1.5px solid; border-radius: 8px;
+                padding: 9px 14px; font-family: 'JetBrains Mono', monospace;
+                font-size: 10px; color: #e2e8f0; white-space: nowrap;
+                box-shadow: 0 6px 24px rgba(0,0,0,.5);
+                animation: mdbToastIn .25s ease forwards;
+                pointer-events: none;
+            }
+            .mdb-toast.crit { border-color: #ef4444; }
+            .mdb-toast.warn { border-color: #f59e0b; }
+            @keyframes mdbToastIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+            @keyframes mdbToastOut { from { opacity: 1; } to { opacity: 0; transform: translateY(6px); } }
+            .mdb-alert-clear-btn {
+                width: 100%; padding: 5px; border-radius: 5px; margin-top: 8px;
+                font-family: inherit; font-size: 9px; font-weight: 700; letter-spacing: .05em;
+                background: rgba(239,68,68,.1); color: #f87171; border: 1px solid rgba(239,68,68,.2);
+                cursor: pointer; transition: all .15s;
+            }
+            .mdb-alert-clear-btn:hover { background: rgba(239,68,68,.2); }
         `;
         document.head.appendChild(style);
 
@@ -111,6 +208,7 @@ class MetricsDashboard {
             <div id="mdbHeader">
                 <span class="mdb-title">◈ MÉTRICAS DE RED</span>
                 <span class="mdb-pulse off" id="mdbPulse"></span>
+                <span class="mdb-alert-badge hidden" id="mdbAlertBadge">0</span>
                 <button id="mdbClose">✕</button>
             </div>
             <div class="mdb-toolbar">
@@ -118,45 +216,118 @@ class MetricsDashboard {
                 <button class="mdb-btn stop"  id="mdbStop">⏹ Detener</button>
                 <button class="mdb-btn clear" id="mdbClear">⌫ Limpiar</button>
             </div>
+            <div class="mdb-tabs">
+                <button class="mdb-tab active" id="mdbTabMetrics" data-tab="metrics">Métricas</button>
+                <button class="mdb-tab alert-tab" id="mdbTabAlerts" data-tab="alerts">⚡ Alertas</button>
+            </div>
             <div class="mdb-body">
-                <div class="mdb-kpi-grid">
-                    <div class="mdb-kpi">
-                        <div class="mdb-kpi-val" id="kpiThru">—<span class="mdb-kpi-unit">Mb/s</span></div>
-                        <div class="mdb-kpi-lbl">Throughput</div>
+                <!-- PANEL MÉTRICAS -->
+                <div id="mdbMetricsPanel" class="active">
+                    <div class="mdb-kpi-grid">
+                        <div class="mdb-kpi">
+                            <div class="mdb-kpi-val" id="kpiThru">—<span class="mdb-kpi-unit">Mb/s</span></div>
+                            <div class="mdb-kpi-lbl">Throughput</div>
+                        </div>
+                        <div class="mdb-kpi">
+                            <div class="mdb-kpi-val" id="kpiLat">—<span class="mdb-kpi-unit">ms</span></div>
+                            <div class="mdb-kpi-lbl">Latencia avg</div>
+                        </div>
+                        <div class="mdb-kpi">
+                            <div class="mdb-kpi-val" id="kpiDrop">—</div>
+                            <div class="mdb-kpi-lbl">Drops total</div>
+                        </div>
+                        <div class="mdb-kpi">
+                            <div class="mdb-kpi-val" id="kpiLinks">—</div>
+                            <div class="mdb-kpi-lbl">Enlcs activos</div>
+                        </div>
                     </div>
-                    <div class="mdb-kpi">
-                        <div class="mdb-kpi-val" id="kpiLat">—<span class="mdb-kpi-unit">ms</span></div>
-                        <div class="mdb-kpi-lbl">Latencia avg</div>
+                    <div class="mdb-charts-row">
+                        <div class="mdb-chart-card">
+                            <div class="mdb-chart-title">Throughput Mb/s</div>
+                            <canvas class="mdb-spark" id="sparkThru"></canvas>
+                        </div>
+                        <div class="mdb-chart-card">
+                            <div class="mdb-chart-title">Latencia ms</div>
+                            <canvas class="mdb-spark" id="sparkLat"></canvas>
+                        </div>
+                        <div class="mdb-chart-card">
+                            <div class="mdb-chart-title">Drops/tick</div>
+                            <canvas class="mdb-spark" id="sparkDrop"></canvas>
+                        </div>
                     </div>
-                    <div class="mdb-kpi">
-                        <div class="mdb-kpi-val" id="kpiDrop">—</div>
-                        <div class="mdb-kpi-lbl">Drops total</div>
-                    </div>
-                    <div class="mdb-kpi">
-                        <div class="mdb-kpi-val" id="kpiLinks">—</div>
-                        <div class="mdb-kpi-lbl">Enlcs activos</div>
+                    <div class="mdb-section-hdr">Métricas por enlace</div>
+                    <div id="mdbLinksBody">
+                        <div class="mdb-empty">Inicia la captura para ver métricas por enlace.</div>
                     </div>
                 </div>
-                <div class="mdb-charts-row">
-                    <div class="mdb-chart-card">
-                        <div class="mdb-chart-title">Throughput Mb/s</div>
-                        <canvas class="mdb-spark" id="sparkThru"></canvas>
+                <!-- PANEL ALERTAS -->
+                <div id="mdbAlertsPanel">
+                    <div class="mdb-thresholds">
+                        <div class="mdb-thr-title">⚙ Umbrales de alerta</div>
+                        <div class="mdb-thr-row">
+                            <span class="mdb-thr-label">Drops acum. (warning)</span>
+                            <input class="mdb-thr-input" id="thrDropWarn" type="number" min="0" value="5">
+                            <span class="mdb-thr-unit">pkts</span>
+                            <span class="mdb-thr-sev warn">WARN</span>
+                        </div>
+                        <div class="mdb-thr-row">
+                            <span class="mdb-thr-label">Drops acum. (crítico)</span>
+                            <input class="mdb-thr-input" id="thrDropCrit" type="number" min="0" value="20">
+                            <span class="mdb-thr-unit">pkts</span>
+                            <span class="mdb-thr-sev crit">CRIT</span>
+                        </div>
+                        <div class="mdb-thr-row">
+                            <span class="mdb-thr-label">Ancho de banda (warning)</span>
+                            <input class="mdb-thr-input" id="thrBwWarn" type="number" min="0" max="100" value="70">
+                            <span class="mdb-thr-unit">%</span>
+                            <span class="mdb-thr-sev warn">WARN</span>
+                        </div>
+                        <div class="mdb-thr-row">
+                            <span class="mdb-thr-label">Ancho de banda (crítico)</span>
+                            <input class="mdb-thr-input" id="thrBwCrit" type="number" min="0" max="100" value="90">
+                            <span class="mdb-thr-unit">%</span>
+                            <span class="mdb-thr-sev crit">CRIT</span>
+                        </div>
+                        <div class="mdb-thr-row">
+                            <span class="mdb-thr-label">Latencia (warning)</span>
+                            <input class="mdb-thr-input" id="thrLatWarn" type="number" min="0" value="50">
+                            <span class="mdb-thr-unit">ms</span>
+                            <span class="mdb-thr-sev warn">WARN</span>
+                        </div>
+                        <div class="mdb-thr-row">
+                            <span class="mdb-thr-label">Latencia (crítico)</span>
+                            <input class="mdb-thr-input" id="thrLatCrit" type="number" min="0" value="150">
+                            <span class="mdb-thr-unit">ms</span>
+                            <span class="mdb-thr-sev crit">CRIT</span>
+                        </div>
+                        <div class="mdb-thr-row">
+                            <span class="mdb-thr-label">Cola saturada (warning)</span>
+                            <input class="mdb-thr-input" id="thrQWarn" type="number" min="0" max="100" value="60">
+                            <span class="mdb-thr-unit">%</span>
+                            <span class="mdb-thr-sev warn">WARN</span>
+                        </div>
+                        <div class="mdb-thr-row">
+                            <span class="mdb-thr-label">Pérdida de paquetes</span>
+                            <input class="mdb-thr-input" id="thrLossWarn" type="number" min="0" max="100" step="0.1" value="1">
+                            <span class="mdb-thr-unit">%</span>
+                            <span class="mdb-thr-sev warn">WARN</span>
+                        </div>
                     </div>
-                    <div class="mdb-chart-card">
-                        <div class="mdb-chart-title">Latencia ms</div>
-                        <canvas class="mdb-spark" id="sparkLat"></canvas>
+                    <div class="mdb-section-hdr">Alertas activas <span id="mdbAlertCount" style="color:#475569">(0)</span></div>
+                    <div id="mdbAlertList">
+                        <div class="mdb-no-alerts">
+                            <span class="mdb-no-alerts-icon">✅</span>
+                            Sin alertas activas.<br>
+                            <span style="color:#1e3a55">Los umbrales se evalúan en cada tick.</span>
+                        </div>
                     </div>
-                    <div class="mdb-chart-card">
-                        <div class="mdb-chart-title">Drops/tick</div>
-                        <canvas class="mdb-spark" id="sparkDrop"></canvas>
-                    </div>
-                </div>
-                <div class="mdb-section-hdr">Métricas por enlace</div>
-                <div id="mdbLinksBody">
-                    <div class="mdb-empty">Inicia la captura para ver métricas por enlace.</div>
                 </div>
             </div>
         `;
+        // Toast area (fuera del panel, fijo en la ventana)
+        const toastArea = document.createElement('div');
+        toastArea.id = 'mdbToastArea';
+        document.body.appendChild(toastArea);
         document.body.appendChild(panel);
         this._panel = panel;
 
@@ -165,6 +336,17 @@ class MetricsDashboard {
         panel.querySelector('#mdbStart').onclick  = () => this.start();
         panel.querySelector('#mdbStop').onclick   = () => this.stop();
         panel.querySelector('#mdbClear').onclick  = () => this.clear();
+
+        // Tabs
+        panel.querySelectorAll('.mdb-tab').forEach(tab => {
+            tab.onclick = () => this._switchTab(tab.dataset.tab);
+        });
+
+        // Sistema de alertas
+        this._alerts       = [];          // {id, sev, msg, value, threshold, time, source}
+        this._alertHistory = [];          // historial completo (últimas 100)
+        this._activeAlertIds = new Set(); // IDs de alertas actualmente disparadas
+        this._currentTab   = 'metrics';
 
         // Drag
         let ox = 0, oy = 0;
@@ -285,6 +467,192 @@ class MetricsDashboard {
         ctx.stroke();
     }
 
+    // ── TABS ───────────────────────────────────────────────────────────
+    _switchTab(tab) {
+        this._currentTab = tab;
+        this._panel.querySelectorAll('.mdb-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+        const metrics = this._panel.querySelector('#mdbMetricsPanel');
+        const alerts  = this._panel.querySelector('#mdbAlertsPanel');
+        if (metrics) metrics.classList.toggle('active', tab === 'metrics');
+        if (alerts)  alerts.classList.toggle('active', tab === 'alerts');
+    }
+
+    // ── SISTEMA DE ALERTAS ─────────────────────────────────────────────
+    _getThr(id) {
+        const el = document.getElementById(id);
+        return el ? parseFloat(el.value) : NaN;
+    }
+
+    /** Evalúa umbrales y emite alertas según el estado actual de la red */
+    _evaluateAlerts(rows, totalDrops, avgLat) {
+        const now = new Date();
+        const fmt  = d => d.toLocaleTimeString('es', { hour12: false });
+        const newActiveIds = new Set();
+        const toFire = [];   // alertas nuevas que deben dispararse como toast
+
+        const thrDropWarn = this._getThr('thrDropWarn');
+        const thrDropCrit = this._getThr('thrDropCrit');
+        const thrBwWarn   = this._getThr('thrBwWarn');
+        const thrBwCrit   = this._getThr('thrBwCrit');
+        const thrLatWarn  = this._getThr('thrLatWarn');
+        const thrLatCrit  = this._getThr('thrLatCrit');
+        const thrQWarn    = this._getThr('thrQWarn');
+        const thrLossWarn = this._getThr('thrLossWarn');
+
+        const check = (id, sev, msg, value, threshold, source) => {
+            newActiveIds.add(id);
+            const isNew = !this._activeAlertIds.has(id);
+            if (isNew) toFire.push({ id, sev, msg, value, threshold, source, time: fmt(now) });
+        };
+
+        // ── Drops globales ──
+        if (!isNaN(thrDropCrit) && totalDrops >= thrDropCrit && thrDropCrit > 0) {
+            check('drops_crit', 'crit', `Drops acumulados críticos`, totalDrops, thrDropCrit, 'Red global');
+        } else if (!isNaN(thrDropWarn) && totalDrops >= thrDropWarn && thrDropWarn > 0) {
+            check('drops_warn', 'warn', `Drops acumulados elevados`, totalDrops, thrDropWarn, 'Red global');
+        }
+
+        // ── Latencia global ──
+        if (!isNaN(thrLatCrit) && avgLat > 0 && avgLat >= thrLatCrit) {
+            check('lat_crit', 'crit', `Latencia promedio crítica`, avgLat.toFixed(1), thrLatCrit, 'Red global');
+        } else if (!isNaN(thrLatWarn) && avgLat > 0 && avgLat >= thrLatWarn) {
+            check('lat_warn', 'warn', `Latencia promedio elevada`, avgLat.toFixed(1), thrLatWarn, 'Red global');
+        }
+
+        // ── Por enlace ──
+        rows.forEach(r => {
+            if (r.status !== 'up') return;
+            const safeId = r.label.replace(/[^a-z0-9]/gi, '_');
+
+            // Ancho de banda
+            if (!isNaN(thrBwCrit) && r.bwPct >= thrBwCrit) {
+                check(`bw_crit_${safeId}`, 'crit', `Enlace al ${r.bwPct}% de capacidad`, r.bwPct, thrBwCrit, r.label);
+            } else if (!isNaN(thrBwWarn) && r.bwPct >= thrBwWarn) {
+                check(`bw_warn_${safeId}`, 'warn', `Enlace usando ${r.bwPct}% de BW`, r.bwPct, thrBwWarn, r.label);
+            }
+
+            // Cola
+            if (!isNaN(thrQWarn) && r.qPct >= thrQWarn) {
+                const qSev = r.qPct >= 90 ? 'crit' : 'warn';
+                check(`q_${qSev}_${safeId}`, qSev, `Cola al ${r.qPct}% de capacidad`, r.qPct, thrQWarn, r.label);
+            }
+
+            // Pérdida de paquetes
+            const lossPct = r.loss * 100;
+            if (!isNaN(thrLossWarn) && lossPct >= thrLossWarn) {
+                const lossSev = lossPct >= thrLossWarn * 5 ? 'crit' : 'warn';
+                check(`loss_${lossSev}_${safeId}`, lossSev, `Pérdida de ${lossPct.toFixed(1)}% en enlace`, lossPct.toFixed(1), thrLossWarn, r.label);
+            }
+        });
+
+        // Actualizar estado activo
+        this._activeAlertIds = newActiveIds;
+
+        // Construir lista de alertas activas para render
+        this._alerts = [];
+        newActiveIds.forEach(id => {
+            const fired = toFire.find(a => a.id === id);
+            if (fired) {
+                this._alertHistory.unshift(fired);
+                if (this._alertHistory.length > 100) this._alertHistory.pop();
+                this._alerts.push(fired);
+            } else {
+                // Mantener la alerta activa sin disparar toast de nuevo
+                const prev = this._alertHistory.find(a => a.id === id);
+                if (prev) this._alerts.push(prev);
+            }
+        });
+
+        // Disparar toasts solo para las nuevas
+        toFire.forEach(a => this._showToast(a));
+
+        // Actualizar badge y tab
+        this._updateAlertBadge();
+        this._renderAlerts();
+    }
+
+    _updateAlertBadge() {
+        const badge = document.getElementById('mdbAlertBadge');
+        const alertTab = this._panel.querySelector('.mdb-tab.alert-tab');
+        const count = this._alerts.length;
+
+        if (badge) {
+            badge.textContent = count;
+            badge.classList.toggle('hidden', count === 0);
+            const hasCrit = this._alerts.some(a => a.sev === 'crit');
+            badge.classList.toggle('warn', !hasCrit && count > 0);
+        }
+
+        if (alertTab) {
+            alertTab.classList.remove('has-crit', 'has-warn');
+            if (this._alerts.some(a => a.sev === 'crit')) alertTab.classList.add('has-crit');
+            else if (count > 0) alertTab.classList.add('has-warn');
+        }
+
+        const countEl = document.getElementById('mdbAlertCount');
+        if (countEl) countEl.textContent = `(${count})`;
+    }
+
+    _renderAlerts() {
+        const list = document.getElementById('mdbAlertList');
+        if (!list) return;
+
+        if (!this._alerts.length) {
+            list.innerHTML = `<div class="mdb-no-alerts">
+                <span class="mdb-no-alerts-icon">✅</span>
+                Sin alertas activas.<br>
+                <span style="color:#1e3a55">Todos los umbrales están dentro del rango normal.</span>
+            </div>`;
+            return;
+        }
+
+        const icons = { crit: '🔴', warn: '🟡' };
+        const sorted = [...this._alerts].sort((a, b) => (a.sev === 'crit' ? -1 : 1));
+
+        list.innerHTML = `<div class="mdb-alert-list">` +
+            sorted.map(a => `
+                <div class="mdb-alert-item ${a.sev}">
+                    <span class="mdb-alert-icon">${icons[a.sev]}</span>
+                    <div class="mdb-alert-content">
+                        <div class="mdb-alert-msg">${a.msg}:
+                            <span class="mdb-alert-val ${a.sev}">${a.value}</span>
+                            <span style="color:#475569"> (umbral: ${a.threshold})</span>
+                        </div>
+                        <div class="mdb-alert-meta">${a.source} · ${a.time}</div>
+                    </div>
+                </div>`).join('') +
+        `</div>
+        <button class="mdb-alert-clear-btn" onclick="
+            const el=this.closest('#mdbAlertsPanel').querySelector('#mdbAlertList');
+        ">⌫ Limpiar historial</button>`;
+
+        // Attach clear button handler properly
+        const btn = list.querySelector('.mdb-alert-clear-btn');
+        if (btn) btn.onclick = () => this._clearAlerts();
+    }
+
+    _clearAlerts() {
+        this._alerts = [];
+        this._alertHistory = [];
+        this._activeAlertIds.clear();
+        this._updateAlertBadge();
+        this._renderAlerts();
+    }
+
+    _showToast(alert) {
+        const area = document.getElementById('mdbToastArea');
+        if (!area) return;
+        const icons = { crit: '🔴', warn: '🟡' };
+        const toast = document.createElement('div');
+        toast.className = `mdb-toast ${alert.sev}`;
+        toast.innerHTML = `${icons[alert.sev]} <strong>${alert.source}:</strong>&nbsp;${alert.msg} — <strong>${alert.value}</strong>`;
+        area.appendChild(toast);
+        setTimeout(() => {
+            toast.style.animation = 'mdbToastOut .3s ease forwards';
+            setTimeout(() => toast.remove(), 300);
+        }, 4000);
+    }
+
     // ── CONTROL ────────────────────────────────────────────────────────
     show() {
         this._panel.style.display = 'flex';
@@ -321,6 +689,9 @@ class MetricsDashboard {
         this._lastTotalDrop = 0;
         this._baseLoad      = {};
         this._ticks         = 0;
+        this._alerts        = [];
+        this._alertHistory  = [];
+        this._activeAlertIds = new Set();
 
         // Limpiar charts
         Object.values(this._charts).forEach(ch => {
@@ -336,6 +707,8 @@ class MetricsDashboard {
         });
         const body = document.getElementById('mdbLinksBody');
         if (body) body.innerHTML = '<div class="mdb-empty">Historial limpiado.</div>';
+        this._updateAlertBadge();
+        this._renderAlerts();
     }
 
     // ── TICK DE MÉTRICAS ───────────────────────────────────────────────
@@ -429,6 +802,9 @@ class MetricsDashboard {
         this._pushChart('thru', totalThru);
         this._pushChart('lat',  avgLat);
         this._pushChart('drop', totalDropDelta);
+
+        // Evaluar alertas
+        this._evaluateAlerts(rows, totalDrops, avgLat);
 
         // Tabla de enlaces
         this._renderTable(rows);

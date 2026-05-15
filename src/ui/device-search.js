@@ -297,3 +297,10 @@ window._deviceSearchInit = function(simulator) {
 };
 // — Exponer al scope global (compatibilidad legacy) —
 if (typeof DeviceSearch !== "undefined") window.DeviceSearch = DeviceSearch;
+
+// — ES6 Export —
+export { DeviceSearch };
+
+export function initDeviceSearch(simulator) {
+    window.deviceSearch = new DeviceSearch(simulator);
+}

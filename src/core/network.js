@@ -15,6 +15,7 @@ class NetworkSimulator {
 
         this.selectedDevice    = null;
         this.nextId            = 1;
+        this._nextConnId       = 1;   // contador monotónico para IDs de conexión (evita colisiones al borrar)
         this.simulationRunning = false;
         this.animationFrame    = null;
         this._waveOffset       = 0;
@@ -60,6 +61,7 @@ class NetworkSimulator {
     // ── DRAW ─────────────────────────────────────
     draw() {
         // _waveOffset is advanced only by _startCableAnim / _anim to avoid double-stepping
+        this.renderer.markDirty();   // any explicit draw() call means topology changed
         this.renderer.render();
         if (this.simulationRunning) this._updatePackets();
     }
@@ -177,6 +179,9 @@ class NetworkSimulator {
         this.devices.push(dev);
         this.engine.addNode(dev.id);
         this.draw();
+        // Emitir evento de dispositivo agregado
+        if (window.EventBus) window.EventBus.emit('DEVICE_ADDED', { device: dev });
+        if (window.eventBus) window.eventBus.emit('device:connected', { from: dev.name, to: 'canvas' });
         return dev;
     }
 
@@ -268,7 +273,7 @@ class NetworkSimulator {
         });
 
         const conn = {
-            id: `conn${this.connections.length}`,
+            id: `conn${this._nextConnId++}`,
             from: d1, to: d2,
             fromInterface: i1, toInterface: i2,
             type: i1.mediaType, status: 'up', speed,
@@ -309,6 +314,9 @@ class NetworkSimulator {
         this._autoInheritVlan(d1, d2, i1, i2);
 
         this.draw();
+        // Emitir evento de enlace conectado
+        if (window.EventBus) window.EventBus.emit('LINK_CONNECTED', { connection: conn, deviceA: d1, deviceB: d2 });
+        if (window.eventBus) window.eventBus.emit('link:up', { a: d1.name, b: d2.name });
         return { success: true, connection: conn };
     }
 
@@ -392,6 +400,74 @@ class NetworkSimulator {
     // ══════════════════════════════════════════════
     //  CAPA DE PAQUETES AVANZADA
     // ══════════════════════════════════════════════
+
+    /**
+     * _checkClientIsolation — Verifica si el tráfico entre src y dst debe ser bloqueado
+     * por aislamiento de clientes.
+     *
+     * Casos que activan el bloqueo:
+     *  1. Ambos dispositivos conectados al mismo AP con clientIsolation=true.
+     *  2. Ambos en la misma VLAN de un switch donde esa VLAN tiene clientIsolation=true.
+     *
+     * @returns {string|null} Razón del bloqueo, o null si se permite el tráfico.
+     */
+    _checkClientIsolation(src, dst) {
+        const endHostTypes = ['PC', 'Laptop', 'Phone', 'IPPhone', 'Camera', 'Printer',
+                              'DVR', 'PayTerminal', 'ControlTerminal', 'Alarm', 'Server'];
+
+        // Solo aplica entre hosts finales — routers/switches siempre se permiten
+        if (!endHostTypes.includes(src.type) || !endHostTypes.includes(dst.type)) return null;
+
+        // ── Caso 1: mismo AP con clientIsolation ────────────────────────
+        const apOf = (dev) => {
+            for (const conn of this.connections) {
+                const ap = (conn.from?.type === 'AP') ? conn.from
+                         : (conn.to?.type   === 'AP') ? conn.to : null;
+                if (ap && (conn.from === dev || conn.to === dev)) return ap;
+            }
+            return null;
+        };
+        const apSrc = apOf(src);
+        const apDst = apOf(dst);
+        if (apSrc && apSrc === apDst && apSrc.clientIsolation === true) {
+            return `AP ${apSrc.name} tiene clientIsolation habilitado`;
+        }
+
+        // ── Caso 2: misma VLAN en switch con clientIsolation ────────────
+        const switchOf = (dev) => {
+            for (const conn of this.connections) {
+                const sw = (['Switch','SwitchPoE'].includes(conn.from?.type)) ? conn.from
+                         : (['Switch','SwitchPoE'].includes(conn.to?.type))   ? conn.to : null;
+                if (sw && (conn.from === dev || conn.to === dev)) return sw;
+            }
+            return null;
+        };
+        const swSrc = switchOf(src);
+        const swDst = switchOf(dst);
+        if (swSrc && swSrc === swDst && swSrc._vlanEngine) {
+            const ve      = swSrc._vlanEngine;
+            const portOf  = (dev, sw) => {
+                const conn = this.connections.find(c =>
+                    (c.from === dev && c.to === sw) || (c.to === dev && c.from === sw));
+                if (!conn) return null;
+                return conn.from === sw ? conn.fromInterface?.name : conn.toInterface?.name;
+            };
+            const portSrc = portOf(src, swSrc);
+            const portDst = portOf(dst, swDst);
+            if (portSrc && portDst) {
+                const vlanSrc = ve.getVlanForPort(portSrc);
+                const vlanDst = ve.getVlanForPort(portDst);
+                if (vlanSrc === vlanDst) {
+                    const vlanCfg = swSrc.vlans?.[vlanSrc];
+                    if (vlanCfg?.clientIsolation === true) {
+                        return `VLAN${vlanSrc} en ${swSrc.name} tiene clientIsolation habilitado`;
+                    }
+                }
+            }
+        }
+
+        return null; // Sin aislamiento — permitir tráfico
+    }
 
     /**
      * _validateIPPath — Valida que existe una ruta IP válida entre src y dst.
@@ -495,12 +571,23 @@ class NetworkSimulator {
         }
 
         // Fallback: si hay camino físico desde el router al dst, aceptar
-        // (cubre casos donde el router no tiene tabla explícita pero está conectado)
+        // cuando todos los nodos intermedios son equipos de red que pueden reenviar paquetes.
+        // Esto cubre:
+        //   - Ruta simple: Router → Switch → PC  (length ≤ 3, sin routers intermedios)
+        //   - Ruta multi-sitio SD-WAN: Router-Sede1 → SDWAN → Router-Sede2 → PC
+        //   - Cualquier WAN/MPLS con routers/ISP en el camino
+        const networkEquipment = [
+            'Router', 'RouterWifi', 'Firewall', 'SDWAN', 'Internet', 'ISP',
+            'Switch', 'SwitchPoE', 'Bridge', 'ONT', 'OLT', 'AC',
+        ];
         const intermediates = physicalPath.slice(1, -1).map(id => this.devices.find(d => d.id === id));
-        const hasRouter = intermediates.some(d => d && routerTypes.includes(d.type));
-        if (!hasRouter && physicalPath.length <= 3) {
-            // Router directamente adyacente al destino (sin otro router entre medio)
-            return { ok: true, reason: `vía gateway ${gwIP}`, hop: gwDev };
+        const pathViable = intermediates.every(d => !d || networkEquipment.includes(d.type));
+        if (pathViable) {
+            const hasSDWAN = intermediates.some(d => d && d.type === 'SDWAN');
+            const reason = hasSDWAN
+                ? `vía gateway ${gwIP} → SD-WAN (multi-sitio)`
+                : `vía gateway ${gwIP}`;
+            return { ok: true, reason, hop: gwDev };
         }
 
         return {
@@ -536,7 +623,20 @@ class NetworkSimulator {
         // Paquetes internos (ARP, DHCP, pong) omiten validación IP
         const skipValidation = ['arp', 'arp-reply', 'dhcp', 'pong'].includes(type) || opts.forcePath;
 
-        // ── Inter-VLAN routing check ─────────────────────────────────────
+        // ── Client Isolation — bloqueo de tráfico L2 entre clientes ────────
+        // Si la VLAN de un switch tiene clientIsolation=true, los clientes de esa VLAN
+        // no pueden comunicarse directamente entre sí (solo con el gateway).
+        // Aplica también a APs con clientIsolation habilitado.
+        // Los paquetes de control (ARP, DHCP, pong) siempre se permiten.
+        if (!skipValidation && !opts._interVlan && !opts._bypassIsolation) {
+            const isolationBlock = this._checkClientIsolation(src, dst);
+            if (isolationBlock) {
+                this._log(`🚫 Client Isolation: ${src.name} ↔ ${dst.name} bloqueado (${isolationBlock})`);
+                return null;
+            }
+        }
+
+
         // Si src y dst están en VLANs distintas del mismo switch, necesitamos
         // pasar por el router (router-on-a-stick). El paquete no puede ir directo.
         if (!skipValidation && !opts._interVlan) {
@@ -989,13 +1089,32 @@ class NetworkSimulator {
         }
 
         const ruta = this.engine.findRoute(origen.id, destino.id);
-        if (!ruta.length) { this._log('❌ Sin ruta entre dispositivos'); return null; }
+        if (!ruta.length) {
+            this._log('❌ Sin ruta entre dispositivos');
+            if (window.EventBus) window.EventBus.emit('LOG_EVENT', { level: 'err', message: `Ping fallido: ${origen.name} → ${destino.name} (sin ruta)` });
+            if (window.eventBus) window.eventBus.emit('ping:fail', { src: origen.name, dst: destino.name });
+            return null;
+        }
 
         const nombres = ruta.map(id => { const d = this.devices.find(x => x.id === id); return d ? d.name : id; });
         this._log(`   Ruta física: ${nombres.join(' → ')}`);
         this._log(`   TTL: 64 · Saltos: ${ruta.length - 1}`);
 
-        return this.sendPacket(origen, destino, 'ping');
+        // Latencia estimada por saltos (solo para el log, el evento se emite tras confirmar)
+        const ms = ruta.length * 2;
+
+        // ── Intentar enviar el paquete ANTES de reportar éxito ──────────
+        // sendPacket puede fallar (VLAN, firewall, QoS, client isolation, etc.)
+        // — no emitir ping:success hasta tener confirmación real.
+        const pkt = this.sendPacket(origen, destino, 'ping');
+        if (pkt) {
+            if (window.EventBus) window.EventBus.emit('LOG_EVENT', { level: 'ok', message: `Ping: ${origen.name} → ${destino.name} (${ms}ms, ${ruta.length - 1} salto${ruta.length !== 2 ? 's' : ''})` });
+            if (window.eventBus) window.eventBus.emit('ping:success', { src: origen.name, dst: destino.name, ms });
+        } else {
+            if (window.EventBus) window.EventBus.emit('LOG_EVENT', { level: 'err', message: `Ping bloqueado: ${origen.name} → ${destino.name}` });
+            if (window.eventBus) window.eventBus.emit('ping:fail', { src: origen.name, dst: destino.name });
+        }
+        return pkt;
     }
 
     tracert(origen, destino) {
@@ -1175,6 +1294,9 @@ class NetworkSimulator {
                 if (window.packetAnimator) window.packetAnimator.onDelivered(p);
                 if (p._ls)  p._ls.dequeue();
                 if (p._src) p._src._congestionQueue = Math.max(0, p._src._congestionQueue - 1);
+
+                // Emitir PACKET_DELIVERED al bus de eventos
+                if (window.EventBus) window.EventBus.emit('PACKET_DELIVERED', { packet: p, device: p.destino });
 
                 const tipo = p.tipo || p.type;
 

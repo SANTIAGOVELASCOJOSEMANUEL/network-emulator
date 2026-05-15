@@ -51,6 +51,15 @@ function learnARP(device, via, intfName) {
 function handleARP(packet, device) {
     if (!device._arpCache) device._arpCache = new ARPCache();
 
+    // Emitir ARP_REQUEST al bus de eventos (UNIFICADO)
+    if (packet.targetIP && window.EventBus) {
+        const eventName = (window.EVENTS?.ARP_REQUEST) || 'ARP_REQUEST';
+        window.EventBus.emit(eventName, {
+            srcDevice: packet.origen || device,
+            targetIP : packet.targetIP,
+        });
+    }
+
     // Aprender la IP/MAC del remitente
     if (packet.srcIP && packet.srcMAC) {
         device._arpCache.learn(packet.srcIP, packet.srcMAC, packet.origen?.id);
@@ -60,6 +69,13 @@ function handleARP(packet, device) {
     const myIP = device.ipConfig?.ipAddress;
     if (myIP && packet.targetIP === myIP) {
         const myMAC = device.interfaces[0]?.mac || '00:00:00:00:00:00';
+
+        // Emitir ARP_REPLY al bus de eventos (UNIFICADO)
+        if (window.EventBus) {
+            const eventName = (window.EVENTS?.ARP_REPLY) || 'ARP_REPLY';
+            window.EventBus.emit(eventName, { srcDevice: device, ip: myIP, mac: myMAC });
+        }
+
         return {
             type    : 'ARP_REPLY',
             srcIP   : myIP,

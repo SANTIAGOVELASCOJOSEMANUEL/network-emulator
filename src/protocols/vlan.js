@@ -42,9 +42,10 @@ class VLANEngine {
         if (!this.switch.vlans) this.switch.vlans = {};
         if (!this.switch.vlans[vlanId]) {
             this.switch.vlans[vlanId] = {
-                name   : `VLAN${vlanId}`,
-                network: `192.168.${vlanId}.0/24`,
-                gateway: `192.168.${vlanId}.254`,
+                name           : `VLAN${vlanId}`,
+                network        : `192.168.${vlanId}.0/24`,
+                gateway        : `192.168.${vlanId}.254`,
+                clientIsolation: false, // true → clientes de la misma VLAN no se comunican entre sí
             };
         }
 
@@ -193,6 +194,24 @@ class VLANEngine {
                 ports.push({ name: portName, mode: 'trunk', native: cfg.nativeVlan === vlanId });
         });
         return ports;
+    }
+
+    /**
+     * setClientIsolation — Activa o desactiva el aislamiento de clientes en una VLAN.
+     * Con aislamiento ON los hosts de esa VLAN no pueden comunicarse directamente
+     * entre sí; solo pueden hablar con el gateway (útil para hoteles, sucursales, etc.).
+     *
+     * @param {number}  vlanId    ID de la VLAN (1-4094)
+     * @param {boolean} enabled   true = activar aislamiento, false = desactivar
+     */
+    setClientIsolation(vlanId, enabled = true) {
+        vlanId = parseInt(vlanId);
+        if (isNaN(vlanId) || vlanId < 1 || vlanId > 4094)
+            return { ok: false, reason: `VLAN ID inválido: ${vlanId}` };
+        if (!this.switch.vlans?.[vlanId])
+            return { ok: false, reason: `VLAN ${vlanId} no existe en ${this.switch.name}` };
+        this.switch.vlans[vlanId].clientIsolation = !!enabled;
+        return { ok: true, vlan: vlanId, clientIsolation: !!enabled };
     }
 
     validate() {

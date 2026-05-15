@@ -536,6 +536,8 @@ class QoSManager {
 window._qosInit = function(simulator) {
     const mgr = new QoSManager(simulator);
     window.qosManager = mgr;
+    if (typeof ServiceRegistry !== 'undefined') ServiceRegistry.register('qos', mgr);
+    if (typeof EventBus !== 'undefined') EventBus.emit('SERVICE_READY', { name: 'qos', service: mgr });
 
     // CLI helpers
     window._qosSummary = (devName) => {
@@ -565,3 +567,32 @@ window.DSCP       = DSCP;
 if (typeof QoSQueue !== "undefined") window.QoSQueue = QoSQueue;
 if (typeof DSCP_BY_VALUE !== "undefined") window.DSCP_BY_VALUE = DSCP_BY_VALUE;
 if (typeof QUEUE_NAMES !== "undefined") window.QUEUE_NAMES = QUEUE_NAMES;
+
+// — ES6 Export —
+export { QoSEngine, QoSManager, QoSPolicy, DSCP };
+
+export function initQoS(simulator) {
+    const mgr = new QoSManager(simulator);
+    window.qosManager = mgr;
+    if (typeof ServiceRegistry !== 'undefined') ServiceRegistry.register('qos', mgr);
+    if (typeof EventBus !== 'undefined') EventBus.emit('SERVICE_READY', { name: 'qos', service: mgr });
+
+    // CLI helpers
+    window._qosSummary = (devName) => {
+        const dev = simulator.devices.find(d => d.name === devName);
+        if (!dev) return `Dispositivo '${devName}' no encontrado`;
+        const eng = mgr._getOrCreate(dev);
+        return eng.summary();
+    };
+
+    window._qosAddPolicy = (devName, opts) => {
+        const dev = simulator.devices.find(d => d.name === devName);
+        if (!dev) return `Dispositivo '${devName}' no encontrado`;
+        const eng = mgr._getOrCreate(dev);
+        const p   = eng.addPolicy(opts);
+        return `Política '${p.name}' (${p.dscp.name}) agregada a ${devName}`;
+    };
+
+    console.log('[QoS] QoSManager inicializado');
+    return mgr;
+}

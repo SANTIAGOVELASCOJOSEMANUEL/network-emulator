@@ -28,6 +28,7 @@ function startSimulation(sim, onStatusChange) {
     try {
         sim.startSimulation();
         onStatusChange?.('active');
+        if (typeof EventBus !== 'undefined') EventBus.emit('SIM_STARTED', {});
     } catch (e) {
         handleError(e);
     }
@@ -40,6 +41,7 @@ function stopSimulation(sim, onStatusChange) {
     try {
         sim.stopSimulation();
         onStatusChange?.('stopped');
+        if (typeof EventBus !== 'undefined') EventBus.emit('SIM_STOPPED', {});
     } catch (e) {
         handleError(e);
     }
@@ -78,19 +80,21 @@ function connectDevices(sim, d1, d2, i1, i2, cableType) {
 /**
  * Guarda la red actual.
  * @param {NetworkSimulator} sim
+ * @param {object} managers — objeto con managers { mpls, vpn, nat, dhcp, bgp, qos }
  * @returns {boolean}
  */
-function saveCurrentNetwork(sim) {
-    return saveNetwork(sim);
+function saveCurrentNetwork(sim, managers = {}) {
+    return saveNetwork(sim, managers);
 }
 
 /**
  * Carga la red guardada.
  * @param {NetworkSimulator} sim
+ * @param {object} managers — objeto con managers { mpls, vpn, nat, dhcp, bgp, qos }
  * @returns {boolean}
  */
-function loadSavedNetwork(sim) {
-    return loadNetwork(sim);
+function loadSavedNetwork(sim, managers = {}) {
+    return loadNetwork(sim, managers);
 }
 // — Exponer al scope global (compatibilidad legacy) —
 if (typeof sendPacket !== "undefined") window.sendPacket = sendPacket;
@@ -100,3 +104,6 @@ if (typeof addDevice !== "undefined") window.addDevice = addDevice;
 if (typeof connectDevices !== "undefined") window.connectDevices = connectDevices;
 if (typeof saveCurrentNetwork !== "undefined") window.saveCurrentNetwork = saveCurrentNetwork;
 if (typeof loadSavedNetwork !== "undefined") window.loadSavedNetwork = loadSavedNetwork;
+
+// — ES6 Export —
+export { sendPacket, startSimulation, stopSimulation, addDevice, connectDevices, saveCurrentNetwork, loadSavedNetwork };
