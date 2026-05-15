@@ -1,160 +1,144 @@
-# NETOPS v5 — Guía de migración a Vite
+# Network Emulator
 
-## Estructura del proyecto
+Modern web-based network simulator focused on visualization, education, and interactive protocol analysis.
 
-```
-netops/
-├── index.html              ← HTML principal (ya no tiene 57 <script> tags)
-├── css/
-│   └── style.css
-├── src/
-│   ├── main.js             ← Punto de entrada único (Vite lo bundlea todo)
-│   ├── app.js              ← Inicialización del simulador
-│   │
-│   ├── core/               ← Motor principal
-│   │   ├── engine.js
-│   │   ├── network.js
-│   │   ├── networkcontroller.js
-│   │   ├── renderer.js
-│   │   ├── packet.js
-│   │   ├── devices.js
-│   │   ├── storage.js
-│   │   ├── errorhandler.js
-│   │   └── logger.js
-│   │
-│   ├── protocols/          ← Lógica de protocolos de red
-│   │   ├── arp.js / arp-table.js
-│   │   ├── bgp.js
-│   │   ├── dhcp.js / dhcp-relay.js
-│   │   ├── firewall-engine.js
-│   │   ├── forwarding-engine.js
-│   │   ├── ipv6.js
-│   │   ├── mpls.js
-│   │   ├── nat.js
-│   │   ├── ospf-engine.js / ospf-router.js
-│   │   ├── qos.js
-│   │   ├── routing.js / routing-engine.js
-│   │   ├── stp.js
-│   │   ├── switching.js / switching-engine.js
-│   │   ├── tcp-engine.js
-│   │   ├── vlan.js
-│   │   └── vpn.js
-│   │
-│   ├── visualizers/        ← Visualizaciones educativas
-│   │   ├── arp-visualizer.js
-│   │   ├── dhcp-visualizer.js
-│   │   ├── nat-visualizer.js
-│   │   ├── packet-animator.js
-│   │   ├── packet-inspector.js
-│   │   ├── packet-lifecycle-visualizer.js
-│   │   └── routing-visualizer.js
-│   │
-│   ├── ui/                 ← Paneles e interfaz de usuario
-│   │   ├── advanced.js
-│   │   ├── cli.js
-│   │   ├── console.js
-│   │   ├── device-palette.js   ← era el <script> inline en index.html
-│   │   ├── device-search.js
-│   │   ├── export-enhanced.js
-│   │   ├── inventory-page.js
-│   │   ├── ip-config-panel.js
-│   │   ├── lab-checker.js
-│   │   ├── lab-guide.js
-│   │   ├── link-config-panel.js
-│   │   ├── metrics-dashboard.js
-│   │   ├── project-manager.js
-│   │   ├── routing-engine-ui.js
-│   │   ├── traffic-generator.js
-│   │   ├── ux-enhancements.js
-│   │   └── ux-enhancements-2.js
-│   │
-│   └── utils/              ← Utilidades compartidas
-│       └── canvas-utils.js
-│
-├── package.json
-├── vite.config.js
-└── .gitignore
+## Features
+
+- Interactive network topology builder
+- Router and switch simulation
+- Packet lifecycle visualization
+- Routing visualization
+- NAT visualization
+- VLAN support
+- OSPF simulation
+- BGP simulation
+- MPLS support
+- VPN simulation
+- CLI terminal inspired by Cisco IOS
+- Real-time packet inspection
+- Modular architecture
+- Event-driven core
+- Built with Vite
+
+---
+
+# Tech Stack
+
+- JavaScript / TypeScript (WIP)
+- Vite
+- HTML5 Canvas
+- CSS3
+- Event-Driven Architecture
+
+---
+
+# Project Structure
+
+```txt
+src/
+├── core/
+├── protocols/
+├── ui/
+├── visualizers/
+├── utils/
+├── services/
+└── store/
 ```
 
 ---
 
-## Cómo arrancar
+# Architecture Goals
+
+- Remove global dependencies (`window.*`)
+- Centralized state management
+- Event-driven communication
+- Decoupled rendering engine
+- Scalable protocol system
+- High-performance topology rendering
+
+---
+
+# Current Protocol Support
+
+| Protocol | Status |
+|----------|--------|
+| ARP | ✅ |
+| ICMP | ✅ |
+| TCP | ✅ |
+| UDP | ✅ |
+| VLAN | ✅ |
+| NAT | ✅ |
+| OSPF | ✅ |
+| BGP | ✅ |
+| MPLS | ⚠️ Experimental |
+| VPN | ⚠️ Experimental |
+
+---
+
+# Installation
 
 ```bash
-# Instalar dependencias (solo la primera vez)
+git clone https://github.com/your-repo/network-emulator.git
+cd network-emulator
 npm install
-
-# Servidor de desarrollo con hot-reload
 npm run dev
-# → abre http://localhost:3000 automáticamente
-
-# Build para producción (genera /dist)
-npm run build
-
-# Preview del build de producción
-npm run preview
 ```
 
 ---
 
-## Próximos pasos para escalar más
+# Development Roadmap
 
-### Fase 2 — Convertir archivos a ES Modules reales
+## Core Refactor
+- [x] Migrate to Vite
+- [x] Introduce Event Bus
+- [ ] Remove remaining `window.*`
+- [ ] Implement centralized store
+- [ ] Separate simulation engine from renderer
 
-Los archivos actuales siguen usando `window.*` para comunicarse. El siguiente paso es
-eliminar ese acoplamiento convirtiendo cada archivo a módulos con `export`/`import`:
+## TypeScript Migration
+- [ ] Core engine
+- [ ] Packet system
+- [ ] Protocol engines
+- [ ] Visualizers
 
-**Ejemplo — antes (globals):**
-```js
-// packet-animator.js
-window._paInit = function(simulator) { ... }
-```
+## Performance
+- [ ] Render optimization
+- [ ] Packet batching
+- [ ] Large topology support
+- [ ] Object pooling
 
-**Ejemplo — después (ES Module):**
-```js
-// src/visualizers/packet-animator.js
-export function initPacketAnimator(simulator) { ... }
-
-// src/main.js
-import { initPacketAnimator } from './visualizers/packet-animator.js';
-```
-
-**Orden de migración recomendado** (de menos a más dependencias):
-1. `utils/canvas-utils.js` — sin dependencias, fácil de empezar
-2. `core/logger.js`, `core/errorhandler.js`, `core/storage.js`
-3. `core/packet.js`, `protocols/ipv6.js`
-4. `core/devices.js`, `core/renderer.js`
-5. Los protocolos uno a uno
-6. Los visualizadores
-7. Los paneles UI
-
-### Fase 3 — TypeScript (opcional)
-
-Con módulos reales, agregar TypeScript es solo cambiar `.js` → `.ts` y
-`npm install -D typescript`. Vite lo soporta sin configuración extra.
-
-### Fase 4 — Tests unitarios
-
-Con módulos ES puros, puedes usar **Vitest** (mismo ecosistema que Vite):
-```bash
-npm install -D vitest
-```
+## Future Features
+- [ ] Multiplayer collaboration
+- [ ] Cloud save
+- [ ] Shareable labs
+- [ ] AI assistant
+- [ ] Exam mode
+- [ ] Replay system
 
 ---
 
-## ¿Por qué Vite?
+# Vision
 
-- **Sin configuración** para vanilla JS/HTML
-- **Hot Module Replacement** — los cambios se reflejan en el browser sin recargar
-- **Build optimizado** — minifica, hace tree-shaking y genera chunks automáticamente
-- **Compatible con tu código actual** — no necesitas reescribir nada para empezar
+This project aims to become a modern educational network simulation platform focused on:
+
+- Visualization
+- Interactivity
+- Accessibility
+- Real-time protocol analysis
+
+Instead of only simulating networks, the goal is to help users understand how networks actually work.
 
 ---
 
-## Notas sobre la migración
+# License
 
-- Los archivos JS están en `src/` organizados por dominio
-- El `index.html` ahora tiene **un solo** `<script type="module" src="src/main.js">`
-- El script inline de `NET_DEVICES` fue extraído a `src/ui/device-palette.js`
-- El orden de imports en `main.js` preserva el orden de dependencias original
-- Todo sigue funcionando igual — Vite carga los archivos en el mismo orden
+MIT License
+
+---
+
+# Disclaimer
+
+This project is under active development.  
+Some protocols and features are experimental and may change frequently.
+
+Because apparently building a full network simulator in a browser sounded like a calm and reasonable life decision.
